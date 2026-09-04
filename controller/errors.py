@@ -412,3 +412,68 @@ class ReviewPacketError(ReviewLoopError):
     that does not exist, matches twice, or deviates from the grammar
     fails closed — findings are never guessed, defaulted, or repaired.
     """
+
+
+# ---------------------------------------------------------------------------
+# Merge/reconciliation loop errors (CTRL-008) — typed fail-closed merge
+# boundary
+# ---------------------------------------------------------------------------
+
+
+class MergeLoopError(ControllerError):
+    """Base class for every merge/reconciliation-loop failure (CTRL-008).
+
+    The loop reconstructs repository authority, correlates the exact
+    governed PR, evaluates the complete frozen merge predicate through
+    the CTRL-003 adapter, executes at most one authorized merge attempt,
+    and derives the deterministic post-merge reconciliation record. Every
+    failure — a lifecycle position outside the merge boundary, an
+    authority/merge-evidence contradiction, a malformed frozen policy, or
+    a missing carried reference — fails closed with a typed error. No
+    guessed merges, no retries, no fabricated completion.
+    """
+
+
+class MergePolicyError(MergeLoopError):
+    """The supplied merge policy is structurally invalid.
+
+    ``required_checks`` must name at least one check context, each a
+    non-empty string, with no duplicates. A policy that cannot name the
+    required evidence fails closed before any observation or mutation.
+    """
+
+
+class MergeLoopPositionError(MergeLoopError):
+    """The loop was evaluated at a lifecycle position it does not own.
+
+    The merge/reconciliation loop applies exactly at the merge boundary
+    positions of the frozen lifecycle (APPROVED, MERGING, MERGED, and
+    RECONCILING). Evaluating it at any other position is a governance
+    misuse — the position belongs to another stage — and fails closed
+    before any remote observation.
+    """
+
+
+class MergeContradictionError(MergeLoopError):
+    """Repository authority and observed merge evidence contradict.
+
+    For example: a merge-boundary position with no governed pull request
+    observed; multiple PRs observed for the governed branch; base or
+    base-ref drift; machine state records MERGING while the governed PR
+    is not merged (the single authorized attempt did not land); merged
+    evidence without a merge commit SHA; the completed ledger already
+    records the item being reconciled; or multiple work orders declare
+    READY at once. Repository authority outranks remote observation; the
+    evaluation stops for governance attention.
+    """
+
+
+class MergeMissingReferenceError(MergeLoopError):
+    """A carried reference required by the merge loop is absent.
+
+    The loop keeps no runtime state: the governed branch, dispatch base,
+    and (for merge-predicate evaluation) the architect reviewer identity
+    are caller-carried inputs cross-validated against authority. When
+    the loop requires one and it is absent, the evaluation fails closed
+    rather than guessing.
+    """
