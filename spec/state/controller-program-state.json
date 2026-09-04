@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "0.1",
+  "repository": "pectoraux/controller",
+  "roadmap": "spec/roadmap/roadmap.md",
+  "architecture": "spec/architecture/controller-architecture.md",
+  "activeWorkItem": "CTRL-001",
+  "status": "READY",
+  "completed": [],
+  "rules": {
+    "repositoryIsSourceOfTruth": true,
+    "controllerRuntimeStateIsReconstructible": true,
+    "onePrPerWorkItem": true,
+    "workerCannotMerge": true,
+    "failClosedOnContradiction": true
+  },
+  "nextAction": "Dispatch CTRL-001 only after the controller implementation process has verified this state against the roadmap and architecture."
+}
