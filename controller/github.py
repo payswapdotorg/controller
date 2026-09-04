@@ -33,7 +33,12 @@ The typed seam between the Controller and GitHub. Layering and doctrine:
   predicate (intended base, exact head, one-PR, terminal-success CI for
   required checks, no unresolved blocking review after the Architect's
   APPROVE, repository machine state still identifying the work item as the
-  active eligible item) and re-verified at execution time.
+  active eligible item) and re-verified at execution time. That "issued by
+  ``authorize_merge``" rule is *enforced*, not documented
+  (FZ-CTRL003-004): every genuine authorization carries a module-private
+  issuance proof (:class:`_IssuanceProof`) that ordinary caller-created
+  data cannot supply, and :meth:`merge_pull_request` re-verifies the proof
+  — plus base ref, base SHA, head SHA, and PR state — before executing.
 * **Fail closed (AC4).** Every failure — authentication, rate limit,
   missing resource, malformed response, ambiguity, drift, contradiction,
   policy refusal — is a typed :class:`controller.errors.GithubAdapterError`
@@ -53,7 +58,7 @@ import json
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from controller.domain import DispatchEligibility
@@ -61,6 +66,7 @@ from controller.errors import (
     GithubAdapterError,
     GithubAmbiguityError,
     GithubAuthError,
+    GithubAuthorizationForgedError,
     GithubContradictionError,
     GithubMalformedResponseError,
     GithubMergeBlockedError,
@@ -246,15 +252,19 @@ class GithubPullRequest:
 
 
 @dataclass(frozen=True)
-class MergeAuthorization:
-    """Proof that the frozen merge predicate was satisfied at issue time.
+class _IssuanceProof:
+    """Module-private proof-of-issuance capability (FZ-CTRL003-004).
 
-    Constructed only by :meth:`GithubAdapter.authorize_merge` (the policy
-    gate); :meth:`GithubAdapter.merge_pull_request` re-verifies identity
-    (base ref + base SHA + head SHA, PR state) at execution time. The
-    authorization records the exact PR, refs and SHAs, work item, and merge
-    method so the executed mutation cannot drift from the evaluated
-    predicate.
+    Instances of this type are created in exactly one place — inside
+    :meth:`GithubAdapter.authorize_merge` — and the type itself is
+    module-private and never exported, so it cannot be obtained through
+    the adapter's supported interface. Ordinary caller-created data can
+    therefore never supply a valid proof.
+
+    The proof duplicates the issued field values, binding the capability
+    to the exact authorization data: an authorization whose fields were
+    altered after issuance (including via :func:`dataclasses.replace`)
+    no longer matches its proof and fails verification.
     """
 
     pr_number: int
@@ -263,6 +273,76 @@ class MergeAuthorization:
     base_sha: str
     head_sha: str
     merge_method: str
+
+
+#: Public fields of :class:`MergeAuthorization`, bound to its proof.
+_MERGE_AUTHORIZATION_FIELDS: tuple[str, ...] = (
+    "pr_number",
+    "work_item",
+    "base_ref",
+    "base_sha",
+    "head_sha",
+    "merge_method",
+)
+
+
+@dataclass(frozen=True)
+class MergeAuthorization:
+    """Proof that the frozen merge predicate was satisfied at issue time.
+
+    This is an *opaque capability*, not a plain value (FZ-CTRL003-004):
+    the public fields describe the evaluated predicate, while ``_proof``
+    is the non-forgeable evidence that the authorization was issued by
+    :meth:`GithubAdapter.authorize_merge`. Construction validates the
+    proof and :meth:`GithubAdapter.merge_pull_request` re-verifies it
+    before executing, so a caller-manufactured — even structurally valid
+    — ``MergeAuthorization`` fails closed with
+    :class:`GithubAuthorizationForgedError` and never reaches the merge
+    mutation.
+
+    The authorization records the exact PR, refs and SHAs, work item, and
+    merge method so the executed mutation cannot drift from the evaluated
+    predicate; execution additionally re-verifies base ref, base SHA,
+    head SHA, and PR state. Authorizations are in-process values: they
+    are never serialized, stored, or reconstructed from external data.
+    """
+
+    pr_number: int
+    work_item: str
+    base_ref: str
+    base_sha: str
+    head_sha: str
+    merge_method: str
+    _proof: _IssuanceProof | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        _verify_issuance(self)
+
+
+def _verify_issuance(authorization: MergeAuthorization) -> None:
+    """Fail closed unless the authorization carries a valid issuance proof.
+
+    Enforces the FZ-CTRL003-004 invariant — *issued by* ``authorize_merge``
+    — in two places: at construction (``MergeAuthorization.__post_init__``)
+    and at execution (``merge_pull_request``, before any remote call). A
+    forged object that bypassed ``__init__`` (for example via
+    ``object.__new__``) carries no proof attribute and is rejected here;
+    an authorization altered after issuance no longer matches its proof
+    and is rejected as well.
+    """
+    proof = getattr(authorization, "_proof", None)
+    if not isinstance(proof, _IssuanceProof):
+        raise GithubAuthorizationForgedError(
+            "MergeAuthorization carries no valid issuance proof: it was not "
+            "issued by GithubAdapter.authorize_merge and cannot command a "
+            "merge"
+        )
+    for name in _MERGE_AUTHORIZATION_FIELDS:
+        if getattr(proof, name) != getattr(authorization, name):
+            raise GithubAuthorizationForgedError(
+                f"MergeAuthorization field '{name}' was altered after "
+                "issuance: it no longer matches its issuance proof"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -591,6 +671,12 @@ class GithubAdapter:
 
         Any unsatisfied predicate fails closed with a typed error and no
         authorization is issued. Nothing is auto-repaired or retried.
+
+        The returned :class:`MergeAuthorization` is an opaque capability:
+        it embeds a module-private issuance proof duplicating the issued
+        field values, so it cannot be manufactured or altered by caller
+        data (FZ-CTRL003-004) — ``merge_pull_request`` re-verifies the
+        proof before executing.
         """
         pr = self.get_pull_request(pr_number)
         if pr.merged:
@@ -682,7 +768,7 @@ class GithubAdapter:
                 f"eligible item: " + "; ".join(eligibility.basis)
             )
 
-        return MergeAuthorization(
+        proof = _IssuanceProof(
             pr_number=pr_number,
             work_item=work_item,
             base_ref=expected_base_ref,
@@ -690,17 +776,32 @@ class GithubAdapter:
             head_sha=expected_head_sha,
             merge_method="merge",
         )
+        return MergeAuthorization(
+            pr_number=pr_number,
+            work_item=work_item,
+            base_ref=expected_base_ref,
+            base_sha=expected_base_sha,
+            head_sha=expected_head_sha,
+            merge_method="merge",
+            _proof=proof,
+        )
 
     def merge_pull_request(self, authorization: MergeAuthorization) -> GithubPullRequest:
         """Execute a governed merge, re-verifying identity at execution time.
 
-        Refuses if the PR moved after authorization (head drift, base
-        retarget or drift, closed, or already merged) or if GitHub declines
-        the merge. The worker role (Z.ai) must never call this method —
-        enforcement of that role rule is governance plus the authorize gate,
-        which requires an Architect APPROVE review on GitHub bound to the
-        exact head SHA.
+        The authorization must have been issued by
+        :meth:`authorize_merge` (AC6): its issuance proof is re-verified
+        as the first step of execution (FZ-CTRL003-004) — a
+        caller-manufactured or altered authorization fails closed with
+        :class:`GithubAuthorizationForgedError` before any remote call.
+        Execution then refuses if the PR moved after authorization (head
+        drift, base retarget or drift, closed, or already merged) or if
+        GitHub declines the merge. The worker role (Z.ai) must never call
+        this method — enforcement of that role rule is governance plus the
+        authorize gate, which requires an Architect APPROVE review on
+        GitHub bound to the exact head SHA.
         """
+        _verify_issuance(authorization)
         pr = self.get_pull_request(authorization.pr_number)
         if pr.merged:
             raise GithubMergeBlockedError(f"PR #{authorization.pr_number} is already merged")

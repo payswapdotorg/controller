@@ -132,3 +132,16 @@ class GithubMergeBlockedError(GithubAdapterError):
     evidence (PR state, CI, reviews, mergeability) does not satisfy the
     frozen architecture's merge predicate. Never bypassed.
     """
+
+
+class GithubAuthorizationForgedError(GithubAdapterError):
+    """A MergeAuthorization was not issued by the adapter's merge gate.
+
+    FZ-CTRL003-004: ``merge_pull_request`` is executable only with an
+    authorization issued by ``GithubAdapter.authorize_merge``. That
+    invariant is enforced — not documented — through a module-private,
+    non-forgeable issuance proof carried by every genuine
+    ``MergeAuthorization``. A caller-manufactured or altered
+    authorization (structurally valid or not) fails closed with this
+    error before any remote mutation executes.
+    """
