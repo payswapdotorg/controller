@@ -1,6 +1,8 @@
 # CTRL-003 — GitHub adapter
 
-Status: `READY`
+Status: `COMPLETE`
+
+Completed via PR #7 (merge commit `7cc340375dcd9768d986b1245303d7006f54fbf1`, base `8171bf46b8f29b4e894791a7437251a64226678c`), including review-iteration fixes FZ-CTRL003-001/002/003 and the FZ-CTRL003-004/004A merge-authorization resolution (execution-time re-proof of the complete merge predicate); machine state reconciled per `spec/operations/controller-build-process.md` (exact construction loop, step 12).
 
 ## Objective
 
