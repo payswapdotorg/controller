@@ -6,15 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `IMPLEMENTING`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-008 — Merge + Reconciliation (`spec/work-items/CTRL-008.md`, `READY`)
-- **PR:** implementation PR not yet opened; dispatch authorized from exact main base `f55f5190a82a0fb774285a03347e6df71163cbd5` (governance PR #22 dispatch comment `5545536948`)
-- **last completed architect action:** CTRL-007 reconciled; CTRL-008 defined/frozen/activated as the sole READY item; durable worker dispatch issued against exact base `f55f5190a82a0fb774285a03347e6df71163cbd5`
-- **last completed worker action:** CTRL-007 implementation merged at `a0392aa0e07772518638f506d755bd9d90d9dc4e`
-- **current implementation action:** Z.ai is authorized to implement only `spec/work-items/CTRL-008.md` from the exact dispatch base; one implementation PR only
-- **last update (UTC):** 2026-09-04T19:36:00Z
+- **PR:** #23 (branch `ctrl-008-merge-reconciliation`, corrected head `5b9333bc3d1ed4a22d614b161f51c3df2a84781d`, current main base `c67bc666e08a4ac3162bd18a296ba05c499069b7`)
+- **last completed architect action:** FZ-CTRL008-001 requested changes on PR #23; corrected worker implementation returned with five production-SHA regressions and green validation
+- **last completed worker action:** FZ-CTRL008-001 resolved — dispatch provenance `f55f519...` is distinct from the observed current PR/main base `c67bc66...`; true execution-time base drift remains fail-closed
+- **current implementation action:** awaiting Architect re-review of corrected CTRL-008 implementation PR
+- **last update (UTC):** 2026-09-04T21:10:00Z
 - **next planned item:** CTRL-009 — Recovery / idempotency (per the roadmap; not defined, not eligible)
-- **next step:** Z.ai opens/updates exactly one CTRL-008 implementation PR and returns to `WAITING_FOR_ARCHITECT` with a green validation transcript
+- **next step:** Architect re-review; on APPROVE + satisfied merge predicates, merge PR #23 and perform post-merge reconciliation
 
 ## Maintenance protocol
 
