@@ -285,3 +285,64 @@ class OrchestrationMissingReferenceError(OrchestrationError):
     and remote evidence. When a cycle requires one and it is absent, the
     run fails closed rather than guessing the correlation.
     """
+
+
+# ---------------------------------------------------------------------------
+# Evidence gate errors (CTRL-006) — typed fail-closed CI/evidence boundary
+# ---------------------------------------------------------------------------
+
+
+class EvidenceGateError(ControllerError):
+    """Base class for every CI/evidence-gate boundary failure (CTRL-006).
+
+    The gate classifies observed CI evidence for the active governed
+    Work Order against a frozen required-evidence policy and hands off
+    typed retry requests to the orchestrator/operator boundary. It is
+    never an authority source, never executes retries itself, and every
+    failure — a defective policy, a lifecycle position outside the
+    gate's scope, an authority/remote contradiction, or a missing
+    carried reference — fails closed with a typed error. No guessed
+    classification, no silent reassignment of evidence.
+    """
+
+
+class EvidencePolicyError(EvidenceGateError):
+    """The supplied evidence policy is structurally invalid.
+
+    For example: no required checks, a duplicate or empty check context,
+    or retryable checks that are not a subset of the required set. The
+    policy is a caller-supplied input the gate validates before use; a
+    defective policy never reaches classification.
+    """
+
+
+class EvidenceGatePositionError(EvidenceGateError):
+    """The gate was evaluated at a lifecycle position it does not own.
+
+    The evidence gate applies exactly at the CI evidence positions
+    (PR_OPEN and CI_PENDING) of the frozen lifecycle. Evaluating it at
+    any other position is a governance misuse — the position belongs to
+    another stage — and fails closed before any remote observation.
+    """
+
+
+class EvidenceContradictionError(EvidenceGateError):
+    """Repository authority and observed CI evidence contradict.
+
+    For example: machine state records a CI evidence position while no
+    governed pull request is observed, or the carried worker session is
+    bound to a foreign repository, work item, base, or drifted PR
+    identity. Repository authority outranks remote observation; the
+    evaluation stops for governance attention.
+    """
+
+
+class EvidenceMissingReferenceError(EvidenceGateError):
+    """A carried reference required for evidence correlation is absent.
+
+    The gate keeps no runtime state (AC7): the governed branch and
+    dispatch base (and the typed worker session for retry handoffs) are
+    caller-carried inputs cross-validated against authority. When
+    correlation requires one and it is absent, the evaluation fails
+    closed rather than guessing the correlation.
+    """

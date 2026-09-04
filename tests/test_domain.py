@@ -37,22 +37,24 @@ DISPATCH_CMD = DomainCommand(work_item="CTRL-002", command=CommandName.DISPATCH)
 
 
 class RealRepositoryDomainTests(unittest.TestCase):
-    def test_real_repository_reconstructs_ctrl_005_ready(self) -> None:
+    def test_real_repository_reconstructs_ctrl_006_ready(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
-        self.assertEqual(item.identity.work_item, "CTRL-005")
-        self.assertEqual(item.identity.work_order_path, "spec/work-items/CTRL-005.md")
+        self.assertEqual(item.identity.work_item, "CTRL-006")
+        self.assertEqual(item.identity.work_order_path, "spec/work-items/CTRL-006.md")
         self.assertEqual(item.identity.repository, "pectoraux/controller")
         self.assertIs(item.lifecycle, LifecycleState.READY)
         self.assertTrue(item.eligibility.eligible)
-        self.assertEqual(item.completed, ("CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004"))
+        self.assertEqual(
+            item.completed, ("CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005")
+        )
         self.assertEqual(item.authority.automation_stage, "STAGE-1-STATE-MACHINE-AUTOMATION")
 
     def test_real_repository_reconstruction_is_deterministic(self) -> None:
         self.assertEqual(reconstruct_domain(REPO_ROOT), reconstruct_domain(REPO_ROOT))
 
-    def test_real_repository_allows_ctrl_005_dispatch(self) -> None:
+    def test_real_repository_allows_ctrl_006_dispatch(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
-        event = item.handle(DomainCommand("CTRL-005", CommandName.DISPATCH))
+        event = item.handle(DomainCommand("CTRL-006", CommandName.DISPATCH))
         self.assertIs(event.from_state, LifecycleState.READY)
         self.assertIs(event.to_state, LifecycleState.DISPATCHED)
 
@@ -525,7 +527,7 @@ class DomainCLITests(unittest.TestCase):
         result = self._run("domain", "--repo", str(REPO_ROOT))
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("domain model: OK", result.stdout)
-        self.assertIn("active work item: CTRL-005", result.stdout)
+        self.assertIn("active work item: CTRL-006", result.stdout)
         self.assertIn("lifecycle state: READY", result.stdout)
         self.assertIn("dispatch eligibility: ELIGIBLE", result.stdout)
 
