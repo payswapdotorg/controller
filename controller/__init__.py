@@ -8,11 +8,12 @@ context, and domain commands/events with deterministic serialization.
 CTRL-003 GitHub adapter: a typed, dependency-injected observation/mutation
 boundary with strict normalization, work-order correlation, and a
 policy-gated merge authorization enforcing the frozen merge predicate.
-CTRL-005 orchestration boundary and CTRL-006 CI/evidence gate: one-step
-governed orchestration over the accepted adapters, deterministic
-classification of required CI evidence, and typed retry handoffs. No
-worker merging, no database, no scheduler — those stay outside the
-frozen authority.
+CTRL-005 orchestration boundary, CTRL-006 CI/evidence gate, and CTRL-007
+Architect review loop: one-step governed orchestration over the accepted
+adapters, deterministic classification of required CI evidence with typed
+retry handoffs, and durable machine-readable review packets with
+same-worker/same-PR change-iteration handoffs. No worker merging, no
+database, no scheduler — those stay outside the frozen authority.
 """
 
 from __future__ import annotations
@@ -66,6 +67,11 @@ from controller.errors import (
     GithubTransportError,
     IneligibleDispatchError,
     InvalidTransitionError,
+    ReviewContradictionError,
+    ReviewLoopError,
+    ReviewLoopPositionError,
+    ReviewMissingReferenceError,
+    ReviewPacketError,
     SpecError,
 )
 from controller.evidence import (
@@ -93,6 +99,15 @@ from controller.orchestrator import (
     OrchestrationReferences,
     Orchestrator,
 )
+from controller.review import (
+    ArchitectReviewLoop,
+    FindingSeverity,
+    ReviewDecision,
+    ReviewFinding,
+    ReviewHandoff,
+    ReviewLoopOutcome,
+    ReviewPacket,
+)
 from controller.states import (
     ALL_STATES,
     LIFECYCLE_SEQUENCE,
@@ -109,6 +124,7 @@ from controller.zai import DEFAULT_API_ROOT as ZAI_DEFAULT_API_ROOT
 from controller.zai import (
     UrllibZaiTransport,
     ZaiAdapter,
+    ZaiIssuedWorkerSession,
     ZaiTransport,
     ZaiWorkerContext,
     ZaiWorkerSession,
@@ -118,6 +134,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ALL_STATES",
+    "ArchitectReviewLoop",
     "AuthorityContext",
     "Command",
     "CommandName",
@@ -142,6 +159,7 @@ __all__ = [
     "EvidencePolicy",
     "EvidencePolicyError",
     "EvidenceRetryRequest",
+    "FindingSeverity",
     "GithubAdapter",
     "GithubAdapterError",
     "GithubAmbiguityError",
@@ -174,6 +192,16 @@ __all__ = [
     "OrchestrationReferences",
     "Orchestrator",
     "ProgramState",
+    "ReviewContradictionError",
+    "ReviewDecision",
+    "ReviewFinding",
+    "ReviewHandoff",
+    "ReviewLoopError",
+    "ReviewLoopOutcome",
+    "ReviewLoopPositionError",
+    "ReviewMissingReferenceError",
+    "ReviewPacket",
+    "ReviewPacketError",
     "STATE_FILE",
     "SUPPORTED_SCHEMA_VERSION",
     "SpecError",
@@ -190,6 +218,7 @@ __all__ = [
     "ZaiConfigurationError",
     "ZaiContextMismatchError",
     "ZaiContradictionError",
+    "ZaiIssuedWorkerSession",
     "ZaiMalformedResponseError",
     "ZaiMissingSessionError",
     "ZaiPolicyViolationError",
