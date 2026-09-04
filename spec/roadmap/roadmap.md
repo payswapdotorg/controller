@@ -61,7 +61,7 @@ The stage mapping is an operational interpretation of the roadmap, not permissio
 
 ## Sequencing rule
 
-CTRL-001, CTRL-002, CTRL-003, and CTRL-004 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, and PR #11 and recorded in machine state `completed`. **CTRL-005 — Orchestrator is now explicitly defined and activated as the sole `READY` item.** Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
+CTRL-001, CTRL-002, CTRL-003, CTRL-004, and CTRL-005 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, PR #11, and PR #14 and recorded in machine state `completed`. **CTRL-006 remains planned and is not yet defined or eligible.** Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
 
 ## Human-operator progression
 
