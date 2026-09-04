@@ -59,7 +59,7 @@ from controller.errors import (
     IneligibleDispatchError,
 )
 from controller.states import LifecycleState
-from controller.transitions import allowed_commands, dispatch
+from controller.transitions import TRANSITIONS, allowed_commands, dispatch
 
 #: Basis note recorded when eligibility is derived from a full authority
 #: reconstruction (machine state cross-checked against the work order).
@@ -225,6 +225,12 @@ class DomainEvent:
     Mirrors the CTRL-001 event semantics with explicit serialization for
     adapter exchange. Immutable and timeless: no timestamps, UUIDs, or
     random data, so equivalent command histories produce equal events.
+
+    Semantic validity is enforced against the frozen CTRL-001 transition
+    table on deserialization and on application (see
+    :func:`_validate_event_semantics`): a structurally valid but
+    transition-impossible event — e.g. APPROVE issued from READY — fails
+    closed instead of entering the domain (FZ-CTRL002-001).
     """
 
     work_item: str
@@ -284,11 +290,39 @@ class DomainEvent:
             to_state = LifecycleState(field_values[2])
         except ValueError:
             raise DomainError(f"DomainEvent: unknown to-state '{field_values[2]}'") from None
-        return cls(
+        event = cls(
             work_item=work_item,
             command=command,
             from_state=from_state,
             to_state=to_state,
+        )
+        _validate_event_semantics(event)
+        return event
+
+
+def _validate_event_semantics(event: DomainEvent) -> None:
+    """Validate event semantics against the frozen CTRL-001 transition table.
+
+    The single shared validation path (FZ-CTRL002-001): both
+    :meth:`DomainEvent.deserialize` and :meth:`GovernedWorkItem.advance`
+    route through this function, so deserialized and in-memory events
+    carry identical semantics. The frozen table is referenced directly —
+    never duplicated or reinterpreted.
+
+    Raises :class:`DomainError` when ``(from_state, command)`` is not a
+    table entry, or when ``to_state`` is not that entry's successor.
+    """
+    expected = TRANSITIONS.get((event.from_state, event.command))
+    if expected is None:
+        raise DomainError(
+            f"DomainEvent: command {event.command.value} is not valid from "
+            f"state {event.from_state.value} under the frozen transition table"
+        )
+    if event.to_state != expected:
+        raise DomainError(
+            f"DomainEvent: command {event.command.value} from "
+            f"{event.from_state.value} must transition to {expected.value}, "
+            f"not {event.to_state.value}"
         )
 
 
@@ -341,7 +375,11 @@ class GovernedWorkItem:
     def advance(self, event: DomainEvent) -> GovernedWorkItem:
         """Project this snapshot through an applied domain event (pure).
 
-        Re-applying an already-applied event fails deterministically
+        Refuses forged events before positioning is even considered
+        (FZ-CTRL002-001): the event's ``(from_state, command)`` pair and
+        successor state are validated against the frozen CTRL-001
+        transition table via the same shared path used on deserialization.
+        Re-applying an already-applied event then fails deterministically
         (the from-state no longer matches) rather than silently
         duplicating or diverging state (AC7).
         """
@@ -350,6 +388,7 @@ class GovernedWorkItem:
                 f"event belongs to work item '{event.work_item}', but the "
                 f"active governed item is '{self.identity.work_item}'"
             )
+        _validate_event_semantics(event)
         if event.from_state != self.lifecycle:
             raise DomainError(
                 f"event {event.command.value} starts from "

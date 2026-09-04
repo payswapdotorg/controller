@@ -414,6 +414,104 @@ class ReconstructionTests(unittest.TestCase):
             reconstruct_domain(self.root)
 
 
+class ForgedEventTests(unittest.TestCase):
+    """FZ-CTRL002-001: transition-impossible events fail closed everywhere.
+
+    A structurally valid but frozen-table-impossible event (e.g.
+    APPROVE issued from READY) must be rejected by BOTH deserialization
+    and advance(), through the single shared semantic validation path.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name)
+        self.root = make_repo(self.base, status="READY", work_item="CTRL-002")
+        self.item = reconstruct_domain(self.root)
+
+    def test_impossible_pair_fails_deserialization(self) -> None:
+        forged = {
+            "workItem": "CTRL-002",
+            "command": "APPROVE",
+            "fromState": "READY",
+            "toState": "APPROVED",
+        }
+        with self.assertRaises(DomainError):
+            DomainEvent.deserialize(forged)
+
+    def test_impossible_pair_fails_advance(self) -> None:
+        forged = DomainEvent(
+            work_item="CTRL-002",
+            command=CommandName.APPROVE,
+            from_state=LifecycleState.READY,
+            to_state=LifecycleState.APPROVED,
+        )
+        with self.assertRaises(DomainError):
+            self.item.advance(forged)
+
+    def test_wrong_successor_fails_deserialization(self) -> None:
+        forged = {
+            "workItem": "CTRL-002",
+            "command": "DISPATCH",
+            "fromState": "READY",
+            "toState": "MERGED",
+        }
+        with self.assertRaises(DomainError):
+            DomainEvent.deserialize(forged)
+
+    def test_wrong_successor_fails_advance(self) -> None:
+        forged = DomainEvent(
+            work_item="CTRL-002",
+            command=CommandName.DISPATCH,
+            from_state=LifecycleState.READY,
+            to_state=LifecycleState.MERGED,
+        )
+        with self.assertRaises(DomainError):
+            self.item.advance(forged)
+
+    def test_table_valid_event_still_round_trips_and_advances(self) -> None:
+        event = DomainEvent.deserialize(
+            {
+                "workItem": "CTRL-002",
+                "command": "DISPATCH",
+                "fromState": "READY",
+                "toState": "DISPATCHED",
+            }
+        )
+        advanced = self.item.advance(event)
+        self.assertIs(advanced.lifecycle, LifecycleState.DISPATCHED)
+
+    def test_error_messages_cite_the_frozen_table(self) -> None:
+        forged = DomainEvent(
+            work_item="CTRL-002",
+            command=CommandName.APPROVE,
+            from_state=LifecycleState.READY,
+            to_state=LifecycleState.APPROVED,
+        )
+        with self.assertRaises(DomainError) as ctx:
+            self.item.advance(forged)
+        message = str(ctx.exception)
+        self.assertIn("APPROVE", message)
+        self.assertIn("READY", message)
+        self.assertIn("frozen transition table", message)
+
+    def test_every_table_event_passes_semantic_validation(self) -> None:
+        """Positive sweep: every (state, command, successor) in the frozen
+        table deserializes and validates without error."""
+        from controller.transitions import TRANSITIONS
+
+        for (from_state, command), to_state in TRANSITIONS.items():
+            event = DomainEvent.deserialize(
+                {
+                    "workItem": "CTRL-002",
+                    "command": command.value,
+                    "fromState": from_state.value,
+                    "toState": to_state.value,
+                }
+            )
+            self.assertIs(event.to_state, to_state)
+
+
 class DomainCLITests(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
