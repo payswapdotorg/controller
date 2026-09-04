@@ -8,8 +8,11 @@ context, and domain commands/events with deterministic serialization.
 CTRL-003 GitHub adapter: a typed, dependency-injected observation/mutation
 boundary with strict normalization, work-order correlation, and a
 policy-gated merge authorization enforcing the frozen merge predicate.
-No Z.ai integration, no merging by workers, no database — those belong
-to later work orders.
+CTRL-005 orchestration boundary and CTRL-006 CI/evidence gate: one-step
+governed orchestration over the accepted adapters, deterministic
+classification of required CI evidence, and typed retry handoffs. No
+worker merging, no database, no scheduler — those stay outside the
+frozen authority.
 """
 
 from __future__ import annotations
@@ -45,6 +48,11 @@ from controller.errors import (
     ContradictionError,
     ControllerError,
     DomainError,
+    EvidenceContradictionError,
+    EvidenceGateError,
+    EvidenceGatePositionError,
+    EvidenceMissingReferenceError,
+    EvidencePolicyError,
     GithubAdapterError,
     GithubAmbiguityError,
     GithubAuthError,
@@ -59,6 +67,13 @@ from controller.errors import (
     IneligibleDispatchError,
     InvalidTransitionError,
     SpecError,
+)
+from controller.evidence import (
+    EvidenceClassification,
+    EvidenceGate,
+    EvidenceGateOutcome,
+    EvidencePolicy,
+    EvidenceRetryRequest,
 )
 from controller.github import (
     DEFAULT_API_ROOT,
@@ -117,6 +132,16 @@ __all__ = [
     "DomainEvent",
     "Event",
     "EXCEPTION_COMMANDS",
+    "EvidenceClassification",
+    "EvidenceContradictionError",
+    "EvidenceGate",
+    "EvidenceGateError",
+    "EvidenceGateOutcome",
+    "EvidenceGatePositionError",
+    "EvidenceMissingReferenceError",
+    "EvidencePolicy",
+    "EvidencePolicyError",
+    "EvidenceRetryRequest",
     "GithubAdapter",
     "GithubAdapterError",
     "GithubAmbiguityError",

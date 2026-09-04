@@ -6,15 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `IMPLEMENTING`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-006 — CI / Evidence Gate (`spec/work-items/CTRL-006.md`, `READY`)
-- **PR:** none yet; Z.ai implementation is authorized from the exact current `main` SHA recorded in dispatch comment `5543195224`/its correction below
-- **last completed architect action:** CTRL-005 reviewed/approved/merged/reconciled; CTRL-006 defined, frozen, activated, and dispatched to Z.ai
-- **last completed worker action:** CTRL-005 implementation delivered and resolved Architect findings FZ-CTRL005-001 and FZ-CTRL005-002; PR #14 merged and reconciled
-- **current implementation action:** Z.ai implements only the frozen CTRL-006 Work Order; machine state remains `READY` until the governed lifecycle advances
-- **last update (UTC):** 2026-09-04T16:12:00Z
+- **PR:** one implementation PR open from the exact corrected dispatch base `72a8459f4a153b8a7b58ee6ab7c40997bd71cd1b` (dispatch comment `5543201456`)
+- **last completed architect action:** CTRL-005 reviewed/approved/merged/reconciled; CTRL-006 defined, frozen, activated, and dispatched to Z.ai (base correction applied)
+- **last completed worker action:** Z.ai implemented the frozen CTRL-006 Work Order — `controller/evidence.py` (typed CI/evidence gate with frozen classification rules, required-evidence policy execution, one governed lifecycle step per evaluation, and the typed retry-request boundary), the `EvidenceGateError` family, 51 deterministic offline tests, and the mechanical real-repository test-pin correction (CTRL-005/READY -> CTRL-006/READY, completed x4 -> x5) required to make the validation suite green on the activation base; full validation green (356 tests, strict mypy, ruff, CLI validate/domain, external-I/O guard, CTRL-006 scope audit)
+- **current implementation action:** none; awaiting Architect review of the CTRL-006 implementation PR
+- **last update (UTC):** 2026-09-04T16:40:00Z
 - **next planned item:** CTRL-007 (per the roadmap; not defined, not eligible)
-- **next step:** Z.ai verifies the exact post-handoff main SHA from the durable dispatch record, implements CTRL-006 only, validates, and opens one implementation PR; Architect review follows
+- **next step:** Architect reviews the CTRL-006 implementation PR against the frozen Work Order; worker resolves any findings on the same PR
 
 ## Maintenance protocol
 
