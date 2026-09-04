@@ -6,23 +6,23 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
+- **current state:** `CHANGES_REQUESTED`
 - **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `READY`)
 - **PR:** #7 — https://github.com/pectoraux/controller/pull/7 (implementation)
-- **head SHA awaiting review:** `3321dc8ed0dd5df6b5901b865cd9242466cacc23`
+- **head SHA under review:** `3321dc8ed0dd5df6b5901b865cd9242466cacc23`
   (CTRL-003 implementation + FZ-CTRL003-001/002/003 fixes; the branch tip may
   additionally advance with status-dashboard-only commits, which do not alter
   the implementation)
-- **last completed worker action:** all three review-iteration-1 findings
-  resolved — merge authorization now binds the authority-derived active work
-  item (DispatchEligibility), the Architect APPROVE's exact reviewed head SHA
-  (commit_id), and the intended base ref + SHA (re-verified at execution);
-  full validation green (197/197 tests, strict mypy, ruff, CLI, guard,
-  forbidden-surface audit PASS)
-- **ARCHITECT ACTION: REVIEW REQUIRED**
-- **last update (UTC):** 2026-09-04T12:13:52Z
-- **next step:** the human operator should say `go` to invoke the Architect
-  review cycle for PR #7 (review iteration 2)
+- **last completed worker action:** review iteration 2 received — Architect
+  REQUEST_CHANGES with one remaining HIGH finding `FZ-CTRL003-004`
+  (`MergeAuthorization` is forgeable; `merge_pull_request()` must be
+  executable only with an authorization issued by `authorize_merge`).
+  Worker is resolving it now; the branch will advance with the fix.
+- **ARCHITECT ACTION: REVIEW REQUIRED** (after the fix lands)
+- **last update (UTC):** 2026-09-04T13:02:20Z
+- **next step:** worker implements the FZ-CTRL003-004 non-forgeable
+  authorization capability, reruns the full validation suite, updates the
+  durable PR transcript, and returns this PR to `WAITING_FOR_ARCHITECT`
 
 ## Maintenance protocol
 
