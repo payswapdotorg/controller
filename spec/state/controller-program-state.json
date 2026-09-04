@@ -5,9 +5,9 @@
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-005",
-  "status": "READY",
+  "status": "COMPLETE",
   "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
-  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004"],
+  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-005 — Orchestrator is now explicitly defined and frozen as the sole READY work item. Z.ai may implement only spec/work-items/CTRL-005.md from the current main base; the worker may not merge, approve, redefine authority, or claim completion. Stage 1 remains active; implementation of CTRL-005 does not silently advance the automation stage."
+  "nextAction": "CTRL-005 — Orchestrator is complete and reconciled from merge commit 3e5ad4bc35186aaec5548cc1e06d6f27b7534a17. CTRL-006 remains planned but is not defined or eligible; no worker action is authorized until its Work Order is explicitly defined and frozen. Stage 1 remains active; completion of CTRL-005 does not silently advance the automation stage."
 }
