@@ -6,13 +6,22 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `DISPATCHED`
+- **current state:** `IMPLEMENTING`
 - **active Work Order:** CTRL-004 — Z.ai adapter (`spec/work-items/CTRL-004.md`, `READY`)
-- **activation:** merged at `7a6ffafc9b4b5405c278ce90a1b2647052e668e1`
+- **dispatch base:** `af22a2ffea2535f927c9656bfe0273e28ae32c61` (current `main`
+  after the activation merge `7a6ffaf...` + the dispatch record)
 - **worker handoff:** durable dispatch recorded on PR #10 comment `5541668064`
-- **last completed architect action:** CTRL-004 activated as the sole READY item
-- **last update (UTC):** 2026-09-04T14:50:00Z
-- **next step:** Z.ai verifies current `main`, repairs the remaining real-repository domain pin, implements the frozen CTRL-004 Work Order, validates, and returns one implementation PR to `WAITING_FOR_ARCHITECT`
+- **last completed worker action:** dispatch received and verified (authority:
+  CTRL-004 READY, completed x3, STAGE-1; activation `7a6ffaf` confirmed an
+  ancestor of the working base); implementation started — the remaining
+  real-repository `tests/test_domain.py` pin will be repaired to
+  CTRL-004/READY as the first change, then the frozen Work Order surface is
+  implemented
+- **last update (UTC):** 2026-09-04T14:55:00Z
+- **next step:** implement the frozen CTRL-004 Work Order (typed Z.ai
+  start/resume adapter boundary, offline deterministic tests), run the full
+  validation suite, and return exactly one implementation PR to
+  `WAITING_FOR_ARCHITECT`
 
 ## Maintenance protocol
 
