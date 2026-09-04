@@ -1,6 +1,6 @@
 # CTRL-005 — Orchestrator
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Objective
 
@@ -39,7 +39,7 @@ Implement the Controller's deterministic orchestration boundary over the already
 - No end-to-end dogfood implementation (CTRL-010).
 - No new lifecycle states, transition rules, authority sources, workflow engine, scheduler, queue, or durable orchestration database.
 - No GitHub or Z.ai transport reimplementation; use the accepted CTRL-003/CTRL-004 boundaries.
-- No roadmap, architecture, or Work Order mutation from the runtime orchestrator.
+- No roadmap, architecture, or Work Order mutation from the orchestration runtime.
 - No credentials or secrets in repository state.
 
 ## Acceptance criteria
@@ -89,8 +89,8 @@ Offline deterministic tests cover ready dispatch, exact PR/worker correlation, r
 
 ## Handoff
 
-Worker must verify the current `main` SHA and authority state before implementation, confirm this Work Order is `READY`, implement only the owned CTRL-005 surface, run the complete validation suite, create/update exactly one PR for CTRL-005, and return an evidence transcript containing base/head SHAs and acceptance-criterion results. Worker may not merge, approve, redefine authority, or mark CTRL-005 complete.
+Worker verified the exact activation base `039177b27a3cdf38ec4ceed033ab7420c13c152c`, implemented CTRL-005 in PR #14 only, resolved Architect findings FZ-CTRL005-001 and FZ-CTRL005-002 on the same PR, and returned a validation transcript reporting 305 tests passed, strict mypy clean, ruff clean, CLI validate/domain clean, external-I/O guards green, and the CTRL-005 scope audit passing. The Architect approved reviewed head `3275198ef44c6589288814f3dedcaeebe6462c30` and merged PR #14 with expected-head protection.
 
 ## Merge / reconciliation evidence
 
-Not yet implemented. This Work Order is newly defined and activated as the sole READY item after CTRL-004 reconciliation.
+Complete and reconciled. PR #14 (`CTRL-005 — Orchestrator`) was merged at `3e5ad4bc35186aaec5548cc1e06d6f27b7534a17` from reviewed head `3275198ef44c6589288814f3dedcaeebe6462c30` against activation base `039177b27a3cdf38ec4ceed033ab7420c13c152c`. The implementation remains within the frozen CTRL-005 scope; no CTRL-006+ implementation was introduced. Repository machine state records CTRL-005 as complete and includes it in `completed`; CTRL-006 remains planned but undefined and ineligible until a separate governance definition/activation.

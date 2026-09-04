@@ -6,42 +6,16 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
-- **active Work Order:** CTRL-005 — Orchestrator (`spec/work-items/CTRL-005.md`, `READY`)
-- **PR:** PR #14 (open, from `ctrl-005-orchestrator`; dispatch
-  base `039177b27a3cdf38ec4ceed033ab7420c13c152c`) — FZ-CTRL005-002 (HIGH)
-  closed by the worker: DISPATCHED→IMPLEMENTING now re-establishes session
-  provenance from live provider state through the accepted adapter's
-  start/identify contract (provider-identified session must be the carried
-  session); structurally exact hand-constructed values cannot advance the
-  lifecycle; 3 deterministic regression tests added
-- **head SHA awaiting review:** `e523713` (FZ-CTRL005-002 fix, on top of
-  `a045371` FZ-001 fix and `a0367e3` implementation; the branch tip
-  may additionally advance with status-dashboard-only commits, which do not
-  alter the implementation)
-- **implementation merge evidence:** prior CTRL-004 implementation PR #11 merged at
-  `c873b467fc7f4381f7c213723a69071eb9953168` (reviewed head
-  `165fb959281619b0e635b603ef2660834a60571e`, base
-  `af22a2ffea2535f927c9656bfe0273e28ae32c61`); reconciliation PR #12 merged at
-  `f3a1e0a13d914ddbcaa7779c1ac0e34035ade1cd`; CTRL-005 governance PR #13 merged at
-  `a462ec287b28562221db450a6b6a25473845fd0e`
-- **last completed architect action:** CTRL-005 work order defined/frozen,
-  activated as the sole READY item, Z.ai dispatch authorized, and the dispatch
-  base corrected to `039177b27a3cdf38ec4ceed033ab7420c13c152c`
-- **last completed worker action:** CTRL-005 implemented per the frozen Work
-  Order — deterministic orchestration boundary (`controller/orchestrator.py`:
-  authority reconstruction first, exact active-item correlation, carried
-  `OrchestrationReferences` cross-validated not guessed, one frozen-table
-  transition or pure observation per cycle, fail-closed contradictions, no
-  runtime state with restart-identical decisions, typed downstream handoffs
-  only; `OrchestrationError` family; 30 deterministic offline tests; README
-  operational documentation); full validation green (293/293 tests, strict mypy
-  on 26 files, ruff, CLI validate/domain, forbidden-surface audit vs
-  `039177b` PASS)
-- **last update (UTC):** 2026-09-04T16:15:00Z
-- **next planned item:** CTRL-006 (per the roadmap; not defined, not eligible —
-  no worker action)
-- **next step:** Architect re-reviews PR #14 (FZ-CTRL005-002 resolution)
+- **current state:** `COMPLETE`
+- **active Work Order:** CTRL-005 — Orchestrator (`spec/work-items/CTRL-005.md`, `COMPLETE`)
+- **PR:** PR #14 merged at `3e5ad4bc35186aaec5548cc1e06d6f27b7534a17`; Architect approved reviewed head `3275198ef44c6589288814f3dedcaeebe6462c30` against dispatch base `039177b27a3cdf38ec4ceed033ab7420c13c152c0`
+- **merge evidence:** FZ-CTRL005-001 and FZ-CTRL005-002 closed; implementation validated with 305 tests passed, strict mypy, ruff, CLI validation, external-I/O guard, and CTRL-005 scope audit reported green by the worker
+- **last completed architect action:** reviewed and approved CTRL-005 PR #14 after exact worker-session binding and live provider provenance re-proof were satisfied; merged the exact reviewed head with an expected-head guard
+- **last completed worker action:** implemented CTRL-005 on the exact activation base, resolved Architect findings FZ-CTRL005-001 and FZ-CTRL005-002 in the same PR, and returned a green validation transcript
+- **reconciliation action:** repository machine state and Work Order are being reconciled from the exact merge evidence; no implementation authority is changed beyond recording completion
+- **last update (UTC):** 2026-09-04T16:00:00Z
+- **next planned item:** CTRL-006 (per the roadmap; not defined, not eligible)
+- **next step:** Architect defines/freezes CTRL-006 through the normal governance path; no worker action is authorized yet
 
 ## Maintenance protocol
 
