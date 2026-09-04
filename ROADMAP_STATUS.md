@@ -7,22 +7,20 @@
 > file is wrong. It never claims an action that has not actually occurred.
 
 - **current state:** `WAITING_FOR_ARCHITECT`
-- **active Work Order:** CTRL-002 — Domain/state model (`spec/work-items/CTRL-002.md`, reconciled to `COMPLETE`)
-- **PR:** #5 — https://github.com/pectoraux/controller/pull/5 (post-merge reconciliation)
-- **head SHA awaiting review:** `2ea43b7948f902db9b72025625e7c29340d459b2`
-  (CTRL-002 post-merge reconciliation from main `4dc8387eff1d48039c235727976e1aef33d0bc97`;
-  the branch tip may additionally advance with status-dashboard-only commits,
-  which do not alter the reconciliation)
-- **last completed worker action:** CTRL-002 post-merge reconciliation prepared
-  per the Architect POST-MERGE ACTION on PR #4 — machine state COMPLETE +
-  completed [CTRL-001, CTRL-002], work-order status reconciled, roadmap
-  completion evidence recorded, Stage 1 continues; full validation green
-  (122/122 tests, strict mypy, ruff, CLI validate + domain, audit PASS)
+- **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `READY`)
+- **PR:** #6 — https://github.com/pectoraux/controller/pull/6 (Architect governance/activation)
+- **head SHA awaiting review:** `41a32448212f471e66fbc19ccb9a72343a3c6bb1`
+  (CTRL-003 work-order definition/activation governance change; branch tip may
+  advance with status-dashboard-only commits, which do not alter the Work Order
+  or authority intent)
+- **last completed Architect action:** CTRL-003 Work Order defined and machine
+  state prepared for activation from reconciled main `b9e7402476f94a7a52ef6cd248ee5bf18d9d1ca2`;
+  CTRL-004 remains planned; Stage 1 remains active.
 - **ARCHITECT ACTION: REVIEW REQUIRED**
-- **last update (UTC):** 2026-09-04T11:36:49Z
+- **last update (UTC):** 2026-09-04T11:49:30Z
 - **next step:** the human operator should say `go` to invoke the Architect
-  review cycle for PR #5; after merge, the Architect defines CTRL-003/CTRL-004
-  work orders (no implementation item is currently eligible)
+  review cycle for PR #6; after merge, Z.ai may implement CTRL-003 from the
+  resulting main SHA.
 
 ## Maintenance protocol
 
