@@ -73,6 +73,11 @@ from controller.github import (
     MergeAuthorization,
     UrllibGithubTransport,
 )
+from controller.orchestrator import (
+    OrchestrationOutcome,
+    OrchestrationReferences,
+    Orchestrator,
+)
 from controller.states import (
     ALL_STATES,
     LIFECYCLE_SEQUENCE,
@@ -137,6 +142,12 @@ __all__ = [
     "LIFECYCLE_SEQUENCE",
     "LifecycleState",
     "MergeAuthorization",
+    "OrchestrationContradictionError",
+    "OrchestrationError",
+    "OrchestrationMissingReferenceError",
+    "OrchestrationOutcome",
+    "OrchestrationReferences",
+    "Orchestrator",
     "ProgramState",
     "STATE_FILE",
     "SUPPORTED_SCHEMA_VERSION",

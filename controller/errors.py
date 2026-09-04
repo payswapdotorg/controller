@@ -246,3 +246,42 @@ class ZaiPolicyViolationError(ZaiAdapterError):
     exceed the frozen worker role (for example, carrying unknown fields
     or token-like provider material) fails closed with this error.
     """
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator errors (CTRL-005) — typed fail-closed coordination boundary
+# ---------------------------------------------------------------------------
+
+
+class OrchestrationError(ControllerError):
+    """Base class for every orchestrator boundary failure (CTRL-005).
+
+    The orchestrator coordinates the accepted domain, GitHub, and Z.ai
+    abstractions for exactly one active governed Work Order. It is never
+    an authority source: repository authority outranks its projections,
+    and every failure — contradiction or a missing non-authoritative
+    carried reference — fails closed with a typed error. No guessed
+    recovery, alternate-item dispatch, or silent continuation.
+    """
+
+
+class OrchestrationContradictionError(OrchestrationError):
+    """Repository authority and observed remote evidence contradict.
+
+    For example: machine state records a PR-open (or later) lifecycle
+    position while no governed pull request is observed, or the recorded
+    CHANGES_REQUESTED position no longer matches the review evidence.
+    Repository authority outranks remote observation (AC5); the
+    orchestration run stops for governance attention.
+    """
+
+
+class OrchestrationMissingReferenceError(OrchestrationError):
+    """A required non-authoritative carried reference was not supplied.
+
+    The orchestrator keeps no runtime state (AC6): the governed branch,
+    dispatch base SHA, worker session reference, and architect reviewer
+    identity are caller-carried inputs, cross-validated against authority
+    and remote evidence. When a cycle requires one and it is absent, the
+    run fails closed rather than guessing the correlation.
+    """
