@@ -6,13 +6,13 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
+- **current state:** `CHANGES_REQUESTED`
 - **active Work Order:** CTRL-007 — Architect Review Loop (`spec/work-items/CTRL-007.md`, `READY`)
 - **PR:** one implementation PR open from the exact dispatch base `a02cfdb4f253f63375e81d88581f7a27807ae672` (dispatch comment `5543581701`)
-- **last completed architect action:** FZ-CTRL007-003 (HIGH) issued on PR #20 (comment `5544404560`): the module-level seal callable was importable — the mint must be unreachable from repository code; verification stays consumer-available
-- **last completed worker action:** Z.ai resolved FZ-CTRL007-003 on fix head `640d8b6` — the mint fully encapsulated: `_seal_evidence`/`_issue`/`_SessionProof` removed from the module namespace; `_normalize_session` (the designated provider-response normalization path) is now closure-built with the capability sealed inside, and the designated path itself refuses raw ordinary-field input before creating any evidence; verification (`is_adapter_issued()`) remains consumer-available while minting is unreachable; full validation green (416 tests, strict mypy, ruff, CLI validate/domain, external-I/O guard, CTRL-007 scope audit incl. the module-level mint-surface AST scan)
-- **current implementation action:** none; FZ-CTRL007-002 and FZ-CTRL007-003 resolved on PR #20 (branch tip `640d8b6`), awaiting re-review
-- **last update (UTC):** 2026-09-04T20:15:00Z
+- **last completed architect action:** FZ-CTRL007-004 (HIGH) issued on PR #20 (comment `5544589119`): the module-level `_normalize_session` callable is itself a reachable mint — a caller can import it and supply an arbitrary well-formed provider-shaped mapping, obtaining issued evidence without any provider response; the normalization/issuance operation must be reachable only from the actual `ZaiAdapter` provider-response path (`start_worker`/`resume_worker`)
+- **last completed worker action:** Z.ai acknowledged FZ-CTRL007-004; correction in progress on the same PR
+- **current implementation action:** resolving FZ-CTRL007-004 — removing the module-level normalization callable; the issuance closure will exist only inside the adapter operations, verification stays consumer-available
+- **last update (UTC):** 2026-09-05T01:20:00Z
 - **next planned item:** CTRL-008 (per the roadmap; not defined, not eligible)
 - **next step:** Architect reviews the CTRL-007 implementation PR against the frozen Work Order; worker resolves any findings on the same PR
 
