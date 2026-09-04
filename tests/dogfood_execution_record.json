@@ -1,0 +1,463 @@
+{
+ "architect_reviewer": "pectoraux",
+ "automation_stage": "STAGE-1-STATE-MACHINE-AUTOMATION",
+ "branch": "ctrl-010-dogfood",
+ "change_iterations": 1,
+ "completed_after": [
+  "CTRL-001",
+  "CTRL-002",
+  "CTRL-003",
+  "CTRL-004",
+  "CTRL-005",
+  "CTRL-006",
+  "CTRL-007",
+  "CTRL-008",
+  "CTRL-009",
+  "CTRL-010"
+ ],
+ "completed_before": [
+  "CTRL-001",
+  "CTRL-002",
+  "CTRL-003",
+  "CTRL-004",
+  "CTRL-005",
+  "CTRL-006",
+  "CTRL-007",
+  "CTRL-008",
+  "CTRL-009"
+ ],
+ "dispatch_base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "failures": [
+  {
+   "error": "OrchestrationContradictionError",
+   "lifecycle_before": "DISPATCHED",
+   "message": "carried worker session 'zai-session-ctrl-010-001' is bound to work item 'CTRL-009', but repository authority identifies 'CTRL-010' as the active item",
+   "probe": "foreign-session-contradiction",
+   "provider_calls": [],
+   "recovery_condition": null,
+   "remote_mutations": []
+  },
+  {
+   "error": "MergeContradictionError",
+   "lifecycle_before": "MERGING",
+   "message": "machine state records MERGING for 'CTRL-010' but PR #30 for 'CTRL-010' is not merged; the single authorized merge attempt did not land \u2014 governance attention is required (the loop never re-attempts)",
+   "probe": "partial-mutation-unresolved",
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "recovery_condition": "PARTIAL_MUTATION_UNRESOLVED",
+   "remote_mutations": []
+  }
+ ],
+ "final_lifecycle": "COMPLETE",
+ "head_final": "dddddddddddddddddddddddddddddddddddddddd",
+ "head_initial": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+ "merge_attempts": 1,
+ "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+ "next_work_item": null,
+ "pr_number": 30,
+ "repository": "pectoraux/controller",
+ "restart": {
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "basis": [
+   "lifecycle state is APPROVED",
+   "governed PR #30 observed (state closed, merged=True, base aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
+   "observed merge evidence: merged, closed, base ref main, merge commit cccccccccccccccccccccccccccccccccccccccc",
+   "the merge already landed while machine state records APPROVED: the merge boundary records it (external-merge continuation), never re-attempts it"
+  ],
+  "boundary": "MERGE_BOUNDARY",
+  "condition": "EXTERNAL_COMPLETION_OBSERVED",
+  "lifecycle": "APPROVED",
+  "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+  "next_step": "MERGE",
+  "provider_calls": [
+   "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+  ],
+  "pull_request": 30,
+  "session_binding": "VERIFIED_ISSUED",
+  "session_id": "zai-session-ctrl-010-001",
+  "session_required": false
+ },
+ "session_id": "zai-session-ctrl-010-001",
+ "stage6_statement": "Stage 6 (merge/reconciliation automation) prerequisites per the roadmap mapping (CTRL-009 + CTRL-010) are exercised end-to-end by this run: the CTRL-008 merge predicate authorized exactly one merge attempt, the external-merge continuation recorded the observed merge without a second attempt after the deliberate restart, the deterministic reconciliation record derived the completed ledger and selected no next item, and the CTRL-009 recovery boundary classified and directed the resumption. automationStage is preserved verbatim (STAGE-1-STATE-MACHINE-AUTOMATION); CTRL-010 does not advance the stage, and any stage transition remains an explicit Architect-governed authority update supported by accepted evidence.",
+ "steps": [
+  {
+   "boundary": "ORCHESTRATOR",
+   "event_command": "DISPATCH",
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "session_id": "zai-session-ctrl-010-001",
+    "work_item": "CTRL-010"
+   },
+   "lifecycle_after": "DISPATCHED",
+   "lifecycle_before": "READY",
+   "outcome": "WorkerDispatched",
+   "phase": "dispatch-worker",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/branches/main",
+    "POST /worker/sessions"
+   ],
+   "step": 1
+  },
+  {
+   "boundary": "ORCHESTRATOR",
+   "event_command": "BEGIN_IMPLEMENTATION",
+   "identity": {
+    "session_id": "zai-session-ctrl-010-001",
+    "work_item": "CTRL-010"
+   },
+   "lifecycle_after": "IMPLEMENTING",
+   "lifecycle_before": "DISPATCHED",
+   "outcome": "ImplementationStarted",
+   "phase": "begin-implementation",
+   "projected": true,
+   "provider_calls": [
+    "POST /worker/sessions"
+   ],
+   "step": 2
+  },
+  {
+   "boundary": "ORCHESTRATOR",
+   "event_command": "OPEN_PR",
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "pr": 30,
+    "work_item": "CTRL-010"
+   },
+   "lifecycle_after": "PR_OPEN",
+   "lifecycle_before": "IMPLEMENTING",
+   "outcome": "PullRequestOpened",
+   "phase": "open-pull-request",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "step": 3
+  },
+  {
+   "boundary": "ORCHESTRATOR",
+   "event_command": "AWAIT_CI",
+   "identity": {
+    "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "pr": 30
+   },
+   "lifecycle_after": "CI_PENDING",
+   "lifecycle_before": "PR_OPEN",
+   "outcome": "AwaitingCI",
+   "phase": "await-ci",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/commits/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/status"
+   ],
+   "step": 4
+  },
+  {
+   "boundary": "EVIDENCE_GATE",
+   "event_command": "RECORD_CI_SUCCESS",
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "classification": "TERMINAL_SUCCESS",
+    "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "pr": 30
+   },
+   "lifecycle_after": "REVIEW_PENDING",
+   "lifecycle_before": "CI_PENDING",
+   "outcome": "EvidenceGateOutcome",
+   "phase": "record-ci-success",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/commits/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/status"
+   ],
+   "step": 5
+  },
+  {
+   "boundary": "REVIEW_LOOP",
+   "event_command": "REQUEST_CHANGES",
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "decision": "REQUEST_CHANGES",
+    "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "iteration": 1,
+    "pr": 30,
+    "session_id": "zai-session-ctrl-010-001"
+   },
+   "lifecycle_after": "CHANGES_REQUESTED",
+   "lifecycle_before": "REVIEW_PENDING",
+   "outcome": "ReviewLoopOutcome",
+   "phase": "architect-request-changes",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/pulls/30/reviews",
+    "GET /repos/pectoraux/controller/issues/30/comments"
+   ],
+   "step": 6
+  },
+  {
+   "boundary": "ORCHESTRATOR",
+   "event_command": "RESUME_IMPLEMENTATION",
+   "identity": {
+    "findings": 1,
+    "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "pr": 30,
+    "session_id": "zai-session-ctrl-010-001",
+    "work_item": "CTRL-010"
+   },
+   "lifecycle_after": "IMPLEMENTING",
+   "lifecycle_before": "CHANGES_REQUESTED",
+   "outcome": "WorkerResumed",
+   "phase": "resume-same-worker-same-pr",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/pulls/30/reviews",
+    "POST /worker/sessions/zai-session-ctrl-010-001/resume"
+   ],
+   "step": 7
+  },
+  {
+   "boundary": "ORCHESTRATOR",
+   "event_command": "OPEN_PR",
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "pr": 30
+   },
+   "lifecycle_after": "PR_OPEN",
+   "lifecycle_before": "IMPLEMENTING",
+   "outcome": "PullRequestOpened",
+   "phase": "open-pull-request-iteration-2",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "step": 8
+  },
+  {
+   "boundary": "ORCHESTRATOR",
+   "event_command": "AWAIT_CI",
+   "identity": {
+    "head_sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "pr": 30
+   },
+   "lifecycle_after": "CI_PENDING",
+   "lifecycle_before": "PR_OPEN",
+   "outcome": "AwaitingCI",
+   "phase": "await-ci-iteration-2",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/commits/dddddddddddddddddddddddddddddddddddddddd/status"
+   ],
+   "step": 9
+  },
+  {
+   "boundary": "EVIDENCE_GATE",
+   "event_command": "RECORD_CI_SUCCESS",
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "classification": "TERMINAL_SUCCESS",
+    "head_sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "pr": 30
+   },
+   "lifecycle_after": "REVIEW_PENDING",
+   "lifecycle_before": "CI_PENDING",
+   "outcome": "EvidenceGateOutcome",
+   "phase": "record-ci-success-iteration-2",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/commits/dddddddddddddddddddddddddddddddddddddddd/status"
+   ],
+   "step": 10
+  },
+  {
+   "boundary": "REVIEW_LOOP",
+   "event_command": "APPROVE",
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "decision": "APPROVE",
+    "head_sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "pr": 30
+   },
+   "lifecycle_after": "APPROVED",
+   "lifecycle_before": "REVIEW_PENDING",
+   "outcome": "ReviewLoopOutcome",
+   "phase": "architect-approve",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/pulls/30/reviews"
+   ],
+   "step": 11
+  },
+  {
+   "boundary": "MERGE_BOUNDARY",
+   "event_command": "MERGE",
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "dispatch_base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "merge_attempted": true,
+    "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "pr": 30
+   },
+   "lifecycle_after": "APPROVED",
+   "lifecycle_before": "APPROVED",
+   "outcome": "MergeLoopOutcome",
+   "phase": "authorized-merge-attempt-state-write-lost",
+   "projected": false,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/pulls/30",
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/commits/dddddddddddddddddddddddddddddddddddddddd/status",
+    "GET /repos/pectoraux/controller/pulls/30/reviews",
+    "GET /repos/pectoraux/controller/pulls/30",
+    "GET /repos/pectoraux/controller/pulls?state=open&head=pectoraux:ctrl-010-dogfood",
+    "GET /repos/pectoraux/controller/commits/dddddddddddddddddddddddddddddddddddddddd/status",
+    "GET /repos/pectoraux/controller/pulls/30/reviews",
+    "PUT /repos/pectoraux/controller/pulls/30/merge",
+    "GET /repos/pectoraux/controller/pulls/30"
+   ],
+   "step": 12
+  },
+  {
+   "boundary": "RECOVERY_BOUNDARY",
+   "event_command": null,
+   "identity": {
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "boundary": "MERGE_BOUNDARY",
+    "condition": "EXTERNAL_COMPLETION_OBSERVED",
+    "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "next_step": "MERGE"
+   },
+   "lifecycle_after": "APPROVED",
+   "lifecycle_before": "APPROVED",
+   "outcome": "RecoveryPlan",
+   "phase": "restart-classification",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "step": 13
+  },
+  {
+   "boundary": "MERGE_BOUNDARY",
+   "event_command": "MERGE",
+   "identity": {
+    "head_sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "merge_attempted": false,
+    "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "pr": 30
+   },
+   "lifecycle_after": "MERGING",
+   "lifecycle_before": "APPROVED",
+   "outcome": "MergeLoopOutcome",
+   "phase": "record-observed-merge-no-second-attempt",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "step": 14
+  },
+  {
+   "boundary": "MERGE_BOUNDARY",
+   "event_command": "RECORD_MERGE",
+   "identity": {
+    "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "pr": 30
+   },
+   "lifecycle_after": "MERGED",
+   "lifecycle_before": "MERGING",
+   "outcome": "MergeLoopOutcome",
+   "phase": "record-merge",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "step": 15
+  },
+  {
+   "boundary": "MERGE_BOUNDARY",
+   "event_command": "RECONCILE",
+   "identity": {
+    "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "pr": 30
+   },
+   "lifecycle_after": "RECONCILING",
+   "lifecycle_before": "MERGED",
+   "outcome": "MergeLoopOutcome",
+   "phase": "reconcile",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "step": 16
+  },
+  {
+   "boundary": "MERGE_BOUNDARY",
+   "event_command": "RECORD_RECONCILIATION",
+   "identity": {
+    "automation_stage": "STAGE-1-STATE-MACHINE-AUTOMATION",
+    "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "next_work_item": null,
+    "pr": 30
+   },
+   "lifecycle_after": "COMPLETE",
+   "lifecycle_before": "RECONCILING",
+   "outcome": "MergeLoopOutcome",
+   "phase": "record-reconciliation",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "step": 17
+  },
+  {
+   "boundary": "RECOVERY_BOUNDARY",
+   "event_command": null,
+   "identity": {
+    "boundary": "ARCHITECT_GOVERNANCE",
+    "condition": "AWAITING_GOVERNANCE",
+    "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "next_step": "ADVANCE"
+   },
+   "lifecycle_after": "COMPLETE",
+   "lifecycle_before": "COMPLETE",
+   "outcome": "RecoveryPlan",
+   "phase": "terminal-awaiting-governance",
+   "projected": true,
+   "provider_calls": [
+    "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+   ],
+   "step": 18
+  }
+ ],
+ "terminal_governance": {
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "basis": [
+   "lifecycle state is COMPLETE",
+   "governed PR #30 observed merged with merge commit cccccccccccccccccccccccccccccccccccccccc",
+   "post-reconciliation advancement is Architect-side governance; the worker never advances or claims completion"
+  ],
+  "boundary": "ARCHITECT_GOVERNANCE",
+  "condition": "AWAITING_GOVERNANCE",
+  "lifecycle": "COMPLETE",
+  "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+  "next_step": "ADVANCE",
+  "provider_calls": [
+   "GET /repos/pectoraux/controller/pulls?state=all&head=pectoraux:ctrl-010-dogfood"
+  ],
+  "pull_request": 30,
+  "session_binding": "VERIFIED_ISSUED",
+  "session_id": "zai-session-ctrl-010-001",
+  "session_required": false
+ },
+ "work_item": "CTRL-010"
+}

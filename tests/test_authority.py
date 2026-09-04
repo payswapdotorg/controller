@@ -35,7 +35,7 @@ _ALL_REQUIRED_FIELDS = [
 class RealRepositoryTests(unittest.TestCase):
     def test_real_repository_authority_validates(self) -> None:
         program = verify_authority(REPO_ROOT)
-        self.assertEqual(program.active_work_item, "CTRL-009")
+        self.assertEqual(program.active_work_item, "CTRL-010")
         self.assertIs(program.status, LifecycleState.READY)
         self.assertEqual(program.schema_version, "0.1")
         self.assertEqual(program.automation_stage, "STAGE-1-STATE-MACHINE-AUTOMATION")
@@ -50,6 +50,7 @@ class RealRepositoryTests(unittest.TestCase):
                 "CTRL-006",
                 "CTRL-007",
                 "CTRL-008",
+                "CTRL-009",
             ),
         )
 
@@ -59,7 +60,7 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(len(program.rules), 7)
 
     def test_real_work_item_status_parses(self) -> None:
-        self.assertIs(load_work_item_status(REPO_ROOT, "CTRL-009"), LifecycleState.READY)
+        self.assertIs(load_work_item_status(REPO_ROOT, "CTRL-010"), LifecycleState.READY)
 
 
 class ValidLoadTests(unittest.TestCase):
