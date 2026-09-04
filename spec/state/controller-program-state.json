@@ -6,7 +6,7 @@
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-010",
   "status": "COMPLETE",
-  "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
+  "automationStage": "STAGE-6-MERGE-RECONCILIATION-AUTOMATION",
   "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009", "CTRL-010"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-010 is complete and reconciled from observed implementation merge 621847cba9dad92a0d45c13853b24ad66402284e. The CTRL-009 + CTRL-010 Stage-6 prerequisites have explicit accepted dogfood evidence. Stage 1 remains the recorded automation stage until a separate explicit Architect-governed stage transition updates authority. No successor Work Item is defined by the current roadmap."
+  "nextAction": "Stage 6 — Merge/reconciliation automation is explicitly activated by Architect governance after accepted CTRL-009 recovery/idempotency and CTRL-010 end-to-end dogfood evidence. All ten roadmap Work Items are complete/reconciled; no successor Work Item is currently defined. Human remains the product/architecture authority and exception handler."
 }
