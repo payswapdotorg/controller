@@ -61,7 +61,7 @@ The stage mapping is an operational interpretation of the roadmap, not permissio
 
 ## Sequencing rule
 
-CTRL-001 is the only currently eligible implementation item. Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
+CTRL-001 is complete and reconciled: accepted and merged via PR #1 and recorded in machine state `completed`. The next planned item is CTRL-002 (Domain/state model), which becomes the only eligible implementation item once the Architect defines and freezes its work order (`spec/work-items/CTRL-002.md`) and machine state marks it `READY`; until then no implementation item is eligible for dispatch. Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
 
 ## Human-operator progression
 

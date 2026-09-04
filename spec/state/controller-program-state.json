@@ -5,9 +5,9 @@
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-001",
-  "status": "READY",
-  "automationStage": "STAGE-0-MANUAL-CONTROLLER",
-  "completed": [],
+  "status": "COMPLETE",
+  "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
+  "completed": ["CTRL-001"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "Dispatch CTRL-001 only after the controller implementation process has verified this state against the roadmap, architecture, and build process. The human operator currently performs the Controller's mechanical orchestration role."
+  "nextAction": "CTRL-001 is merged (PR #1, merge commit 0f8e3a749d4dde587c4c81c8b4d250ae2205ff37) and reconciled: recorded in completed, automation stage advanced to Stage 1. The Architect must define and freeze the CTRL-002 work order (spec/work-items/CTRL-002.md) and mark it READY in machine state before CTRL-002 becomes eligible for dispatch. The human operator still performs external dispatch, review routing, and merge authorization; the controller state machine is the canonical lifecycle model."
 }

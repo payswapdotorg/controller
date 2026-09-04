@@ -1,6 +1,8 @@
 # CTRL-001 — Foundation & Repository Authority
 
-Status: `READY`
+Status: `COMPLETE`
+
+Completed via PR #1 (merge commit `0f8e3a749d4dde587c4c81c8b4d250ae2205ff37`); machine state reconciled per `spec/operations/controller-build-process.md` (exact construction loop, step 12).
 
 ## Objective
 Create the minimal executable/controller-repository foundation without implementing downstream integrations.
