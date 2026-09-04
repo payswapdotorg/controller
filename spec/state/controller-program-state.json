@@ -3,15 +3,19 @@
   "repository": "pectoraux/controller",
   "roadmap": "spec/roadmap/roadmap.md",
   "architecture": "spec/architecture/controller-architecture.md",
+  "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-001",
   "status": "READY",
+  "automationStage": "STAGE-0-MANUAL-CONTROLLER",
   "completed": [],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
     "onePrPerWorkItem": true,
     "workerCannotMerge": true,
-    "failClosedOnContradiction": true
+    "failClosedOnContradiction": true,
+    "humanOperatorIsTemporaryMechanicalController": true,
+    "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "Dispatch CTRL-001 only after the controller implementation process has verified this state against the roadmap and architecture."
+  "nextAction": "Dispatch CTRL-001 only after the controller implementation process has verified this state against the roadmap, architecture, and build process. The human operator currently performs the Controller's mechanical orchestration role."
 }
