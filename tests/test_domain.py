@@ -37,30 +37,29 @@ DISPATCH_CMD = DomainCommand(work_item="CTRL-002", command=CommandName.DISPATCH)
 
 
 class RealRepositoryDomainTests(unittest.TestCase):
-    def test_real_repository_reconstructs_ctrl_002_eligible(self) -> None:
+    def test_real_repository_reconstructs_ctrl_002_complete(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
         self.assertEqual(item.identity.work_item, "CTRL-002")
         self.assertEqual(item.identity.work_order_path, "spec/work-items/CTRL-002.md")
         self.assertEqual(item.identity.repository, "pectoraux/controller")
-        self.assertIs(item.lifecycle, LifecycleState.READY)
-        self.assertTrue(item.eligibility.eligible)
-        self.assertEqual(item.completed, ("CTRL-001",))
+        self.assertIs(item.lifecycle, LifecycleState.COMPLETE)
+        self.assertFalse(item.eligibility.eligible)
+        self.assertEqual(item.completed, ("CTRL-001", "CTRL-002"))
         self.assertEqual(item.authority.automation_stage, "STAGE-1-STATE-MACHINE-AUTOMATION")
 
     def test_real_repository_reconstruction_is_deterministic(self) -> None:
         self.assertEqual(reconstruct_domain(REPO_ROOT), reconstruct_domain(REPO_ROOT))
 
-    def test_real_repository_dispatch_produces_domain_event(self) -> None:
+    def test_real_repository_refuses_dispatch_after_completion(self) -> None:
+        """Post-reconciliation AC2 demonstration: the completed item is
+        ineligible and the domain refuses to dispatch it."""
         item = reconstruct_domain(REPO_ROOT)
-        event = item.handle(DISPATCH_CMD)
-        self.assertEqual(
-            (event.work_item, event.command, event.from_state, event.to_state),
-            ("CTRL-002", CommandName.DISPATCH, LifecycleState.READY, LifecycleState.DISPATCHED),
-        )
+        with self.assertRaises(IneligibleDispatchError):
+            item.handle(DISPATCH_CMD)
 
     def test_real_repository_allowed_commands_delegate_to_table(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
-        self.assertEqual(item.allowed_commands(), allowed_commands(LifecycleState.READY))
+        self.assertEqual(item.allowed_commands(), allowed_commands(item.lifecycle))
 
 
 class EligibilityTests(unittest.TestCase):
@@ -528,8 +527,8 @@ class DomainCLITests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("domain model: OK", result.stdout)
         self.assertIn("active work item: CTRL-002", result.stdout)
-        self.assertIn("lifecycle state: READY", result.stdout)
-        self.assertIn("dispatch eligibility: ELIGIBLE", result.stdout)
+        self.assertIn("lifecycle state: COMPLETE", result.stdout)
+        self.assertIn("dispatch eligibility: INELIGIBLE", result.stdout)
 
     def test_domain_contradictory_repository_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

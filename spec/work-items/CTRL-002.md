@@ -1,6 +1,8 @@
 # CTRL-002 — Domain/state model
 
-Status: `READY`
+Status: `COMPLETE`
+
+Completed via PR #4 (merge commit `4dc8387eff1d48039c235727976e1aef33d0bc97`), including review iteration 1 fix FZ-CTRL002-001; machine state reconciled per `spec/operations/controller-build-process.md` (exact construction loop, step 12).
 
 ## Objective
 
