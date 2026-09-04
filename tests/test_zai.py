@@ -36,7 +36,6 @@ from controller.zai import (
     ZaiWorkerContext,
     ZaiWorkerSession,
     _http_error,
-    _normalize_session,
     _require_payload_policy,
 )
 from controller.zai import (
@@ -77,6 +76,17 @@ def _context(
         head_sha=head_sha,
         review_findings=review_findings,
     )
+
+
+def _issued_session(
+    report: dict[str, object] | None = None,
+    context: ZaiWorkerContext | None = None,
+) -> ZaiIssuedWorkerSession:
+    """Adapter-issued evidence produced through the ACTUAL provider-response
+    path (fake transport) — the one and only issuance path (FZ-CTRL007-004):
+    there is no module-level normalization callable to shortcut it."""
+    transport = FakeZaiTransport({START_PATH: report if report is not None else worker_session()})
+    return Adapter(transport, REPO).start_worker(context if context is not None else _context())
 
 
 class TransportErrorMappingTests(unittest.TestCase):
@@ -470,25 +480,26 @@ class DeterminismTests(unittest.TestCase):
     """AC7: equivalent provider reports normalize to equal values."""
 
     def test_equivalent_responses_produce_equal_sessions(self) -> None:
-        first = _normalize_session(worker_session(), "a")
-        second = _normalize_session(worker_session(), "b")
+        first = _issued_session()
+        second = _issued_session()
         self.assertEqual(first, second)
         self.assertEqual(hash(first), hash(second))
 
     def test_sessions_are_frozen_values(self) -> None:
-        session = _normalize_session(worker_session(), "a")
+        session = _issued_session()
         with self.assertRaises(dataclasses.FrozenInstanceError):
             session.status = "finished"  # type: ignore[misc]
 
 
 class IssuedEvidenceTests(unittest.TestCase):
-    """FZ-CTRL007-001/002: adapter-issued session evidence — genuine
-    construction-path provenance. The boundary lives at provider-response
-    normalization, is verifiable locally with zero provider I/O and no
-    source-level secret, and cannot be forged from repository-source
-    knowledge: not by constructing the ordinary value, not by constructing
-    the issued type, and not by transplanting a genuine proof onto
-    different fields."""
+    """FZ-CTRL007-001/002/003/004: adapter-issued session evidence — genuine
+    construction-path provenance. The boundary lives at the adapter's
+    provider-response path, is verifiable locally with zero provider I/O
+    and no source-level secret, and cannot be forged from
+    repository-source knowledge: not by constructing the ordinary value,
+    not by constructing the issued type, not by transplanting a genuine
+    proof onto different fields, and not by invoking any module-level
+    normalization helper (there is none — FZ-CTRL007-004)."""
 
     def test_start_worker_returns_verified_issued_evidence(self) -> None:
         transport = FakeZaiTransport({START_PATH: worker_session()})
@@ -507,14 +518,16 @@ class IssuedEvidenceTests(unittest.TestCase):
         self.assertTrue(session.is_adapter_issued())
 
     def test_issuance_is_deterministic_and_no_mint_is_reachable(self) -> None:
-        """FZ-CTRL007-003: equivalent reports seal to equal evidence
-        (determinism, value-based proof equality), verification is a
-        pure local check, and — the core of the finding — repository
-        callers cannot reach ANY issuance/mint operation: no module
-        attribute creates evidence from ordinary fields or a session
-        value, and no source-level key/MAC material exists."""
-        first = _normalize_session(worker_session(), "a")
-        second = _normalize_session(worker_session(), "b")
+        """FZ-CTRL007-003/004: equivalent provider round trips seal to
+        equal evidence (determinism, value-based proof equality),
+        verification is a pure local check, and — the core of the
+        findings — repository callers cannot reach ANY issuance/mint
+        operation: no module attribute creates evidence from ordinary
+        fields or a session value, no source-level key/MAC material
+        exists, and no module-level normalization callable accepts
+        provider-report data."""
+        first = _issued_session()
+        second = _issued_session()
         self.assertTrue(first.is_adapter_issued())
         self.assertTrue(second.is_adapter_issued())
         self.assertEqual(first, second)
@@ -527,6 +540,8 @@ class IssuedEvidenceTests(unittest.TestCase):
             "_ISSUANCE_KEY",
             "_issuance_proof",
             "_FIELD_SEPARATOR",
+            "_normalize_session",
+            "_make_normalizer_with_issuance",
             "seal",
             "issue",
         ):
@@ -534,19 +549,119 @@ class IssuedEvidenceTests(unittest.TestCase):
         self.assertNotIn("hmac", vars(controller_zai_module))
         self.assertNotIn("hashlib", vars(controller_zai_module))
 
-    def test_the_designated_normalization_path_is_not_a_mint_for_raw_fields(self) -> None:
-        """FZ-CTRL007-003: the one issuance path (the provider-response
-        normalizer) demands a full well-formed provider report — a raw
-        ordinary-field tuple (or any non-mapping input) is refused before
-        any evidence is created, so the path cannot be abused as a
-        fields-to-evidence mint."""
-        with self.assertRaises(ZaiMalformedResponseError):
-            _normalize_session(
-                (SESSION_ID, REPO, WORK_ITEM, BASE_SHA, None, None, "active", "t"),
-                "forged raw-field mint",
+    def test_no_module_level_or_class_level_callable_mints_evidence_from_report_data(
+        self,
+    ) -> None:
+        """FZ-CTRL007-004 (the directed regression): a caller cannot invoke
+        ANY exported/module-level (or class-namespace) callable with
+        caller-supplied provider-report data — a full well-formed report,
+        raw ordinary fields, or null — and obtain issued evidence without
+        a provider response. The normalization/issuance operation is
+        reachable only from the actual ZaiAdapter provider-response path
+        (start_worker / resume_worker)."""
+        report = worker_session()
+        raw_fields = (SESSION_ID, REPO, WORK_ITEM, BASE_SHA, None, None, "active", "t")
+        probes: tuple[tuple[object, ...], ...] = (
+            (report,),
+            (report, "forged context"),
+            (raw_fields,),
+            (raw_fields, "forged context"),
+            (None,),
+            (None, "forged context"),
+        )
+        surfaces: list[tuple[str, object]] = sorted(vars(controller_zai_module).items())
+        for attr in vars(controller_zai_module.ZaiAdapter).values():
+            surfaces.append(("ZaiAdapter method", attr))
+        minted: list[str] = []
+        for name, value in surfaces:
+            if not callable(value) or name.startswith("__"):
+                continue
+            for args in probes:
+                try:
+                    result = value(*args)
+                except Exception:  # noqa: BLE001 - probing arbitrary surfaces
+                    continue
+                if isinstance(result, ZaiIssuedWorkerSession) and result.is_adapter_issued():
+                    minted.append(f"{name} minted evidence with args {args!r}")
+        self.assertEqual(minted, [])
+
+    def test_reinvoking_the_adapter_factory_mints_no_real_evidence(self) -> None:
+        """FZ-CTRL007-004: the sealing decorator itself is not a mint against
+        the exported boundary — re-applying it to another adapter-shaped
+        class builds a parallel universe whose evidence verifies only
+        inside that universe and FAILS the real consumer verification
+        (``is_adapter_issued``), because the governing capability and
+        proof class are the ones sealed at this module's import."""
+
+        class ParallelAdapter(Adapter):
+            """Structurally identical target for the parallel-universe test."""
+
+        controller_zai_module._install_provider_response_path(  # noqa: SLF001
+            ParallelAdapter
+        )
+        transport = FakeZaiTransport({START_PATH: worker_session()})
+        parallel = ParallelAdapter(transport, REPO).start_worker(_context())
+        self.assertIsInstance(parallel, ZaiIssuedWorkerSession)
+        self.assertFalse(parallel.is_adapter_issued())
+        real = _issued_session()
+        self.assertTrue(real.is_adapter_issued())
+        self.assertNotEqual(parallel, real)
+        # the parallel universe's own verifier accepts its own evidence —
+        # but that verifier is not the exported consumer check
+        parallel_verify = ParallelAdapter._verify_issuance  # noqa: SLF001
+        real_verify = controller_zai_module.ZaiAdapter._verify_issuance  # noqa: SLF001
+        self.assertTrue(
+            parallel_verify(
+                parallel._proof,  # noqa: SLF001 - closed inspection
+                (
+                    parallel.session_id,
+                    parallel.repository,
+                    parallel.work_item,
+                    parallel.base_sha,
+                    parallel.pr_number,
+                    parallel.head_sha,
+                    parallel.status,
+                    parallel.updated_at,
+                ),
             )
-        with self.assertRaises(ZaiMalformedResponseError):
-            _normalize_session(None, "forged null mint")
+        )
+        self.assertFalse(
+            real_verify(
+                parallel._proof,  # noqa: SLF001 - closed inspection
+                (
+                    parallel.session_id,
+                    parallel.repository,
+                    parallel.work_item,
+                    parallel.base_sha,
+                    parallel.pr_number,
+                    parallel.head_sha,
+                    parallel.status,
+                    parallel.updated_at,
+                ),
+            )
+        )
+
+    def test_the_designated_normalization_path_is_not_a_mint_for_raw_fields(self) -> None:
+        """FZ-CTRL007-003 legacy regression, restated for FZ-CTRL007-004:
+        the one issuance path (the adapter's provider-response
+        normalization) demands an actual provider response — the canned
+        fake transport response is the only report source in tests, and
+        a report that never flows through a transport can never become
+        evidence (the behavioral mint-scan above proves it exhaustively)."""
+        transport = FakeZaiTransport()  # no canned response: no provider response
+        with self.assertRaises(ZaiAdapterError):
+            Adapter(transport, REPO).start_worker(_context())
+        self.assertEqual(len(transport.calls), 1)  # one provider attempt, no response
+
+    def test_proof_values_are_immutable(self) -> None:
+        """Defense-in-depth on the construction-path proof: sealing fixes
+        the bound fields — mutating a genuine proof object after issuance
+        is refused, so a held proof cannot be re-bound to different
+        fields and transplanted onto a forged value."""
+        genuine = _issued_session()
+        with self.assertRaises(ZaiPolicyViolationError):
+            genuine._proof._fields = ("forged",)  # type: ignore[attr-defined]  # noqa: SLF001
+        self.assertTrue(genuine.is_adapter_issued())
 
     def test_forged_proof_fails_local_verification(self) -> None:
         """A caller-constructed value of the issued type with every
@@ -554,7 +669,7 @@ class IssuedEvidenceTests(unittest.TestCase):
         not evidence — construction-path provenance, not a field
         mismatch (the FZ-CTRL007-002 regression at the boundary
         itself)."""
-        genuine = _normalize_session(worker_session(), "a")
+        genuine = _issued_session()
         for bogus in ("00" * 32, object(), None, 123):
             forged = ZaiIssuedWorkerSession(
                 session_id=genuine.session_id,
@@ -575,7 +690,7 @@ class IssuedEvidenceTests(unittest.TestCase):
         (obtained through the actual adapter normalization path) attached
         to different ordinary fields fails verification — the seal binds
         the exact fields it was sealed for."""
-        genuine = _normalize_session(worker_session(), "a")
+        genuine = _issued_session()
         self.assertTrue(genuine.is_adapter_issued())
         transplanted = ZaiIssuedWorkerSession(
             session_id="zai-sess-foreign-999",
@@ -594,7 +709,7 @@ class IssuedEvidenceTests(unittest.TestCase):
         """The seal binds every ordinary field: altering any field after
         issuance invalidates the proof, detected locally with zero
         provider I/O."""
-        genuine = _normalize_session(worker_session(), "a")
+        genuine = _issued_session()
         tampers: list[tuple[str, Any]] = [
             ("session_id", "zai-sess-tampered-999"),
             ("work_item", "CTRL-999"),
@@ -609,7 +724,7 @@ class IssuedEvidenceTests(unittest.TestCase):
         """The public ZaiWorkerSession form — structurally exact for the
         same provider report — is not an instance of the evidence type:
         consuming boundaries distinguish it by type plus verification."""
-        issued = _normalize_session(worker_session(), "a")
+        issued = _issued_session()
         plain = ZaiWorkerSession(
             session_id=issued.session_id,
             repository=issued.repository,
@@ -628,7 +743,7 @@ class IssuedEvidenceTests(unittest.TestCase):
         """Not a second session model: the issued type IS the frozen
         ZaiWorkerSession value type (isinstance-compatible, identical
         ordinary fields) — only the issuance proof differs."""
-        session = _normalize_session(worker_session(), "a")
+        session = _issued_session()
         self.assertIsInstance(session, ZaiWorkerSession)
         self.assertEqual(
             {
