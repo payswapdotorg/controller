@@ -6,14 +6,18 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `CHANGES_REQUESTED`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-005 — Orchestrator (`spec/work-items/CTRL-005.md`, `READY`)
 - **PR:** PR #14 (open, from `ctrl-005-orchestrator`; dispatch
-  base `039177b27a3cdf38ec4ceed033ab7420c13c152c`) — Architect REQUEST_CHANGES
-  received (comment 5542747569): FZ-CTRL005-001 (HIGH) — the
-  DISPATCHED→IMPLEMENTING transition trusted an unbound raw worker-session id;
-  fix in progress on the same PR
-- **head SHA awaiting review:** fix landing on top of `a0367e3b83651e007067c4907ba950bc8583684a` (implementation)
+  base `039177b27a3cdf38ec4ceed033ab7420c13c152c`) — FZ-CTRL005-001 (HIGH)
+  closed by the worker: the carried worker reference is now the typed
+  `ZaiWorkerSession` evidence whose binding (session id, repository, active
+  Work Item, dispatch base SHA) is re-proved against authority before any
+  lifecycle event; 9 deterministic regression tests added
+- **head SHA awaiting review:** `a045371` (FZ-CTRL005-001 fix, on top of
+  `a0367e3b83651e007067c4907ba950bc8583684a` implementation; the branch tip
+  may additionally advance with status-dashboard-only commits, which do not
+  alter the implementation)
 - **implementation merge evidence:** prior CTRL-004 implementation PR #11 merged at
   `c873b467fc7f4381f7c213723a69071eb9953168` (reviewed head
   `165fb959281619b0e635b603ef2660834a60571e`, base
@@ -33,11 +37,10 @@
   operational documentation); full validation green (293/293 tests, strict mypy
   on 26 files, ruff, CLI validate/domain, forbidden-surface audit vs
   `039177b` PASS)
-- **last update (UTC):** 2026-09-04T15:40:00Z
+- **last update (UTC):** 2026-09-04T15:50:00Z
 - **next planned item:** CTRL-006 (per the roadmap; not defined, not eligible —
   no worker action)
-- **next step:** worker closes FZ-CTRL005-001 on PR #14 and returns to
-  `WAITING_FOR_ARCHITECT`
+- **next step:** Architect re-reviews PR #14 (FZ-CTRL005-001 resolution)
 
 ## Maintenance protocol
 
