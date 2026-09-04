@@ -6,16 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `COMPLETE`
-- **active Work Order:** CTRL-006 — CI / Evidence Gate (`spec/work-items/CTRL-006.md`, `COMPLETE`)
-- **PR:** PR #17 merged at `fbc4e41c0fab05f14fa1d4cb8f989a71d7c05ab5`; reviewed head `ec6155a41aad557105d63db8ac1768d8cad2a002`, base `72a8459f4a153b8a7b58ee6ab7c40997bd71cd1b`
-- **merge evidence:** FZ-CTRL006-001/002/003 closed; worker reported 356 tests passed, strict mypy clean, ruff clean, CLI validation clean, external-I/O guards green, and the CTRL-006 scope audit passing
-- **last completed architect action:** reviewed/approved CTRL-006 PR #17 and merged the exact reviewed head with expected-head protection
-- **last completed worker action:** implemented CTRL-006 on the exact corrected activation base, resolved all review findings, and returned a green validation transcript
-- **reconciliation action:** CTRL-006 is being recorded in repository machine state and authoritative documents from merge evidence `fbc4e41c0fab05f14fa1d4cb8f989a71d7c05ab5`
-- **last update (UTC):** 2026-09-04T16:30:00Z
-- **next planned item:** CTRL-007 (per the roadmap; not defined, not eligible)
-- **next step:** Architect defines/freezes CTRL-007 through the normal governance path; no worker action is authorized yet
+- **current state:** `READY`
+- **active Work Order:** CTRL-007 — Architect Review Loop (`spec/work-items/CTRL-007.md`, `READY`)
+- **PR:** none yet; CTRL-007 governance definition/activation is being reconciled from the post-CTRL-006 main base
+- **last completed architect action:** CTRL-006 reviewed/approved/merged/reconciled; CTRL-007 Architect Review Loop defined and frozen as the sole READY item
+- **last completed worker action:** CTRL-006 implementation delivered and merged
+- **current governance action:** finalize CTRL-007 definition/activation on main, then authorize exactly one implementation PR from that resulting base
+- **last update (UTC):** 2026-09-04T16:35:00Z
+- **next planned item:** CTRL-008 (per the roadmap; not defined, not eligible)
+- **next step:** complete the CTRL-007 governance merge; only then may Z.ai implement CTRL-007 from the exact resulting main base
 
 ## Maintenance protocol
 
