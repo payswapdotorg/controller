@@ -6,35 +6,18 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
-- **active Work Order:** CTRL-004 — Z.ai adapter (`spec/work-items/CTRL-004.md`, `READY`)
-- **PR:** CTRL-004 implementation PR (open, from `ctrl-004-zai-adapter`; dispatch
-  base `af22a2ffea2535f927c9656bfe0273e28ae32c61` = the verified current `main`
-  at dispatch time)
-- **head SHA awaiting review:** `9d93640db4c20096001678fddd37b661a96d9037` (implementation; the branch tip
-  may additionally advance with status-dashboard-only commits, which do not
-  alter the implementation)
-- **last completed worker action:** CTRL-004 implemented per the frozen Work
-  Order — typed Z.ai start/resume adapter boundary (`controller/zai.py`: DI
-  transport, exact work-context binding validated before provider I/O, resume
-  identity with fork refusal and verbatim review-packet propagation, frozen
-  worker-role contract with no free-text instruction channel, 11 typed
-  fail-closed errors, deterministic offline fakes); the remaining real-repo
-  `tests/test_domain.py` pin repaired to CTRL-004/READY; I/O guard authorizes
-  exactly two transport modules; full validation green (263/263 tests, strict
-  mypy on 24 files, ruff, CLI validate/domain, guard 8/8, forbidden-surface
-  audit vs the dispatch base PASS)
-- **ARCHITECT ACTION: REVIEW REQUIRED**
-- **last update (UTC):** 2026-09-04T15:20:00Z
-- **next step:** Architect review of the CTRL-004 implementation PR
-
-## Maintenance protocol
-
-- On entering `WAITING_FOR_ARCHITECT`: update this file in the same governed
-  change (or immediately before the PR is presented) with the fields above.
-- On leaving `WAITING_FOR_ARCHITECT`: update immediately to the new state
-  (`IMPLEMENTING`, `CHANGES_REQUESTED`, `APPROVED`, `RECONCILING`, or
-  equivalent repository-defined state).
-- Updating this file does not require a separate Architect approval.
-- This file records only actions that have actually occurred; it is not a
-  prediction.
+- **current state:** `RECONCILING`
+- **active Work Order:** CTRL-004 — Z.ai adapter (`spec/work-items/CTRL-004.md`, `COMPLETE` in reconciliation branch)
+- **PR:** post-merge reconciliation PR for CTRL-004 (being presented)
+- **implementation merge evidence:** PR #11 merged at
+  `c873b467fc7f4381f7c213723a69071eb9953168` (reviewed head
+  `165fb959281619b0e635b603ef2660834a60571e`, base
+  `af22a2ffea2535f927c9656bfe0273e28ae32c61`)
+- **last completed architect action:** CTRL-004 implementation approved and
+  merged; post-merge reconciliation is now being performed
+- **last completed worker action:** CTRL-004 implementation delivered and
+  validated; PR #11 merged by the Architect
+- **last update (UTC):** 2026-09-04T15:30:00Z
+- **next step:** Architect review and merge of the CTRL-004 post-merge
+  reconciliation PR; after reconciliation, CTRL-005 remains planned until
+  the Architect separately defines/freezes and activates its Work Order
