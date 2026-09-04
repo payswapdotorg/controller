@@ -6,15 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `APPROVED`
-- **active Work Order:** CTRL-008 — Merge + Reconciliation (`spec/work-items/CTRL-008.md`, `READY`)
-- **PR:** #23 (branch `ctrl-008-merge-reconciliation`, current implementation tip synchronized with main dashboard); Architect semantic review accepted
-- **last completed architect action:** corrected CTRL-008 implementation APPROVED after resolving FZ-CTRL008-001; no implementation semantics changed afterward
-- **last completed worker action:** FZ-CTRL008-001 correction delivered; 480 tests + 167 subtests, strict mypy clean, ruff clean, external-I/O guard green, scope audit PASS
-- **current implementation action:** merge PR #23 under the frozen merge predicate
-- **last update (UTC):** 2026-09-04T21:32:00Z
-- **next planned item:** CTRL-009 — Recovery / idempotency (per the roadmap; not defined, not eligible)
-- **next step:** execute the single authorized merge attempt; on observed success, reconcile CTRL-008 immediately
+- **current state:** `IMPLEMENTING`
+- **active Work Order:** CTRL-009 — Recovery / Idempotency (`spec/work-items/CTRL-009.md`, `READY`)
+- **PR:** implementation PR not yet opened; worker dispatch authorized from exact main base `4f9faf577526fe06af4e4ad7ab592d0d408752a1` (governance PR #25)
+- **last completed architect action:** CTRL-009 defined/frozen/activated as the sole READY item after CTRL-008 reconciliation; durable worker dispatch issued against exact base `4f9faf577526fe06af4e4ad7ab592d0d408752a1`
+- **last completed worker action:** CTRL-008 implementation merged at `e733e37a1ecf7a86c12e3baac0fd325c5806aaa4`; reconciliation merged at `51b683ee608abc300ddff3a7e32ca0323f8eab5e`
+- **current implementation action:** Z.ai is authorized to implement only `spec/work-items/CTRL-009.md` from the exact governance activation base; one implementation PR only
+- **last update (UTC):** 2026-09-04T22:01:00Z
+- **next planned item:** CTRL-010 — End-to-end dogfood (per the roadmap; not yet defined, not eligible)
+- **next step:** Z.ai implements CTRL-009, opens/updates exactly one PR, and returns to `WAITING_FOR_ARCHITECT` with a green validation transcript
 
 ## Maintenance protocol
 
