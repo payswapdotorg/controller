@@ -477,3 +477,55 @@ class MergeMissingReferenceError(MergeLoopError):
     the loop requires one and it is absent, the evaluation fails closed
     rather than guessing.
     """
+
+
+class RecoveryLoopError(ControllerError):
+    """Base class for every recovery-boundary failure (CTRL-009).
+
+    The boundary reconstructs repository authority, correlates the
+    observed GitHub evidence and carried identities, and classifies the
+    restart/interruption condition into a typed plan. Every failure — a
+    terminal exception position, an authority/remote/evidence
+    contradiction, an ambiguous or foreign identity, or a missing
+    carried reference — fails closed with a typed error. No guessed
+    resumes, no retries, no fabricated decisions.
+    """
+
+
+class RecoveryTerminalStateError(RecoveryLoopError):
+    """The active work item is in a terminal exception state.
+
+    BLOCKED, ESCALATED, and CANCELLED end the lifecycle: no recovery
+    exists for them, and leaving one is an explicit governed act, never
+    a runtime transition. The evaluation fails closed before any remote
+    observation.
+    """
+
+
+class RecoveryContradictionError(RecoveryLoopError):
+    """Repository authority and observed evidence contradict.
+
+    For example: a PR-open-or-later position with no governed pull
+    request observed (authority ahead of evidence); multiple PRs for
+    the governed branch across its whole history; a foreign base ref;
+    a closed or base-drifted PR at a pre-merge position (the frozen
+    pre-merge correlation is open-only and exact-base, so such evidence
+    is unsupported and stops for governance); machine state at or after
+    MERGED with no observed merge evidence; malformed merge evidence;
+    a vanished or flipped architect decision at CHANGES_REQUESTED; or a
+    carried worker session whose repository, Work Item, dispatch base,
+    PR, or head binding contradicts reconstructed authority. Foreign or
+    stale evidence is history, not permission; ambiguity is a
+    contradiction, never a guess.
+    """
+
+
+class RecoveryMissingReferenceError(RecoveryLoopError):
+    """A carried reference required by the recovery boundary is absent.
+
+    The boundary keeps no runtime state: the governed branch, the
+    dispatch-base provenance, and (when review evidence is consulted)
+    the architect reviewer identity are caller-carried inputs
+    cross-validated against authority. When one is required and absent,
+    the evaluation fails closed rather than guessing.
+    """
