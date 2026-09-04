@@ -61,7 +61,7 @@ The stage mapping is an operational interpretation of the roadmap, not permissio
 
 ## Sequencing rule
 
-CTRL-001 through CTRL-009 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, PR #11, PR #14, PR #17, PR #20, PR #23, and PR #26, with reconciliation checkpoints recorded via PR #24 and PR #28 and all nine items in machine state `completed`. **CTRL-010 — End-to-end dogfood is now explicitly defined and activated as the sole `READY` item.** Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
+CTRL-001 through CTRL-010 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, PR #11, PR #14, PR #17, PR #20, PR #23, PR #26, and PR #30, with reconciliation checkpoints recorded via PR #24, PR #28, and this CTRL-010 reconciliation checkpoint. All ten items are in machine state `completed`. No successor Work Item is currently defined. The roadmap's Stage 6 prerequisite mapping (`CTRL-009 + CTRL-010`) now has accepted implementation, reconciliation, and end-to-end execution evidence.
 
 ## Human-operator progression
 

@@ -5,9 +5,9 @@
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-010",
-  "status": "READY",
+  "status": "COMPLETE",
   "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
-  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009"],
+  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009", "CTRL-010"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-010 — End-to-end dogfood is explicitly defined, frozen, and activated as the sole READY work item after CTRL-009 reconciliation. Z.ai may implement only spec/work-items/CTRL-010.md from this exact governance activation base; the worker may not merge, approve, redefine authority, alter roadmap semantics, or advance the automation stage. Stage 1 remains active."
+  "nextAction": "CTRL-010 is complete and reconciled from observed implementation merge 621847cba9dad92a0d45c13853b24ad66402284e. The CTRL-009 + CTRL-010 Stage-6 prerequisites have explicit accepted dogfood evidence. Stage 1 remains the recorded automation stage until a separate explicit Architect-governed stage transition updates authority. No successor Work Item is defined by the current roadmap."
 }
