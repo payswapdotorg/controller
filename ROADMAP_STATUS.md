@@ -8,11 +8,11 @@
 
 - **current state:** `APPROVED`
 - **active Work Order:** CTRL-008 — Merge + Reconciliation (`spec/work-items/CTRL-008.md`, `READY`)
-- **PR:** #23 (branch `ctrl-008-merge-reconciliation`, current head `079a528eaf88d1168af86def671ee4ade8e383cf`); Architect semantic review accepted
-- **last completed architect action:** FZ-CTRL008-001 resolved and corrected implementation accepted for merge; dashboard-only synchronization is non-authoritative
+- **PR:** #23 (branch `ctrl-008-merge-reconciliation`, current head `aa221b343a70d1d2f5ca5a74b088713322532c16`); Architect semantic review accepted
+- **last completed architect action:** FZ-CTRL008-001 resolved and corrected implementation accepted for merge; no implementation changes after the worker fix
 - **last completed worker action:** FZ-CTRL008-001 correction delivered; 480 tests + 167 subtests, strict mypy clean, ruff clean, external-I/O guard green, scope audit PASS
 - **current implementation action:** one merge attempt under the frozen predicate
-- **last update (UTC):** 2026-09-04T21:30:00Z
+- **last update (UTC):** 2026-09-04T21:31:00Z
 - **next planned item:** CTRL-009 — Recovery / idempotency (per the roadmap; not defined, not eligible)
 - **next step:** execute one merge attempt; on observed success, immediately reconcile CTRL-008 to COMPLETE without advancing Stage 1
 
