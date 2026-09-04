@@ -61,7 +61,7 @@ The stage mapping is an operational interpretation of the roadmap, not permissio
 
 ## Sequencing rule
 
-CTRL-001 through CTRL-007 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, PR #11, PR #14, PR #17, and PR #20 and recorded in machine state `completed`. **CTRL-008 — Merge + reconciliation is now explicitly defined and activated as the sole `READY` item.** Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
+CTRL-001 through CTRL-008 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, PR #11, PR #14, PR #17, PR #20, and PR #23, with CTRL-008 reconciliation recorded via PR #24 and all eight items in machine state `completed`. **CTRL-009 — Recovery/idempotency is now explicitly defined and activated as the sole `READY` item.** Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
 
 ## Human-operator progression
 
