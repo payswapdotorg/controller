@@ -6,13 +6,13 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
+- **current state:** `CHANGES_REQUESTED`
 - **active Work Order:** CTRL-007 — Architect Review Loop (`spec/work-items/CTRL-007.md`, `READY`)
 - **PR:** one implementation PR open from the exact dispatch base `a02cfdb4f253f63375e81d88581f7a27807ae672` (dispatch comment `5543581701`)
-- **last completed architect action:** CTRL-006 reconciled; CTRL-007 defined/frozen/activated as sole READY item; dispatched to Z.ai from base `a02cfdb`
-- **last completed worker action:** Z.ai implemented the frozen CTRL-007 Work Order — `controller/review.py` (the governed Architect review loop: exact decision correlation over the accepted review evidence, the durable machine-readable REQUEST_CHANGES packet parsed with the frozen review-protocol grammar and cross-validated against observed evidence, at most one governed transition per evaluation, the idempotent CHANGES_REQUESTED re-observation, and the typed same-worker/same-PR handoff with locally proven session binding), the `ReviewLoopError` family, 45 deterministic offline tests, and the mechanical real-repository test-pin correction (CTRL-006/READY -> CTRL-007/READY, completed x5 -> x6) required to make the validation suite green on the activation base; full validation green (401 tests, strict mypy, ruff, CLI validate/domain, external-I/O guard, CTRL-007 scope audit)
-- **current implementation action:** none; FZ-CTRL007-001 resolved on PR #20 (adapter provenance via the accepted start_worker identify contract before the handoff), awaiting re-review
-- **last update (UTC):** 2026-09-04T17:35:00Z
+- **last completed architect action:** re-review of the FZ-CTRL007-001 resolution rejected the start_worker-based provenance re-proof as a CTRL-007 observation-boundary violation; correction directed on the same PR (comment `5543968191`)
+- **last completed worker action:** Z.ai delivered the CTRL-007 implementation and the first FZ-CTRL007-001 resolution (head `672f7b3`); the Architect rejected that resolution's provider call from the review loop
+- **current implementation action:** resolving the FZ-CTRL007-001 correction — adapter-issued session evidence sealed at the CTRL-004 normalization boundary, with the review loop validating carried evidence locally and performing zero worker-provider I/O
+- **last update (UTC):** 2026-09-04T18:30:00Z
 - **next planned item:** CTRL-008 (per the roadmap; not defined, not eligible)
 - **next step:** Architect reviews the CTRL-007 implementation PR against the frozen Work Order; worker resolves any findings on the same PR
 
