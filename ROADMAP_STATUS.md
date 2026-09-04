@@ -6,20 +6,23 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `CHANGES_REQUESTED`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `READY`)
 - **PR:** #7 — https://github.com/pectoraux/controller/pull/7 (implementation)
-- **head SHA of record:** `1939140f51a877eacecdd3c5e70d67a0ffda2323` (implementation under review; branch tip advances with the requested fixes)
-- **last completed worker action:** Architect review received — REQUEST_CHANGES with
-  findings FZ-CTRL003-001 (bind merge authorization to the authoritative
-  active work-item identity), FZ-CTRL003-002 (bind APPROVE to the exact
-  reviewed head SHA), FZ-CTRL003-003 (bind authorization to the intended
-  base ref + SHA); worker is resolving all three now
-- **ARCHITECT ACTION:** (none — worker resolving requested changes)
-- **last update (UTC):** 2026-09-04T12:08:21Z
-- **next step:** worker fixes all three findings, adds the required
-  contradiction/retarget/head-change tests, reruns the full validation suite,
-  pushes to the same PR, and returns this file to `WAITING_FOR_ARCHITECT`
+- **head SHA awaiting review:** `3321dc8ed0dd5df6b5901b865cd9242466cacc23`
+  (CTRL-003 implementation + FZ-CTRL003-001/002/003 fixes; the branch tip may
+  additionally advance with status-dashboard-only commits, which do not alter
+  the implementation)
+- **last completed worker action:** all three review-iteration-1 findings
+  resolved — merge authorization now binds the authority-derived active work
+  item (DispatchEligibility), the Architect APPROVE's exact reviewed head SHA
+  (commit_id), and the intended base ref + SHA (re-verified at execution);
+  full validation green (197/197 tests, strict mypy, ruff, CLI, guard,
+  forbidden-surface audit PASS)
+- **ARCHITECT ACTION: REVIEW REQUIRED**
+- **last update (UTC):** 2026-09-04T12:13:52Z
+- **next step:** the human operator should say `go` to invoke the Architect
+  review cycle for PR #7 (review iteration 2)
 
 ## Maintenance protocol
 
