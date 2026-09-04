@@ -4,8 +4,8 @@
   "roadmap": "spec/roadmap/roadmap.md",
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
-  "activeWorkItem": "CTRL-004",
-  "status": "COMPLETE",
+  "activeWorkItem": "CTRL-005",
+  "status": "READY",
   "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
   "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004"],
   "rules": {
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-004 is merged via PR #11 (merge commit c873b467fc7f4381f7c213723a69071eb9953168) and reconciled: recorded in completed. Per the roadmap graph the next planned item is CTRL-005 (Orchestrator); the Architect must define and freeze its work order (spec/work-items/CTRL-005.md) and mark it READY before it becomes eligible for dispatch. Stage 1 remains active until CTRL-004 is accepted as the final Stage 1 item; the human operator still performs external dispatch, review routing, and merge authorization."
+  "nextAction": "CTRL-005 — Orchestrator is now explicitly defined and frozen as the sole READY work item. Z.ai may implement only spec/work-items/CTRL-005.md from the current main base; the worker may not merge, approve, redefine authority, or claim completion. Stage 1 remains active; implementation of CTRL-005 does not silently advance the automation stage."
 }
