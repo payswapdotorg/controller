@@ -197,6 +197,9 @@ As Controller capabilities are accepted, replace only the steps that the reposit
 
 ## Current bootstrap position
 
-The authoritative roadmap currently makes `CTRL-001` the only eligible implementation item. The machine state records `CTRL-001` as `READY`. Therefore the project is currently **Stage 0 — Manual controller / bootstrap** and is waiting for the human operator to dispatch CTRL-001 through the governed process.
+CTRL-001 has been accepted and merged (PR #1, merge commit `0f8e3a749d4dde587c4c81c8b4d250ae2205ff37`) and repository machine state has been reconciled: `CTRL-001` is `COMPLETE`, recorded in `completed`, and the automation stage is **Stage 1 — State-machine automation** (per the roadmap automation-stage mapping and the Stage 1 exit condition: the controller's state machine and reconstruction tests are accepted and merged).
 
-The first automation milestone is acceptance and merge of CTRL-001. Until then, the human remains the mechanical Controller.
+Stage 1 active.
+You still perform: dispatching work orders to Z.ai, routing PR/CI state to the Architect, relaying review packets, and performing currently-authorized merges.
+You no longer need to perform: maintaining the active work item's lifecycle state manually; the controller's validated state machine and repository reconstruction are the canonical lifecycle model.
+The next automation milestone is: the CTRL-002 work order (Domain/state model), followed by GitHub observation automation (CTRL-003 + CTRL-004).
