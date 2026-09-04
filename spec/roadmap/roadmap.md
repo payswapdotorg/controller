@@ -61,7 +61,7 @@ The stage mapping is an operational interpretation of the roadmap, not permissio
 
 ## Sequencing rule
 
-CTRL-001 and CTRL-002 are complete and reconciled: accepted and merged via PR #1 and PR #4 and recorded in machine state `completed`. The next planned items are CTRL-003 (GitHub adapter) and CTRL-004 (Z.ai adapter); they become eligible only once the Architect defines and freezes their work orders (`spec/work-items/CTRL-003.md`, `spec/work-items/CTRL-004.md`) and machine state marks the next item `READY`; until then no implementation item is eligible for dispatch. Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
+CTRL-001 and CTRL-002 are complete and reconciled: accepted and merged via PR #1 and PR #4 and recorded in machine state `completed`. **CTRL-003 — GitHub adapter is now defined and frozen in `spec/work-items/CTRL-003.md`, and machine state marks it `READY`; it is the only eligible implementation item.** CTRL-004 remains planned until the current active item is complete and the Architect explicitly defines/freezes its Work Order. Later items remain planned until their predecessor is complete and machine state is reconciled. No worker may begin a planned item merely because its code appears useful.
 
 ## Human-operator progression
 

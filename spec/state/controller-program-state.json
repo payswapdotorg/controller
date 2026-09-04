@@ -4,8 +4,8 @@
   "roadmap": "spec/roadmap/roadmap.md",
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
-  "activeWorkItem": "CTRL-002",
-  "status": "COMPLETE",
+  "activeWorkItem": "CTRL-003",
+  "status": "READY",
   "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
   "completed": ["CTRL-001", "CTRL-002"],
   "rules": {
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-002 is merged (PR #4, merge commit 4dc8387eff1d48039c235727976e1aef33d0bc97) and reconciled: recorded in completed. Per the roadmap graph the next planned items are CTRL-003 (GitHub adapter) and CTRL-004 (Z.ai adapter); the Architect must define and freeze their work orders and mark the next item READY in machine state before it becomes eligible for dispatch. Stage 1 remains active; the human operator still performs external dispatch, review routing, and merge authorization."
+  "nextAction": "CTRL-003 work order is defined and frozen as spec/work-items/CTRL-003.md and is READY. Dispatch CTRL-003 from current main only after authority validation against roadmap, architecture, build process, work order, and machine state."
 }

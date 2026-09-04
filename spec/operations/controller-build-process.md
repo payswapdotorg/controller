@@ -200,6 +200,6 @@ As Controller capabilities are accepted, replace only the steps that the reposit
 CTRL-001 and CTRL-002 have been accepted and merged (PR #1, merge commit `0f8e3a749d4dde587c4c81c8b4d250ae2205ff37`; PR #4, merge commit `4dc8387eff1d48039c235727976e1aef33d0bc97`, including review-iteration fix FZ-CTRL002-001) and repository machine state has been reconciled: both items are recorded in `completed`. The automation stage remains **Stage 1 — State-machine automation**: per the roadmap automation-stage mapping, Stage 1 continues through CTRL-003 and CTRL-004; the controller's validated state machine, domain model, and repository reconstruction are the canonical lifecycle model.
 
 Stage 1 active.
-You still perform: dispatching work orders to Z.ai, routing PR/CI state to the Architect, relaying review packets, and performing currently-authorized merges.
+You still perform: dispatching Work Orders to Z.ai, routing PR/CI state to the Architect, relaying review packets, and performing currently-authorized merges.
 You no longer need to perform: maintaining work-item lifecycle or domain state manually; the controller's validated state machine, domain model, and repository reconstruction provide it.
-The next automation milestone is: the CTRL-003 (GitHub adapter) and CTRL-004 (Z.ai adapter) work orders, which advance the project toward Stage 2 — GitHub observation automation.
+The next automation milestone is: **CTRL-003 — GitHub adapter**, followed by CTRL-004 — Z.ai adapter, progressing toward Stage 2 — GitHub observation automation.
