@@ -18,7 +18,7 @@ This is intentional. The Controller is built using the same governed work-item p
 |---|---|---|
 | Human operator | Routes Work Orders/prompts between Architect and Z.ai, starts the next governed step, relays review results, observes/requests actions | Product owner/operator; initiates or authorizes governed runs; no longer acts as message router |
 | Architect | Defines/freeze architecture, roadmap and acceptance; reviews PRs; requests changes or approves | Same semantic authority; reviews only when policy says human/Architect judgment is required |
-| Z.ai worker | Implements exactly one governed Work Order, tests, pushes branch/PR, responds to review | Same implementation role, dispatched by Controller |
+| Z.ai worker | Implements exactly one governed Work Order, tests, pushes branch/PR, responds to review findings | Same implementation role, dispatched by Controller |
 | Controller | Does not yet exist; its future responsibilities are performed manually by the human operator | Reads repository authority, dispatches/resumes workers, observes GitHub/CI, carries review packets, retries, enforces gates, merges only when policy permits, reconciles state |
 | GitHub/CI | Execution and evidence surface | Same |
 | Repository | Sole durable authority | Sole durable authority |
@@ -197,9 +197,9 @@ As Controller capabilities are accepted, replace only the steps that the reposit
 
 ## Current bootstrap position
 
-CTRL-001 through CTRL-005 are accepted, merged, and reconciled: CTRL-001 (PR #1, merge `0f8e3a749d4dde587c4c81c8b4d250ae2205ff37`), CTRL-002 (PR #4, merge `4dc8387eff1d48039c235727976e1aef33d0bc97`), CTRL-003 (PR #7, merge `7cc340375dcd9768d986b1245303d7006f54fbf1`), CTRL-004 (PR #11, merge `c873b467fc7f4381f7c213723a69071eb9953168`), and CTRL-005 (PR #14, merge `3e5ad4bc35186aaec5548cc1e06d6f27b7534a17`). The repository machine state records all five in `completed`. The automation stage remains **Stage 1 — State-machine automation**: CTRL-005 completion does not silently advance the stage; a future explicit stage transition must be supported by the roadmap and reconciled repository evidence.
+CTRL-001 through CTRL-006 are accepted, merged, and reconciled: CTRL-001 (PR #1, merge `0f8e3a749d4dde587c4c81c8b4d250ae2205ff37`), CTRL-002 (PR #4, merge `4dc8387eff1d48039c235727976e1aef33d0bc97`), CTRL-003 (PR #7, merge `7cc340375dcd9768d986b1245303d7006f54fbf1`), CTRL-004 (PR #11, merge `c873b467fc7f4381f7c213723a69071eb9953168`), CTRL-005 (PR #14, merge `3e5ad4bc35186aaec5548cc1e06d6f27b7534a17`), and CTRL-006 (PR #17, merge `fbc4e41c0fab05f14fa1d4cb8f989a71d7c05ab5`). Repository machine state records all six in `completed`. The automation stage remains **Stage 1 — State-machine automation**; completion of CTRL-006 does not silently advance the stage.
 
 Stage 1 active.
 You still perform: defining/freezing Work Orders, routing implementation/review interactions while later policies remain manual, performing currently-authorized merges, and reconciling post-merge authority until those duties are explicitly automated by later accepted work.
-You no longer need to perform: maintaining work-item lifecycle/domain state manually; CTRL-005 now supplies the deterministic orchestration boundary, exact correlation, governed Z.ai dispatch/resume coordination, pure observations, and downstream handoffs without taking semantic authority.
-The next automation milestone is: **CTRL-006 — CI/evidence gate**. CTRL-006 remains planned, undefined, and ineligible; no worker action is authorized until its Work Order is explicitly defined and frozen.
+You no longer need to perform: maintaining work-item lifecycle/domain state manually; CTRL-005 supplies the deterministic orchestration boundary and CTRL-006 supplies deterministic CI/evidence classification and retry-request handoff without taking semantic authority.
+The next automation milestone is: **CTRL-007 — Architect review loop**. CTRL-007 remains planned, undefined, and ineligible; no worker action is authorized until its Work Order is explicitly defined and frozen.
