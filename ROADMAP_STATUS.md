@@ -6,15 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `READY`
+- **current state:** `IMPLEMENTING`
 - **active Work Order:** CTRL-008 — Merge + Reconciliation (`spec/work-items/CTRL-008.md`, `READY`)
-- **PR:** none yet; CTRL-008 governance definition/activation is being finalized from reconciliation merge `848fe26842d5c4617238bf5c5e450f694f862aa0`
-- **last completed architect action:** CTRL-007 reviewed/approved/merged/reconciled; CTRL-008 Merge + Reconciliation defined and frozen as the next sole READY item
+- **PR:** implementation PR not yet opened; dispatch authorized from exact main base `f55f5190a82a0fb774285a03347e6df71163cbd5` (governance PR #22 dispatch comment `5545536948`)
+- **last completed architect action:** CTRL-007 reconciled; CTRL-008 defined/frozen/activated as the sole READY item; durable worker dispatch issued against exact base `f55f5190a82a0fb774285a03347e6df71163cbd5`
 - **last completed worker action:** CTRL-007 implementation merged at `a0392aa0e07772518638f506d755bd9d90d9dc4e`
-- **current governance action:** finalize CTRL-008 definition/activation on main, then authorize exactly one implementation PR from that resulting base
-- **last update (UTC):** 2026-09-04T19:34:00Z
+- **current implementation action:** Z.ai is authorized to implement only `spec/work-items/CTRL-008.md` from the exact dispatch base; one implementation PR only
+- **last update (UTC):** 2026-09-04T19:36:00Z
 - **next planned item:** CTRL-009 — Recovery / idempotency (per the roadmap; not defined, not eligible)
-- **next step:** complete the CTRL-008 governance merge; only then may Z.ai implement CTRL-008 from the exact resulting main base
+- **next step:** Z.ai opens/updates exactly one CTRL-008 implementation PR and returns to `WAITING_FOR_ARCHITECT` with a green validation transcript
 
 ## Maintenance protocol
 
