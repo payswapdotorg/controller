@@ -5,9 +5,9 @@
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-006",
-  "status": "READY",
+  "status": "COMPLETE",
   "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
-  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005"],
+  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-006 — CI / Evidence Gate is explicitly defined, frozen, and activated as the sole READY work item. Z.ai may implement only spec/work-items/CTRL-006.md from the exact current main base; the worker may not merge, approve, redefine authority, or claim completion. Stage 1 remains active; activation of CTRL-006 does not silently advance the automation stage."
+  "nextAction": "CTRL-006 — CI / Evidence Gate is complete and reconciled from merge commit fbc4e41c0fab05f14fa1d4cb8f989a71d7c05ab5. CTRL-007 remains planned but is not defined or eligible; no worker action is authorized until its Work Order is explicitly defined and frozen. Stage 1 remains active; completion of CTRL-006 does not silently advance the automation stage."
 }
