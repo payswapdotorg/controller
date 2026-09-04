@@ -6,15 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
-- **active Work Order:** CTRL-009 — Recovery / Idempotency (`spec/work-items/CTRL-009.md`, `READY`)
-- **PR:** #26 (branch `ctrl-009-recovery`, review iteration 2: ack `01da8dc` → fix `1caf96d`, on the exact governance activation base `4f9faf577526fe06af4e4ad7ab592d0d408752a1` plus the absorbed dashboard-only dispatch marker `80edeadfbc5de6b95f716a0731c2adf8e17ab171`), returned to `WAITING_FOR_ARCHITECT` with a fresh green validation transcript
-- **last completed architect action:** ARCHITECT DECISION — REQUEST_CHANGES on PR #26 (comment 5547202721, 2026-09-04T22:33:27Z): FZ-CTRL009-001 (HIGH — recovery can direct a replay of already-observed dispatch/start work) and FZ-CTRL009-002 (MEDIUM — the CHANGES_REQUESTED resume was emitted without the required carried worker-session reference)
-- **last completed worker action:** both findings resolved in place on PR #26 — fix `1caf96d` on branch tip: at READY/DISPATCHED with an observed governed PR the plan directs NO next step (the orchestrator's READY/DISPATCHED cycles re-perform the provider start; regressions prove no Z.ai invocation can be caused by the recovery continuation, incl. a structural source guard), and the required absent session fails closed with `RecoveryMissingReferenceError` at the CHANGES_REQUESTED resume (decision-stability contradiction still fires first); suite 551 → 555, mypy strict 0 issues, ruff clean, `audit_ctrl_009.sh` 8/8 PASS; no frozen module touched, no CTRL-001..008 semantics changed
-- **current implementation action:** awaiting Architect semantic re-review of the corrected CTRL-009 implementation (review iteration 2; validation transcript in the worker comment)
-- **last update (UTC):** 2026-09-04T22:46:00Z
-- **next planned item:** CTRL-010 — End-to-end dogfood (per the roadmap; not yet defined, not eligible)
-- **next step:** Architect re-reviews the corrected head on PR #26; on REQUEST_CHANGES the worker iterates again on the same PR, on APPROVE + merge predicates the merge proceeds and post-merge reconciliation records CTRL-009/COMPLETE
+- **current state:** `IMPLEMENTING`
+- **active Work Order:** CTRL-010 — End-to-end dogfood (`spec/work-items/CTRL-010.md`, `READY`)
+- **PR:** implementation PR not yet opened; worker dispatch is authorized from exact governance activation base `3a53cff188dbc9ff1bdb0429df61f67ca8c71055` (governance PR #29 merge)
+- **last completed architect action:** CTRL-010 defined, frozen, and activated as the sole READY successor to reconciled CTRL-009; governance PR #29 merged at `3a53cff188dbc9ff1bdb0429df61f67ca8c71055`
+- **last completed worker action:** CTRL-009 implementation PR #26 merged at `3d5e573f121c710386881d8db3ee3476c82176e3`; reconciliation PR #28 merged at `bf47a7c8b5612328dfeeeb31ce4227bcce0305ee`
+- **current implementation action:** Z.ai is authorized to implement only `spec/work-items/CTRL-010.md` from the exact governance activation base `3a53cff188dbc9ff1bdb0429df61f67ca8c71055`, then open/update exactly one implementation PR and return `WAITING_FOR_ARCHITECT` with the complete validation transcript and dogfood evidence
+- **last update (UTC):** 2026-09-04T23:08:00Z
+- **next planned item:** none after CTRL-010 yet; roadmap Stage 7 follows only after explicit Stage 6/Stage 7 evidence and governance transition
+- **next step:** Z.ai implements CTRL-010 only, using the frozen Work Order acceptance criteria; worker may not merge, approve, redefine authority, alter roadmap ordering, or advance the automation stage
 
 ## Maintenance protocol
 
