@@ -6,13 +6,13 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `CHANGES_REQUESTED`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-007 — Architect Review Loop (`spec/work-items/CTRL-007.md`, `READY`)
 - **PR:** one implementation PR open from the exact dispatch base `a02cfdb4f253f63375e81d88581f7a27807ae672` (dispatch comment `5543581701`)
 - **last completed architect action:** FZ-CTRL007-002 (HIGH) issued on PR #20 (comment `5544181314`): the source-reproducible MAC seal proves repository knowledge, not adapter issuance — genuine construction-path evidence required
-- **last completed worker action:** Z.ai delivered the FZ-CTRL007-001 correction on fix head `af8ddf9` — adapter-issued session evidence (`ZaiIssuedWorkerSession`, sealed at the CTRL-004 provider-response normalization boundary, MAC over every ordinary field, locally verifiable with zero provider I/O); the review loop now holds only the injected GitHub adapter, performs zero worker-provider calls of any kind, and produces the handoff only for carried evidence whose issuance proof verifies locally (structurally exact hand-constructed sessions and forged/tampered proofs fail closed); full validation green (413 tests, strict mypy, ruff, CLI validate/domain, external-I/O guard, CTRL-007 scope audit including the directed zai.py evidence-amendment confinement checks)
-- **current implementation action:** resolving Architect finding FZ-CTRL007-002 (HIGH) — construction-path evidence: replacing the source-reproducible MAC seal with a closure-captured runtime capability so only the CTRL-004 normalization path can issue evidence
-- **last update (UTC):** 2026-09-04T19:20:00Z
+- **last completed worker action:** Z.ai resolved FZ-CTRL007-002 on fix head `1b248ed` — the source-reproducible MAC seal replaced with genuine construction-path evidence: a process-local issuance boundary (runtime capability captured in a closure; not repository source material, not importable, not stored on issued values) reachable only from the CTRL-004 provider-response normalization path, with the proof binding exactly the ordinary fields so transplanted proofs fail; `is_adapter_issued()` is the pure-local predicate and the loop still performs zero worker-provider I/O; full validation green (415 tests, strict mypy, ruff, CLI validate/domain, external-I/O guard, CTRL-007 scope audit)
+- **current implementation action:** none; FZ-CTRL007-002 resolved on PR #20 (branch tip `1b248ed`), awaiting re-review
+- **last update (UTC):** 2026-09-04T19:50:00Z
 - **next planned item:** CTRL-008 (per the roadmap; not defined, not eligible)
 - **next step:** Architect reviews the CTRL-007 implementation PR against the frozen Work Order; worker resolves any findings on the same PR
 
