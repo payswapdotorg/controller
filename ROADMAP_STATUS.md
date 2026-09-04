@@ -6,27 +6,28 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
-- **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `READY`)
-- **PR:** #7 — https://github.com/pectoraux/controller/pull/7 (implementation)
-- **head SHA awaiting review:** `e2c52a6c33c1573dfc39ed05743634dc3ed8ac8c`
-  (CTRL-003 implementation + FZ-CTRL003-001/002/003/004/004A fixes; the branch tip
-  may additionally advance with status-dashboard-only commits, which do not
-  alter the implementation)
-- **last completed worker action:** FZ-CTRL003-004A resolved via the
-  Architect-accepted execution-time re-proof path — the complete frozen merge
-  predicate now lives in one private method shared by `authorize_merge` and
-  `merge_pull_request`, which re-evaluates it *in full* from live GitHub state
-  plus fresh execution-time policy inputs (eligibility, architect reviewer,
-  required checks) immediately before the remote mutation; `MergeAuthorization`
-  is an honest merge request (never evidence), policy parameters are not
-  carried in it, and a caller with access to all public/module symbols cannot
-  reach the PUT merge mutation unless the re-proven predicate (Architect
-  APPROVE bound to the exact head) genuinely holds; full validation green
-  (212/212 tests, strict mypy, ruff, CLI, guard, forbidden-surface audit PASS)
-- **ARCHITECT ACTION: REVIEW REQUIRED**
-- **last update (UTC):** 2026-09-04T13:55:00Z
-- **next step:** Architect review iteration 4 for PR #7
+- **current state:** `RECONCILING`
+- **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `COMPLETE`)
+- **PR:** #7 — https://github.com/pectoraux/controller/pull/7 (merged) +
+  post-merge reconciliation PR (open, from `arch-ctrl-003-post-merge-reconciliation`)
+- **implementation merge evidence:** PR #7 merged at
+  `7cc340375dcd9768d986b1245303d7006f54fbf1` (base
+  `8171bf46b8f29b4e894791a7437251a64226678c`, including FZ-CTRL003-001/002/003
+  and FZ-CTRL003-004/004A fixes); Architect APPROVE recorded 2026-09-04T13:42:57Z
+- **reconciliation scope (per the Architect POST-MERGE RECONCILIATION HANDOFF,
+  comment 5541326234):** machine state CTRL-003 → COMPLETE with `completed`
+  recording all three items; work-order status + merge evidence; roadmap
+  sequencing (CTRL-004 planned, not activated); build-process bootstrap
+  position (Stage 1 remains active; next milestone CTRL-004 — Z.ai adapter);
+  real-repository test pins updated to the reconciled state; this dashboard
+  records RECONCILING while the reconciliation PR is under review
+- **last completed worker action:** FZ-CTRL003-004A resolved and delivered
+  (fix `e2c52a6`, PR head `7cfe30d`); PR #7 approved and merged by the
+  Architect; post-merge reconciliation change prepared
+- **last update (UTC):** 2026-09-04T14:05:00Z
+- **next step:** Architect review of the reconciliation PR; after merge,
+  CTRL-004 becomes the next planned item (Architect defines/freezes its work
+  order and marks it READY before any dispatch)
 
 ## Maintenance protocol
 

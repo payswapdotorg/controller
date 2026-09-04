@@ -5,9 +5,9 @@
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-003",
-  "status": "READY",
+  "status": "COMPLETE",
   "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
-  "completed": ["CTRL-001", "CTRL-002"],
+  "completed": ["CTRL-001", "CTRL-002", "CTRL-003"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-003 work order is defined and frozen as spec/work-items/CTRL-003.md and is READY. Dispatch CTRL-003 from current main only after authority validation against roadmap, architecture, build process, work order, and machine state."
+  "nextAction": "CTRL-003 is merged (PR #7, merge commit 7cc340375dcd9768d986b1245303d7006f54fbf1, including review-iteration fixes FZ-CTRL003-001/002/003/004/004A) and reconciled: recorded in completed. Per the roadmap graph the next planned item is CTRL-004 (Z.ai adapter); the Architect must define and freeze its work order (spec/work-items/CTRL-004.md) and mark it READY in machine state before it becomes eligible for dispatch. Stage 1 remains active; the human operator still performs external dispatch, review routing, and merge authorization."
 }
