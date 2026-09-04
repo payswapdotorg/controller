@@ -1,6 +1,6 @@
 # CTRL-008 — Merge + Reconciliation
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Objective
 
@@ -24,7 +24,7 @@ Implement the Controller's governed merge and post-merge reconciliation boundary
 
 ## In scope
 
-1. Define a typed merge/reconciliation contract over the accepted GitHub adapter, CTRL-006 evidence gate, CTRL-007 Architect-review outcome, and CTRL-005 orchestration references.
+1. Define a typed merge/reconciliation contract over the accepted GitHub adapter, CTRL-006 evidence gate, CTRL-007 Architect-review outcome, and CTRL-005 refs.
 2. Reconstruct repository authority first and operate only on the currently active Work Item and its exactly correlated PR.
 3. Re-establish the full frozen merge predicate from repository/work-item authority and observed evidence before any merge mutation: intended `main` base, exact active Work Item identity, one governed PR, exact PR head, terminal-success required CI/evidence, no unresolved blocking review/change state, and an Architect `APPROVE` bound to that exact head.
 4. Make merge authorization explicit, typed, deterministic, and non-forgeable at execution time. A stale, foreign, missing, ambiguous, or contradictory authorization must fail closed; an approval never implies merge without the remaining predicates.
@@ -58,7 +58,7 @@ The merge target is exactly the active governed Work Item's single PR on intende
 
 ### AC3 — Complete frozen merge predicate
 
-Merge authorization is granted only when every repository-defined predicate is true: intended base, exact active Work Item, clean work-item scope, terminal-success required CI/evidence, no unresolved blocking review/change state, and Architect `APPROVE` bound to the exact current PR head. `APPROVE` alone is insufficient.
+Merge authorization is granted only when every repository-defined predicate is true: intended base, exact active Work Item identity, clean work-item scope, terminal-success required CI/evidence, no unresolved blocking review/change state, and Architect `APPROVE` bound to the exact current PR head. `APPROVE` alone is insufficient.
 
 ### AC4 — Execution-time drift protection
 
@@ -93,8 +93,8 @@ Offline deterministic tests cover successful merge, each merge-predicate refusal
 
 ## Handoff
 
-Architect has defined and frozen CTRL-008 as the sole READY item after CTRL-007 reconciliation. Z.ai may implement only this Work Order from the exact current main base recorded by the governance merge. The worker must verify repository authority and base SHA, implement only the owned CTRL-008 surface, run the complete validation suite and scope/safety audit, create/update exactly one implementation PR, and return a durable evidence transcript with base/head SHAs and acceptance-criterion results. The worker may not merge, approve, redefine authority, or claim completion.
+Architect defined and froze CTRL-008 as the sole READY item after CTRL-007 reconciliation. Z.ai implemented only this Work Order from the exact activation base `f55f5190a82a0fb774285a03347e6df71163cbd5` in PR #23. The implementation resolved Architect finding FZ-CTRL008-001 on the same PR, returned durable validation evidence, and did not redefine authority or claim completion. The final PR branch was reconciled with current `main` and merged as PR #23 at commit `e733e37a1ecf7a86c12e3baac0fd325c5806aaa4`.
 
 ## Merge / reconciliation evidence
 
-Not yet implemented. CTRL-008 is newly defined and activated as the sole READY item after CTRL-007 reconciliation. Stage 1 remains active; activation of CTRL-008 does not silently advance the automation stage.
+Complete and reconciled. PR #23 (`CTRL-008 — Merge + reconciliation boundary (frozen predicate, one authorized attempt, deterministic idempotent reconciliation)`) was Architect-approved after resolution of FZ-CTRL008-001. Worker validation evidence was 480 passing tests + 167 subtests, strict mypy clean, ruff/format clean, `controller validate` and `controller domain` green, no-external-I/O guard green, and `scripts/audit_ctrl_008.sh f55f519...` PASS. The implementation branch was reconciled with the current `main` history before merge. PR #23 was then merged with expected-head protection at `e733e37a1ecf7a86c12e3baac0fd325c5806aaa4`. This reconciliation records CTRL-008 as complete, adds it to machine-state `completed`, preserves `STAGE-1-STATE-MACHINE-AUTOMATION`, and leaves CTRL-009 as the next planned roadmap item without defining or activating it. The exact merge SHA is the observed GitHub merge evidence; no silent stage change occurred.
