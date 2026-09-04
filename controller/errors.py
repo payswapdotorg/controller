@@ -148,3 +148,101 @@ class GithubAuthorizationForgedError(GithubAdapterError):
     never issues). Possession of such a value can never substitute for
     the predicate actually holding at execution time.
     """
+
+
+# ---------------------------------------------------------------------------
+# Z.ai adapter errors (CTRL-004) — typed fail-closed provider boundary
+# ---------------------------------------------------------------------------
+
+
+class ZaiAdapterError(ControllerError):
+    """Base class for every Z.ai adapter boundary failure (CTRL-004).
+
+    The adapter is the typed seam between the Controller and the Z.ai
+    implementation-worker provider. Every failure — configuration,
+    authentication, transport, rejected request, malformed response,
+    context mismatch, missing session identity, contradiction, or worker
+    safety violation — surfaces as a typed subclass of this error. No
+    silent fallback, fabricated success, or guessed identity is
+    permitted (AC4).
+    """
+
+
+class ZaiConfigurationError(ZaiAdapterError):
+    """The adapter or its transport was constructed with invalid inputs.
+
+    For example: a repository not formatted 'owner/name', an empty API
+    root, or a provider identity that is not a non-empty string.
+    """
+
+
+class ZaiAuthError(ZaiAdapterError):
+    """The provider rejected the adapter's authentication."""
+
+
+class ZaiRateLimitError(ZaiAdapterError):
+    """The provider declined the request due to rate limiting."""
+
+
+class ZaiTransportError(ZaiAdapterError):
+    """A provider transport failure (network error, 5xx, timeout).
+
+    The adapter never retries silently; the caller decides policy.
+    """
+
+
+class ZaiRejectedRequestError(ZaiAdapterError):
+    """The provider refused the request for a non-auth, non-rate reason.
+
+    Raised for 4xx refusals other than authentication/rate-limit
+    responses; the provider's reason is carried in the message.
+    """
+
+
+class ZaiMalformedResponseError(ZaiAdapterError):
+    """A provider response does not satisfy the typed response schema.
+
+    Deterministic normalization refuses to guess: missing fields, wrong
+    types, or inconsistent values fail closed rather than being patched.
+    """
+
+
+class ZaiMissingSessionError(ZaiAdapterError):
+    """A worker/session identity is missing where one is required.
+
+    Resume requires an explicit session identifier supplied by the
+    caller; start requires the provider response to identify the worker
+    execution. Absence is never guessed or defaulted (AC3/AC4).
+    """
+
+
+class ZaiContextMismatchError(ZaiAdapterError):
+    """The presented work context does not match the governed context.
+
+    For example: the caller-supplied repository/work item does not match
+    the adapter's repository binding, the provider-reported session
+    belongs to a different work item or PR (a fork), or the base/PR
+    identity drifted from the repository-derived facts. The adapter
+    never silently continues into a different work context (AC2/AC3).
+    """
+
+
+class ZaiContradictionError(ZaiAdapterError):
+    """Provider-reported state contradicts repository-derived authority.
+
+    The adapter never treats provider/session state as authoritative
+    (AC5): a contradiction stops the operation for governance review
+    rather than being resolved by guessing.
+    """
+
+
+class ZaiPolicyViolationError(ZaiAdapterError):
+    """The worker safety boundary would be violated (AC6).
+
+    The adapter may only send controller-approved worker instructions
+    built from repository-derived facts, the Work Order reference, and
+    review findings — it cannot merge, approve, mark work items
+    complete, or authorize architecture changes. A payload that would
+    exceed the frozen worker role (for example, carrying unknown fields
+    or token-like provider material) fails closed with this error.
+    """

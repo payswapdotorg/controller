@@ -1,17 +1,20 @@
 """Forbidden-surface guard: network, persistence, and credential scoping.
 
 CTRL-001 banned all network imports from the controller package. CTRL-003
-(the frozen GitHub adapter work order) authorizes exactly ONE network
-module: ``controller/github.py`` (the injected transport). This guard
-enforces that scoping rather than the original blanket ban:
+(the frozen GitHub adapter work order) authorized exactly ONE network
+module: ``controller/github.py`` (the injected transport). CTRL-004 (the
+frozen Z.ai adapter work order) authorizes exactly ONE more:
+``controller/zai.py`` (the injected worker-provider transport). This
+guard enforces that scoping rather than the original blanket ban:
 
 * network imports (socket/http/urllib/requests/...) are allowed ONLY in
-  ``controller/github.py`` and remain forbidden in every other module;
+  the authorized adapter transport modules (``github.py``, ``zai.py``)
+  and remain forbidden in every other module;
 * subprocess and persistence machinery (subprocess/sqlite3/shelve/pickle/
-  dbm) remains forbidden everywhere, including the adapter;
+  dbm) remains forbidden everywhere, including the adapters;
 * credential *material* (literal token/secret patterns or string literals
   assigned to credential-like names) is banned in all sources; the word
-  "token" as a parameter name in the authorized transport module is not
+  "token" as a parameter name in an authorized transport module is not
   credential material;
 * tests import only the standard library, ``controller``, and ``tests``
   (fakes — no network, no credentials — AC7).
@@ -51,8 +54,9 @@ _PERSISTENCE_IMPORT_ROOTS: frozenset[str] = frozenset(
     }
 )
 
-#: The single module authorized for network imports (CTRL-003 transport).
-_NETWORK_ALLOWED_MODULE = "github.py"
+#: The only modules authorized for network imports (adapter transports:
+#: CTRL-003 github.py, CTRL-004 zai.py).
+_NETWORK_ALLOWED_MODULES = frozenset({"github.py", "zai.py"})
 
 #: Credential-like words banned as *source markers* outside the transport.
 _CREDENTIAL_WORDS: tuple[str, ...] = (
@@ -95,15 +99,15 @@ def _test_sources() -> list[Path]:
 
 
 class NetworkScopingTests(unittest.TestCase):
-    """Network imports exist ONLY in the authorized adapter transport."""
+    """Network imports exist ONLY in the authorized adapter transports."""
 
-    def test_network_imports_only_in_github_module(self) -> None:
+    def test_network_imports_only_in_authorized_adapter_modules(self) -> None:
         offenders: list[str] = []
         for path in _package_sources():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             roots = _import_roots(tree)
-            if path.name == _NETWORK_ALLOWED_MODULE:
-                continue  # authorized (CTRL-003)
+            if path.name in _NETWORK_ALLOWED_MODULES:
+                continue  # authorized (CTRL-003 / CTRL-004)
             if roots & _NETWORK_IMPORT_ROOTS:
                 offenders.append(f"{path.name}: {sorted(roots & _NETWORK_IMPORT_ROOTS)}")
         self.assertEqual(offenders, [])
@@ -115,16 +119,18 @@ class NetworkScopingTests(unittest.TestCase):
                 roots = _import_roots(tree)
                 self.assertEqual(roots & _PERSISTENCE_IMPORT_ROOTS, set())
 
-    def test_github_module_imports_only_stdlib_and_controller(self) -> None:
+    def test_adapter_modules_import_only_stdlib_and_controller(self) -> None:
         allowed = set(sys.stdlib_module_names) | {"controller"}
-        tree = ast.parse((REPO_ROOT / "controller" / "github.py").read_text(encoding="utf-8"))
-        roots = _import_roots(tree)
-        self.assertEqual(roots - allowed, set())
+        for name in sorted(_NETWORK_ALLOWED_MODULES):
+            with self.subTest(module=name):
+                tree = ast.parse((REPO_ROOT / "controller" / name).read_text(encoding="utf-8"))
+                roots = _import_roots(tree)
+                self.assertEqual(roots - allowed, set())
 
     def test_other_modules_remain_stdlib_and_controller_only(self) -> None:
         allowed = set(sys.stdlib_module_names) | {"controller"}
         for path in _package_sources():
-            if path.name == _NETWORK_ALLOWED_MODULE:
+            if path.name in _NETWORK_ALLOWED_MODULES:
                 continue
             with self.subTest(module=path.name):
                 tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -158,9 +164,9 @@ class CredentialGuardTests(unittest.TestCase):
                 for pattern in _CREDENTIAL_LITERALS:
                     self.assertIsNone(pattern.search(source), msg=pattern.pattern)
 
-    def test_no_credential_words_outside_the_transport(self) -> None:
+    def test_no_credential_words_outside_the_transports(self) -> None:
         for path in _package_sources():
-            if path.name == _NETWORK_ALLOWED_MODULE:
+            if path.name in _NETWORK_ALLOWED_MODULES:
                 continue
             with self.subTest(module=path.name):
                 source = path.read_text(encoding="utf-8").lower()
