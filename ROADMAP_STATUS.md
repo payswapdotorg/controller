@@ -6,17 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `COMPLETE`
-- **active Work Order:** CTRL-007 — Architect Review Loop (`spec/work-items/CTRL-007.md`, `COMPLETE`)
-- **PR:** PR #20 merged at `a0392aa0e07772518638f506d755bd9d90d9dc4e`; reviewed head `5a43adfc8f270f5be37ba206ff33a45ad579d961`; base `a02cfdb4f253f63375e81d88581f7a27807ae672`
-- **merge evidence:** Architect approval `5545472093`; FZ-CTRL007-001..006 resolved on the same PR; worker reported 433 passing tests, strict mypy/ruff/format clean, CLI validate/domain green, external-I/O guard green, and `scripts/audit_ctrl_007.sh a02cfdb` PASS
-- **last completed architect action:** reviewed/approved CTRL-007 PR #20 and merged the exact reviewed head with expected-head protection
-- **last completed worker action:** resolved FZ-CTRL007-005 + FZ-CTRL007-006, returned a green validation transcript, and returned to `WAITING_FOR_ARCHITECT` before merge
-- **reconciliation action:** CTRL-007 is being recorded in repository machine state and authoritative documents from merge evidence `a0392aa0e07772518638f506d755bd9d90d9dc4e`
-- **current implementation action:** none
-- **last update (UTC):** 2026-09-04T19:26:44Z
-- **next planned item:** CTRL-008 — Merge + reconciliation (per the roadmap; not defined, not eligible)
-- **next step:** Architect defines/freezes CTRL-008 through the normal governance path; no worker implementation action is authorized yet
+- **current state:** `READY`
+- **active Work Order:** CTRL-008 — Merge + Reconciliation (`spec/work-items/CTRL-008.md`, `READY`)
+- **PR:** none yet; CTRL-008 governance definition/activation is being finalized from reconciliation merge `848fe26842d5c4617238bf5c5e450f694f862aa0`
+- **last completed architect action:** CTRL-007 reviewed/approved/merged/reconciled; CTRL-008 Merge + Reconciliation defined and frozen as the next sole READY item
+- **last completed worker action:** CTRL-007 implementation merged at `a0392aa0e07772518638f506d755bd9d90d9dc4e`
+- **current governance action:** finalize CTRL-008 definition/activation on main, then authorize exactly one implementation PR from that resulting base
+- **last update (UTC):** 2026-09-04T19:34:00Z
+- **next planned item:** CTRL-009 — Recovery / idempotency (per the roadmap; not defined, not eligible)
+- **next step:** complete the CTRL-008 governance merge; only then may Z.ai implement CTRL-008 from the exact resulting main base
 
 ## Maintenance protocol
 
