@@ -9,7 +9,7 @@
 - **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `READY`)
 - **PR:** #6 — https://github.com/pectoraux/controller/pull/6 (Architect governance/activation)
-- **head SHA awaiting review:** `41a32448212f471e66fbc19ccb9a72343a3c6bb1`
+- **head SHA awaiting review:** `5afd6a72862df78be1ba807c81a6f8e3d1b1408c`
   (CTRL-003 work-order definition/activation governance change; branch tip may
   advance with status-dashboard-only commits, which do not alter the Work Order
   or authority intent)
@@ -17,7 +17,7 @@
   state prepared for activation from reconciled main `b9e7402476f94a7a52ef6cd248ee5bf18d9d1ca2`;
   CTRL-004 remains planned; Stage 1 remains active.
 - **ARCHITECT ACTION: REVIEW REQUIRED**
-- **last update (UTC):** 2026-09-04T11:49:30Z
+- **last update (UTC):** 2026-09-04T11:50:30Z
 - **next step:** the human operator should say `go` to invoke the Architect
   review cycle for PR #6; after merge, Z.ai may implement CTRL-003 from the
   resulting main SHA.
