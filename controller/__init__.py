@@ -16,8 +16,13 @@ same-worker/same-PR change-iteration handoffs. CTRL-008 merge +
 reconciliation boundary: the frozen merge-predicate evaluation and
 single authorized merge attempt through the CTRL-003 adapter, observed
 merge evidence, and the deterministic idempotent post-merge
-reconciliation record. No worker merging, no database, no scheduler —
-those stay outside the frozen authority.
+reconciliation record. CTRL-009 recovery boundary: deterministic
+restart/interruption classification over repository authority and
+observed GitHub evidence — the first incomplete governed boundary,
+exact identity binding, observed-evidence conditions, and a typed
+resume plan directed to the boundary that owns it (never executed
+here). No worker merging, no database, no scheduler — those stay
+outside the frozen authority.
 """
 
 from __future__ import annotations
@@ -76,6 +81,10 @@ from controller.errors import (
     MergeLoopPositionError,
     MergeMissingReferenceError,
     MergePolicyError,
+    RecoveryContradictionError,
+    RecoveryLoopError,
+    RecoveryMissingReferenceError,
+    RecoveryTerminalStateError,
     ReviewContradictionError,
     ReviewLoopError,
     ReviewLoopPositionError,
@@ -113,6 +122,14 @@ from controller.orchestrator import (
     OrchestrationOutcome,
     OrchestrationReferences,
     Orchestrator,
+)
+from controller.recovery import (
+    GovernedBoundary,
+    ObservedArchitectDecision,
+    RecoveryBoundary,
+    RecoveryCondition,
+    RecoveryPlan,
+    SessionBinding,
 )
 from controller.review import (
     ArchitectReviewLoop,
@@ -194,6 +211,7 @@ __all__ = [
     "GithubStaleBaseError",
     "GithubTransport",
     "GithubTransportError",
+    "GovernedBoundary",
     "GovernedWorkItem",
     "IneligibleDispatchError",
     "InvalidTransitionError",
@@ -214,8 +232,16 @@ __all__ = [
     "OrchestrationOutcome",
     "OrchestrationReferences",
     "Orchestrator",
+    "ObservedArchitectDecision",
     "ProgramState",
     "ReconciliationRecord",
+    "RecoveryBoundary",
+    "RecoveryCondition",
+    "RecoveryContradictionError",
+    "RecoveryLoopError",
+    "RecoveryMissingReferenceError",
+    "RecoveryPlan",
+    "RecoveryTerminalStateError",
     "ReviewContradictionError",
     "ReviewDecision",
     "ReviewFinding",
@@ -226,6 +252,7 @@ __all__ = [
     "ReviewMissingReferenceError",
     "ReviewPacket",
     "ReviewPacketError",
+    "SessionBinding",
     "STATE_FILE",
     "SUPPORTED_SCHEMA_VERSION",
     "SpecError",
