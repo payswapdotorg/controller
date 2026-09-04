@@ -8,7 +8,7 @@
 
 - **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-009 — Recovery / Idempotency (`spec/work-items/CTRL-009.md`, `READY`)
-- **PR:** branch `ctrl-009-recovery` (implementation head `e13dfd5`, opened from the exact governance activation base `4f9faf577526fe06af4e4ad7ab592d0d408752a1` plus the absorbed dashboard-only dispatch marker `80edeadfbc5de6b95f716a0731c2adf8e17ab171`), returned to `WAITING_FOR_ARCHITECT` with a green validation transcript
+- **PR:** #26 (branch `ctrl-009-recovery`, implementation head `e13dfd5`, opened from the exact governance activation base `4f9faf577526fe06af4e4ad7ab592d0d408752a1` plus the absorbed dashboard-only dispatch marker `80edeadfbc5de6b95f716a0731c2adf8e17ab171`), returned to `WAITING_FOR_ARCHITECT` with a green validation transcript
 - **last completed architect action:** CTRL-009 defined/frozen/activated as the sole READY item after CTRL-008 reconciliation; durable worker dispatch issued against exact base `4f9faf577526fe06af4e4ad7ab592d0d408752a1`
 - **last completed worker action:** CTRL-009 implementation delivered — `controller/recovery.py` (the governed recovery boundary: deterministic restart/interruption classification, the typed RecoveryPlan, the RecoveryLoopError family) and `tests/test_recovery.py` (71 new tests; suite 480 → 551); mechanical real-repository test-pin correction to the CTRL-009 authority (the worker-PR precedent); no frozen module touched
 - **current implementation action:** awaiting Architect semantic review of the CTRL-009 implementation PR (AC1–AC8 evidence in the PR transcript)
