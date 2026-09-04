@@ -224,14 +224,18 @@ class ImplementationCycleTests(OrchestrationFixture):
 
     def test_dispatched_with_session_reference_begins_implementation(self) -> None:
         repo = self._repo("DISPATCHED")
-        orchestrator, _, zai = self._orchestrator()
+        orchestrator, github, zai = self._orchestrator()
         outcome = orchestrator.run_cycle(repo, _refs())
         assert outcome.event is not None
         self.assertEqual(
             (outcome.event.from_state, outcome.event.to_state),
             (LifecycleState.DISPATCHED, LifecycleState.IMPLEMENTING),
         )
-        self.assertEqual(zai.calls, [])
+        # exactly one provider call: the start/identify provenance observation
+        self.assertEqual(len(zai.calls_matching("/worker/sessions")), 1)
+        self.assertEqual(zai.calls_matching(resume_path()), [])
+        self.assertEqual(github.calls_matching("POST", "/"), [])
+        self.assertEqual(github.calls_matching("PUT", "/"), [])
 
     def test_implementing_without_pr_observes(self) -> None:
         repo = self._repo("IMPLEMENTING")
@@ -514,6 +518,60 @@ class SessionEvidenceProofTests(OrchestrationFixture):
         self.assertIn("still DISPATCHED", str(ctx.exception))
         self._assert_no_lifecycle_effect(github, zai)
 
+    def test_dispatched_structurally_exact_forged_session_cannot_advance(self) -> None:
+        """FZ-CTRL005-002: a session value constructed by hand with every
+        binding field exactly right but a session id the provider does NOT
+        identify for the exact governed context cannot advance the
+        lifecycle. Provenance is re-established from live provider state
+        through the adapter's start/identify contract; the mismatch fails
+        closed before the event, with no resume and no GitHub mutation —
+        the single start/identify observation is the intended, governed
+        provenance check."""
+        repo = self._repo("DISPATCHED")
+        orchestrator, github, zai = self._orchestrator()
+        forged = _session(session_id="forged-sess-not-issued")
+        with self.assertRaises(OrchestrationContradictionError) as ctx:
+            orchestrator.run_cycle(repo, _refs(worker_session=forged))
+        self.assertIn("forged-sess-not-issued", str(ctx.exception))
+        self.assertIn("provider identifies", str(ctx.exception))
+        # no lifecycle event (the run failed closed); the only provider
+        # call is the intended start/identify provenance observation;
+        # no resume, no GitHub mutation:
+        self.assertEqual(len(zai.calls_matching("/worker/sessions")), 1)
+        self.assertEqual(zai.calls_matching(resume_path()), [])
+        self.assertEqual(github.calls_matching("POST", "/"), [])
+        self.assertEqual(github.calls_matching("PUT", "/"), [])
+
+    def test_dispatched_provider_forked_session_refuses(self) -> None:
+        """Even genuine carried evidence refuses when the provider now
+        identifies a different session for the exact context (fork guard,
+        mirroring the adapter's resume fork refusal)."""
+        repo = self._repo("DISPATCHED")
+        zai = FakeZaiTransport(
+            {"/worker/sessions": worker_session(session_id="zai-sess-other", work_item=WORK_ITEM)}
+        )
+        orchestrator, github, _ = self._orchestrator(zai=zai)
+        with self.assertRaises(OrchestrationContradictionError):
+            orchestrator.run_cycle(repo, _refs())
+        self.assertEqual(zai.calls_matching(resume_path()), [])
+        self.assertEqual(github.calls_matching("POST", "/"), [])
+        self.assertEqual(github.calls_matching("PUT", "/"), [])
+
+    def test_dispatched_provider_session_with_drifted_base_refuses(self) -> None:
+        """The adapter refuses a provider report bound to a base other
+        than the carried dispatch base — the provenance observation is
+        bound to the exact governed context, not just any session."""
+        repo = self._repo("DISPATCHED")
+        zai = FakeZaiTransport(
+            {"/worker/sessions": worker_session(work_item=WORK_ITEM, base_sha="d" * 40)}
+        )
+        orchestrator, github, _ = self._orchestrator(zai=zai)
+        with self.assertRaises(ZaiContextMismatchError):
+            orchestrator.run_cycle(repo, _refs())
+        self.assertEqual(zai.calls_matching(resume_path()), [])
+        self.assertEqual(github.calls_matching("POST", "/"), [])
+        self.assertEqual(github.calls_matching("PUT", "/"), [])
+
     def test_dispatched_missing_base_reference_fails_closed(self) -> None:
         """Session evidence cannot be proven without the dispatch-base
         reference; nothing is guessed."""
@@ -536,8 +594,9 @@ class SessionEvidenceProofTests(OrchestrationFixture):
         self._assert_no_lifecycle_effect(github, zai)
 
     def test_dispatched_valid_session_evidence_advances_exactly_once(self) -> None:
-        """The honest path still works: proven evidence emits exactly one
-        BEGIN_IMPLEMENTATION event bound to the proven session id."""
+        """The honest path still works: the provider identifies the very
+        session the caller carried, and exactly one BEGIN_IMPLEMENTATION
+        event is emitted bound to the provider-identified session id."""
         repo = self._repo("DISPATCHED")
         orchestrator, github, zai = self._orchestrator()
         outcome = orchestrator.run_cycle(repo, _refs())
@@ -548,7 +607,11 @@ class SessionEvidenceProofTests(OrchestrationFixture):
             (LifecycleState.DISPATCHED, LifecycleState.IMPLEMENTING),
         )
         self.assertEqual(outcome.session_id, SESSION_ID)
-        self._assert_no_lifecycle_effect(github, zai)
+        # one intended provenance observation; nothing else:
+        self.assertEqual(len(zai.calls_matching("/worker/sessions")), 1)
+        self.assertEqual(zai.calls_matching(resume_path()), [])
+        self.assertEqual(github.calls_matching("POST", "/"), [])
+        self.assertEqual(github.calls_matching("PUT", "/"), [])
 
 
 class DownstreamBoundaryTests(OrchestrationFixture):

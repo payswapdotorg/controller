@@ -39,9 +39,11 @@ active governed Work Order. Doctrine:
   reconciliation, and advance are *exposed* (typed handoff outcomes),
   never executed. CI/evidence gate policy belongs to CTRL-006.
 * **Single remote mutation surface.** The only remote mutations the
-  orchestrator can perform are starting and resuming the Z.ai worker —
-  and only after the governed command validates. Branch/PR creation
-  belongs to the worker; merge belongs to the Architect (CTRL-008).
+  orchestrator can perform are starting/identifying and resuming the
+  Z.ai worker through the accepted adapter — only inside a governed
+  cycle, with authority validated first and lifecycle events emitted
+  only on proven evidence. Branch/PR creation belongs to the worker;
+  merge belongs to the Architect (CTRL-008).
 """
 
 from __future__ import annotations
@@ -231,7 +233,7 @@ class Orchestrator:
         if state is LifecycleState.READY:
             return self._dispatch_worker(item, repo_root)
         if state is LifecycleState.DISPATCHED:
-            return self._begin_implementation(item, refs)
+            return self._begin_implementation(item, repo_root, refs)
         if state is LifecycleState.IMPLEMENTING:
             return self._observe_pull_request(item, refs)
         if state is LifecycleState.PR_OPEN:
@@ -258,14 +260,7 @@ class Orchestrator:
         command = DomainCommand(item.identity.work_item, CommandName.DISPATCH)
         event = item.handle(command)  # typed refusal (e.g. IneligibleDispatchError) before I/O
         base = self._github.get_branch(_BASE_BRANCH)
-        content = _read_work_order(repo_root, item.identity.work_order_path)
-        context = ZaiWorkerContext(
-            repository=item.identity.repository,
-            work_item=item.identity.work_item,
-            work_order_path=item.identity.work_order_path,
-            base_sha=base.sha,
-            work_order_content=content,
-        )
+        context = self._dispatch_context(item, repo_root, None, base_sha=base.sha)
         session = self._zai.start_worker(context)
         return WorkerDispatched(
             work_item=item.identity.work_item,
@@ -274,17 +269,57 @@ class Orchestrator:
             session=session,
         )
 
+    def _dispatch_context(
+        self,
+        item: GovernedWorkItem,
+        repo_root: Path,
+        refs: OrchestrationReferences | None,
+        *,
+        base_sha: str | None = None,
+    ) -> ZaiWorkerContext:
+        """The exact repository-derived worker context for the active item.
+
+        At dispatch the base is the live branch head; on the DISPATCHED
+        provenance re-observation the base is the carried dispatch-base
+        reference (the provider-identified session must still be bound to
+        exactly that base, or the adapter refuses)."""
+        resolved_base = base_sha if base_sha is not None else self._carried_base(item, refs)
+        content = _read_work_order(repo_root, item.identity.work_order_path)
+        return ZaiWorkerContext(
+            repository=item.identity.repository,
+            work_item=item.identity.work_item,
+            work_order_path=item.identity.work_order_path,
+            base_sha=resolved_base,
+            work_order_content=content,
+        )
+
+    def _carried_base(self, item: GovernedWorkItem, refs: OrchestrationReferences | None) -> str:
+        if refs is None or refs.base_sha is None:
+            raise OrchestrationMissingReferenceError(
+                f"proving the worker execution for '{item.identity.work_item}' "
+                "requires the carried dispatch-base reference; it is never guessed"
+            )
+        return refs.base_sha
+
     def _begin_implementation(
-        self, item: GovernedWorkItem, refs: OrchestrationReferences
+        self, item: GovernedWorkItem, repo_root: Path, refs: OrchestrationReferences
     ) -> OrchestrationOutcome:
-        """DISPATCHED: the carried typed worker-session evidence is the
-        proof that implementation began. The session's binding — session
-        id, repository, active Work Item, dispatch base SHA — is re-proved
-        against reconstructed authority *before* the lifecycle event
-        (FZ-CTRL005-001); a missing, foreign, swapped, or forged
-        session-id-only reference never advances the lifecycle, and a
-        dispatch-position session must not already carry PR identity
-        (none is invented while still DISPATCHED)."""
+        """DISPATCHED: emit BEGIN_IMPLEMENTATION only on proven execution
+        evidence (FZ-CTRL005-001 + FZ-CTRL005-002).
+
+        The carried typed session is a *request*, not proof: its binding
+        (session id, repository, active Work Item, dispatch base SHA) is
+        checked against reconstructed authority first (foreign binding
+        refuses with zero provider calls), and its **provenance** is then
+        re-established from live provider state through the accepted
+        CTRL-004 adapter contract — ``start_worker`` with the exact
+        repository-derived context *identifies* the worker execution for
+        that exact Work Order, and the provider-identified session must
+        be the very session the caller carried (fork guard, mirroring the
+        adapter's own resume fork refusal). Only then does the lifecycle
+        event emit. No session value constructed by hand — however
+        structurally exact — can pass without the provider identifying
+        it right now; no PR identity is invented while still DISPATCHED."""
         if refs.worker_session is None:
             return AwaitingWorker(
                 work_item=item.identity.work_item,
@@ -298,6 +333,14 @@ class Orchestrator:
                 f"(#{session.pr_number}) while '{item.identity.work_item}' is "
                 "still DISPATCHED and authority records no governed pull request"
             )
+        observed = self._zai.start_worker(self._dispatch_context(item, repo_root, refs))
+        if observed.session_id != session.session_id:
+            raise OrchestrationContradictionError(
+                f"the provider identifies worker session '{observed.session_id}' for "
+                f"the exact '{item.identity.work_item}' context, but the carried "
+                f"evidence names '{session.session_id}': the carried session was "
+                "not issued for this governed context (or the execution forked)"
+            )
         event = item.handle(
             DomainCommand(item.identity.work_item, CommandName.BEGIN_IMPLEMENTATION)
         )
@@ -305,7 +348,7 @@ class Orchestrator:
             work_item=item.identity.work_item,
             lifecycle=item.lifecycle,
             event=event,
-            session_id=session.session_id,
+            session_id=observed.session_id,
         )
 
     def _observe_pull_request(
