@@ -38,15 +38,24 @@ criterion):
   decision) is not the current packet; findings are never dropped,
   rewritten, or invented.
 * **Same-worker/same-PR handoff (AC5).** A validated packet plus the
-  carried typed worker session (proven locally against authority —
-  repository, work item, dispatch base, and PR identity when
-  reported) produce a typed :class:`ReviewHandoff` — a *request* for
-  the existing worker/resume boundary, never an execution: the loop
-  performs no worker-provider I/O; the boundary re-establishes
-  session provenance from live provider state through the accepted
-  CTRL-004 adapter before any resume. Identity, base, head, or packet
-  drift fails closed; the loop never dispatches an alternate worker
-  or creates a new PR.
+  carried typed worker session produce a typed :class:`ReviewHandoff`
+  only after **adapter provenance** is re-established from live
+  provider state (FZ-CTRL007-001): the carried session's binding
+  (repository, work item, dispatch base, PR identity when reported)
+  is proven locally against authority first, and the execution is
+  then identified through the accepted CTRL-004 adapter's
+  ``start_worker`` contract — the only existing contract that
+  observes a worker execution without resuming it — with the exact
+  repository-derived governed context (work order path and content,
+  dispatch base, exact PR identity); the provider-identified session
+  must be the very session the caller carried (fork guard). A
+  structurally exact hand-constructed session value with an
+  arbitrary id therefore cannot produce a handoff. The handoff is a
+  *request* for the existing worker/resume boundary, never an
+  execution: the loop never calls ``resume_worker`` — the boundary
+  performs the resume itself. Identity, base, head, or packet drift
+  fails closed; the loop never dispatches an alternate worker or
+  creates a new PR.
 * **Deterministic iteration control (AC6).** At most one governed
   transition per evaluation — APPROVE or REQUEST_CHANGES from
   REVIEW_PENDING, both already authorized by the frozen CTRL-001
@@ -108,7 +117,7 @@ from controller.errors import (
 from controller.github import GithubAdapter, GithubComment, GithubPullRequest, GithubReview
 from controller.orchestrator import OrchestrationReferences
 from controller.states import LifecycleState
-from controller.zai import ZaiWorkerSession
+from controller.zai import ZaiAdapter, ZaiWorkerContext, ZaiWorkerSession
 
 #: The lifecycle positions the review loop owns: the Architect's
 #: decision position and the change-iteration handoff position.
@@ -384,14 +393,17 @@ class ArchitectReviewLoop:
     One :meth:`evaluate` reconstructs authority, correlates the exact
     governed PR, observes the Architect's review evidence and the
     machine-readable packet surface, and performs at most one governed
-    lifecycle step. The instance holds only the injected GitHub
-    adapter (AC7); restart with the same repository, evidence, and
-    references reproduces the same decision. The loop never talks to
-    the worker provider and never authors a decision.
+    lifecycle step. The instance holds only the two injected adapters
+    (AC7); restart with the same repository, evidence, and references
+    reproduces the same decision. The loop never authors a decision
+    and never resumes the worker: the handoff it produces is a typed
+    request whose session provenance it re-establishes through the
+    accepted CTRL-004 identify contract.
     """
 
-    def __init__(self, *, github: GithubAdapter) -> None:
+    def __init__(self, *, github: GithubAdapter, zai: ZaiAdapter) -> None:
         self._github = github
+        self._zai = zai
 
     def evaluate(
         self,
@@ -429,7 +441,7 @@ class ArchitectReviewLoop:
                     "observed on the governed PR"
                 )
             packet, iteration = self._require_packet(item, pr, reviewer, latest, reviews)
-            handoff = self._handoff(item, references, pr, packet)
+            handoff = self._handoff(repo_root, item, references, pr, packet)
             return ReviewLoopOutcome(
                 work_item=item.identity.work_item,
                 repository=item.identity.repository,
@@ -451,7 +463,7 @@ class ArchitectReviewLoop:
 
         packet, iteration = self._require_packet(item, pr, reviewer, latest, reviews)
         event = item.handle(DomainCommand(item.identity.work_item, CommandName.REQUEST_CHANGES))
-        handoff = self._handoff(item, references, pr, packet)
+        handoff = self._handoff(repo_root, item, references, pr, packet)
         return ReviewLoopOutcome(
             work_item=item.identity.work_item,
             repository=item.identity.repository,
@@ -592,17 +604,29 @@ class ArchitectReviewLoop:
 
     def _handoff(
         self,
+        repo_root: Path,
         item: GovernedWorkItem,
         references: OrchestrationReferences,
         pr: GithubPullRequest,
         packet: ReviewPacket,
     ) -> ReviewHandoff | None:
+        """Produce the typed handoff, or expose the packet without one.
+
+        The handoff exists only with a carried typed worker session.
+        Its binding is proven locally first (zero provider calls on
+        refusal); its **provenance** is then re-established from live
+        provider state through the accepted CTRL-004 identify contract
+        (FZ-CTRL007-001) before the handoff is produced. An absent
+        session reference leaves the packet exposed for governance
+        attention without a handoff. The loop never resumes the worker.
+        """
         session = references.worker_session
         if session is None:
             return None
         self._prove_handoff_session(item, session, pr)
+        proven_session_id = self._identify_worker_execution(repo_root, item, pr, session)
         return ReviewHandoff(
-            session_id=session.session_id,
+            session_id=proven_session_id,
             repository=item.identity.repository,
             work_item=item.identity.work_item,
             work_order_path=item.identity.work_order_path,
@@ -617,6 +641,47 @@ class ArchitectReviewLoop:
                 f"head {pr.head_sha[:12]}"
             ),
         )
+
+    def _identify_worker_execution(
+        self,
+        repo_root: Path,
+        item: GovernedWorkItem,
+        pr: GithubPullRequest,
+        session: ZaiWorkerSession,
+    ) -> str:
+        """Re-establish adapter provenance for the carried session.
+
+        ``start_worker`` with the exact repository-derived governed
+        context — the accepted CTRL-004 identify semantics, the only
+        existing contract that observes a worker execution without
+        resuming it (the FZ-CTRL005-002 doctrine applied to the review
+        handoff) — identifies the execution for exactly this Work
+        Order, dispatch base, and PR; the provider-identified session
+        must be the very session the caller carried (fork guard, the
+        mirror of the orchestrator's DISPATCHED guard). A structurally
+        exact session value constructed by hand cannot pass: only the
+        session the provider identifies right now produces a handoff.
+        The loop never resumes the worker here — resume execution
+        belongs to the consuming boundary.
+        """
+        context = ZaiWorkerContext(
+            repository=item.identity.repository,
+            work_item=item.identity.work_item,
+            work_order_path=item.identity.work_order_path,
+            base_sha=pr.base_sha,
+            work_order_content=_read_work_order(repo_root, item.identity.work_order_path),
+            pr_number=pr.number,
+            head_sha=pr.head_sha,
+        )
+        observed = self._zai.start_worker(context)
+        if observed.session_id != session.session_id:
+            raise ReviewContradictionError(
+                f"the provider identifies worker session '{observed.session_id}' for "
+                f"the exact '{item.identity.work_item}' context, but the carried "
+                f"evidence names '{session.session_id}': the carried session was "
+                "not issued for this governed context (or the execution forked)"
+            )
+        return observed.session_id
 
     def _prove_handoff_session(
         self,
@@ -686,6 +751,16 @@ class ArchitectReviewLoop:
 # ---------------------------------------------------------------------------
 # Deterministic packet-block parsing (AC4) — strict, fail-closed
 # ---------------------------------------------------------------------------
+
+
+def _read_work_order(repo_root: Path, relative: str) -> str:
+    """Read the frozen Work Order text (repository-derived context input)."""
+    try:
+        return (repo_root / relative).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ReviewContradictionError(
+            f"work order '{relative}' could not be read from the repository"
+        ) from exc
 
 
 def _packet_blocks(body: str) -> list[str]:

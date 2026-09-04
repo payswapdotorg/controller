@@ -30,7 +30,7 @@ from controller.review import (
     ReviewPacket,
 )
 from controller.states import LifecycleState
-from controller.zai import ZaiWorkerSession
+from controller.zai import ZaiAdapter, ZaiWorkerSession
 from tests.github_fakes import (
     BASE_SHA,
     HEAD_SHA,
@@ -43,6 +43,7 @@ from tests.github_fakes import (
     review,
 )
 from tests.util import REPO_ROOT, make_repo
+from tests.zai_fakes import START_PATH, FakeZaiTransport, worker_session
 
 BRANCH = "ctrl-007-review-loop"
 WORK_ITEM = "CTRL-007"
@@ -144,6 +145,7 @@ class LoopFixtureMixin(unittest.TestCase):
         comments: list[dict[str, Any]] | None = None,
         with_pr: bool = True,
         pr_head_sha: str = HEAD_SHA,
+        identify: dict[str, Any] | None = None,
     ) -> tuple[ArchitectReviewLoop, Path]:
         single = pull_request(
             number=17,
@@ -165,12 +167,33 @@ class LoopFixtureMixin(unittest.TestCase):
         else:
             responses[f"/repos/{REPO}/issues/17/comments"] = []
         transport = FakeTransport(responses=responses)
-        loop = ArchitectReviewLoop(github=GithubAdapter(transport, REPO))
+        identify_response = (
+            identify
+            if identify is not None
+            else worker_session(
+                session_id=SESSION_ID,
+                repository=REPO,
+                work_item=WORK_ITEM,
+                base_sha=BASE_SHA,
+                pr_number=17,
+                head_sha=HEAD_SHA,
+            )
+        )
+        zai_transport = FakeZaiTransport({START_PATH: identify_response})
+        loop = ArchitectReviewLoop(
+            github=GithubAdapter(transport, REPO),
+            zai=ZaiAdapter(zai_transport, REPO),
+        )
         return loop, self._repo(status)
 
     def _transport(self, loop: ArchitectReviewLoop) -> FakeTransport:
         transport = loop._github._transport  # noqa: SLF001 - test seam
         assert isinstance(transport, FakeTransport)
+        return transport
+
+    def _zai_transport(self, loop: ArchitectReviewLoop) -> FakeZaiTransport:
+        transport = loop._zai._transport  # noqa: SLF001 - test seam
+        assert isinstance(transport, FakeZaiTransport)
         return transport
 
 
@@ -274,7 +297,10 @@ class LoopPositionTests(LoopFixtureMixin):
         self.assertEqual(self._transport(loop).calls, [])
 
     def test_real_repository_is_currently_outside_loop_positions(self) -> None:
-        loop = ArchitectReviewLoop(github=GithubAdapter(FakeTransport(), REPO))
+        loop = ArchitectReviewLoop(
+            github=GithubAdapter(FakeTransport(), REPO),
+            zai=ZaiAdapter(FakeZaiTransport(), REPO),
+        )
         with self.assertRaises(ReviewLoopPositionError):
             loop.evaluate(REPO_ROOT, _refs())
 
@@ -604,6 +630,44 @@ class HandoffTests(LoopFixtureMixin):
         self.assertEqual(outcome.handoff.head_sha, HEAD_SHA)
         self.assertIs(outcome.handoff.packet, outcome.packet)
 
+    def test_structurally_exact_non_adapter_session_cannot_produce_handoff(self) -> None:
+        """FZ-CTRL007-001 regression: a hand-constructed session value with
+        a structurally exact binding but an arbitrary session id is refused
+        — the provider identifies a different execution right now."""
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+            identify=worker_session(
+                session_id="zai-sess-issued-by-provider",
+                repository=REPO,
+                work_item=WORK_ITEM,
+                base_sha=BASE_SHA,
+                pr_number=17,
+                head_sha=HEAD_SHA,
+            ),
+        )
+        with self.assertRaises(ReviewContradictionError):
+            loop.evaluate(repo, _refs())
+
+    def test_provider_session_on_foreign_pr_refuses_identification(self) -> None:
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+            identify=worker_session(
+                session_id=SESSION_ID,
+                repository=REPO,
+                work_item=WORK_ITEM,
+                base_sha=BASE_SHA,
+                pr_number=99,
+                head_sha=HEAD_SHA,
+            ),
+        )
+        with self.assertRaises(Exception) as raised:
+            loop.evaluate(repo, _refs())
+        self.assertIn("Zai", type(raised.exception).__name__)
+
     def test_absent_session_leaves_packet_exposed_without_handoff(self) -> None:
         loop, repo = self._loop(
             "REVIEW_PENDING",
@@ -613,6 +677,7 @@ class HandoffTests(LoopFixtureMixin):
         outcome = loop.evaluate(repo, _refs(worker_session=None))
         assert outcome.packet is not None
         self.assertIsNone(outcome.handoff)
+        self.assertEqual(self._zai_transport(loop).calls, [])
 
     def test_foreign_repository_session_fails_closed(self) -> None:
         with self.assertRaises(ReviewContradictionError):
@@ -634,7 +699,17 @@ class HandoffTests(LoopFixtureMixin):
         with self.assertRaises(ReviewContradictionError):
             self._request_changes_outcome(head_sha="f" * 40)
 
-    def test_handoff_performs_no_worker_provider_calls(self) -> None:
+    def test_local_binding_proof_precedes_provider_identification(self) -> None:
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+        )
+        with self.assertRaises(ReviewContradictionError):
+            loop.evaluate(repo, _refs(worker_session=_session(repository="other/repo")))
+        self.assertEqual(self._zai_transport(loop).calls, [])
+
+    def test_handoff_identifies_without_resume_or_github_mutation(self) -> None:
         loop, repo = self._loop(
             "REVIEW_PENDING",
             reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
@@ -643,6 +718,10 @@ class HandoffTests(LoopFixtureMixin):
         loop.evaluate(repo, _refs())
         transport = self._transport(loop)
         self.assertTrue(all(call[0] == "GET" for call in transport.calls))
+        zai_calls = self._zai_transport(loop).calls
+        self.assertEqual(len(zai_calls), 1)
+        self.assertEqual(zai_calls[0][0], START_PATH)
+        self.assertFalse(any("resume" in path for path, _ in zai_calls))
 
 
 class RestartDeterminismTests(LoopFixtureMixin):
@@ -664,9 +743,9 @@ class RestartDeterminismTests(LoopFixtureMixin):
         other, _ = self._fixture()
         self.assertEqual(loop.evaluate(repo, _refs()), other.evaluate(repo, _refs()))
 
-    def test_loop_instance_holds_only_the_injected_adapter(self) -> None:
+    def test_loop_instance_holds_only_the_two_injected_adapters(self) -> None:
         loop, _ = self._fixture()
-        self.assertEqual(sorted(loop.__dict__.keys()), ["_github"])  # noqa: SLF001 - structural runtime-non-authority pin
+        self.assertEqual(sorted(loop.__dict__.keys()), ["_github", "_zai"])  # noqa: SLF001 - structural runtime-non-authority pin
 
 
 if __name__ == "__main__":
