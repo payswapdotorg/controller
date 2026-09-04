@@ -61,7 +61,11 @@ Layering and doctrine (mirroring the CTRL-003 GitHub adapter):
   verification is available to consumers; minting is not). A
   structurally identical hand-constructed session value — or a
   caller-constructed value of the issued type — is not evidence and
-  fails such verification. This is not a second session model,
+  fails such verification; a *subclass* of the issued type is not
+  evidence either (FZ-CTRL007-005): the check pins the exact dynamic
+  type before invoking the sealed verifier, and governing boundaries
+  invoke the sealed verifier directly (never a value-supplied
+  override of the virtual method). This is not a second session model,
   registry, cache, database, or persistence: it is the same frozen
   value type carrying proof of the path that constructed it.
 
@@ -245,8 +249,14 @@ class ZaiIssuedWorkerSession(ZaiWorkerSession):
     trip. A hand-constructed value of this type (or a structurally
     identical ``ZaiWorkerSession``) therefore fails
     :meth:`is_adapter_issued`, as does a genuine proof transplanted
-    onto different fields. This is not a second session model: it is
-    the same frozen value type carrying its construction-path evidence.
+    onto different fields. A *subclass* of this type is not evidence
+    either (FZ-CTRL007-005): :meth:`is_adapter_issued` pins the exact
+    dynamic type to this class before verifying, and consuming
+    boundaries invoke the sealed adapter verifier directly against
+    the carried proof and ordinary fields rather than trusting any
+    value-supplied override of the virtual method. This is not a
+    second session model: it is the same frozen value type carrying
+    its construction-path evidence.
     """
 
     _proof: object
@@ -256,7 +266,17 @@ class ZaiIssuedWorkerSession(ZaiWorkerSession):
         adapter's provider-response path — a pure local check (zero
         provider I/O) over the carried proof and fields. Verification
         is deliberately available to consumers; the mint is not
-        (FZ-CTRL007-003/004)."""
+        (FZ-CTRL007-003/004). The exact dynamic type is pinned first
+        (FZ-CTRL007-005): a subclass of the issued type never verifies
+        here, even when it carries a genuine proof and overrides
+        nothing — and a subclass that *does* override this method can
+        never influence a governing boundary, because boundaries
+        invoke the sealed adapter verifier
+        (``ZaiAdapter._verify_issuance``) against the carried proof and
+        ordinary fields with the exact type pinned instead of
+        dispatching on this virtual method."""
+        if type(self) is not ZaiIssuedWorkerSession:
+            return False
         return ZaiAdapter._verify_issuance(self._proof, _ordinary_field_values(self))
 
 

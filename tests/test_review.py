@@ -5,7 +5,12 @@ CHANGES_REQUESTED re-observation, the same-worker/same-PR handoff with
 adapter-issued session evidence, and restart determinism). Fully
 offline: the fake GitHub transport serves canned JSON, the synthetic
 authority tree is local, and the loop is exercised with zero
-worker-provider surface of any kind."""
+worker-provider surface of any kind. The packet grammar regressions
+pin the exact-grammar doctrine (FZ-CTRL007-006: blank lines are never
+discarded; structural lines match their exact forms), and the handoff
+regressions pin the non-overridable provenance check
+(FZ-CTRL007-005: the loop invokes the sealed adapter verifier with the
+exact dynamic type pinned, never the value's virtual method)."""
 
 from __future__ import annotations
 
@@ -562,6 +567,151 @@ class RequestChangesTests(LoopFixtureMixin):
             loop.evaluate(repo, _refs())
 
 
+class PacketGrammarStrictnessTests(LoopFixtureMixin):
+    """FZ-CTRL007-006 regressions: the packet grammar is exact in the raw
+    block as it stands — blank lines are never silently discarded, and
+    structural lines must match their exact forms (no trailing
+    whitespace/garbage absorbed into values, canonical decimal
+    integers, exact ``findings:`` / ``findings: []`` lines)."""
+
+    def _grammar_loop(self, body: str) -> tuple[ArchitectReviewLoop, Path]:
+        return self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=body)],
+        )
+
+    def _with_line_inserted_after(self, block: str, anchor: str, extra: str) -> str:
+        lines = block.split("\n")
+        index = lines.index(anchor)
+        lines.insert(index + 1, extra)
+        return "\n".join(lines)
+
+    def _with_line_replaced(self, block: str, original: str, replacement: str) -> str:
+        lines = block.split("\n")
+        index = lines.index(original)
+        lines[index] = replacement
+        return "\n".join(lines)
+
+    def test_clean_packet_still_parses_the_control(self) -> None:
+        """Positive control for the strictness regressions: the unmutated
+        fixture block still produces the handoff."""
+        loop, repo = self._grammar_loop(_packet_block())
+        outcome = loop.evaluate(repo, _refs())
+        assert outcome.handoff is not None
+        self.assertEqual(outcome.handoff.session_id, SESSION_ID)
+
+    def test_blank_line_between_header_lines_fails_closed(self) -> None:
+        """The directed regression: a blank line inserted into an otherwise
+        valid packet must be REJECTED, not silently discarded."""
+        body = self._with_line_inserted_after(_packet_block(), "pr: 17", "")
+        loop, repo = self._grammar_loop(body)
+        with self.assertRaises(ReviewPacketError) as raised:
+            loop.evaluate(repo, _refs())
+        self.assertIn("blank line", str(raised.exception))
+        self.assertIn("FZ-CTRL007-006", str(raised.exception))
+
+    def test_blank_line_between_finding_fields_fails_closed(self) -> None:
+        body = self._with_line_inserted_after(_packet_block(), f"    severity: {FINDING[1]}", "")
+        loop, repo = self._grammar_loop(body)
+        with self.assertRaises(ReviewPacketError) as raised:
+            loop.evaluate(repo, _refs())
+        self.assertIn("blank line", str(raised.exception))
+
+    def test_blank_line_before_the_closing_fence_fails_closed(self) -> None:
+        """A trailing blank line at the end of the block is not invisible:
+        the raw block is validated exactly as it stands."""
+        body = self._with_line_inserted_after(
+            _packet_block(), f"    required_change: {FINDING[4]}", ""
+        )
+        loop, repo = self._grammar_loop(body)
+        with self.assertRaises(ReviewPacketError) as raised:
+            loop.evaluate(repo, _refs())
+        self.assertIn("blank line", str(raised.exception))
+
+    def test_whitespace_only_line_fails_closed(self) -> None:
+        """A whitespace-only line is a blank line, not packet content."""
+        body = self._with_line_inserted_after(_packet_block(), "findings:", "   ")
+        loop, repo = self._grammar_loop(body)
+        with self.assertRaises(ReviewPacketError) as raised:
+            loop.evaluate(repo, _refs())
+        self.assertIn("blank line", str(raised.exception))
+
+    def test_findings_line_with_trailing_whitespace_fails_closed(self) -> None:
+        """Exact line form: 'findings: ' (trailing space) is not 'findings:'
+        — trailing whitespace is never absorbed into acceptance."""
+        body = self._with_line_replaced(_packet_block(), "findings:", "findings: ")
+        loop, repo = self._grammar_loop(body)
+        with self.assertRaises(ReviewPacketError) as raised:
+            loop.evaluate(repo, _refs())
+        self.assertIn("exactly 'findings:'", str(raised.exception))
+        self.assertIn("FZ-CTRL007-006", str(raised.exception))
+
+    def test_empty_findings_line_with_trailing_whitespace_fails_closed(self) -> None:
+        body = self._with_line_replaced(_packet_block(findings=[]), "findings: []", "findings: [] ")
+        loop, repo = self._grammar_loop(body)
+        with self.assertRaises(ReviewPacketError) as raised:
+            loop.evaluate(repo, _refs())
+        self.assertIn("exactly 'findings:'", str(raised.exception))
+
+    def test_int_laxity_never_normalizes_the_packet(self) -> None:
+        """Exact vocabularies: int() would accept signs, surrounding
+        whitespace, and underscores — the grammar does not."""
+        for mutated in ("pr: 2_0", "pr: +17", "pr:  17", "pr: 17 ", "pr: 017"):
+            with self.subTest(line=mutated):
+                body = self._with_line_replaced(_packet_block(), "pr: 17", mutated)
+                loop, repo = self._grammar_loop(body)
+                with self.assertRaises(ReviewPacketError):
+                    loop.evaluate(repo, _refs())
+
+    def test_iteration_must_be_canonical_digits(self) -> None:
+        for mutated in ("iteration: 01", "iteration: _1", "iteration: 1 "):
+            with self.subTest(line=mutated):
+                body = self._with_line_replaced(_packet_block(), "iteration: 1", mutated)
+                loop, repo = self._grammar_loop(body)
+                with self.assertRaises(ReviewPacketError):
+                    loop.evaluate(repo, _refs())
+
+    def test_work_item_with_surrounding_whitespace_fails_closed(self) -> None:
+        """Exact structural vocabulary: the work item identity token is
+        exact — surrounding whitespace is not part of it."""
+        body = self._with_line_replaced(
+            _packet_block(), f"work_item: {WORK_ITEM}", f"work_item: {WORK_ITEM} "
+        )
+        loop, repo = self._grammar_loop(body)
+        with self.assertRaises(ReviewPacketError) as raised:
+            loop.evaluate(repo, _refs())
+        self.assertIn("exact identity token", str(raised.exception))
+
+    def test_findings_declared_text_is_transported_verbatim(self) -> None:
+        """The verbatim-transport requirement is preserved: declared
+        finding text (including internal spacing) is never trimmed or
+        rewritten by the strict grammar."""
+        declared = "  collapse   double spaces   verbatim  "
+        block = "\n".join(
+            [
+                "```review-packet",
+                f"work_item: {WORK_ITEM}",
+                "pr: 17",
+                f"head_sha: {HEAD_SHA}",
+                f"base_sha: {BASE_SHA}",
+                "iteration: 1",
+                "decision: REQUEST_CHANGES",
+                "findings:",
+                f"  - id: {FINDING[0]}",
+                f"    severity: {FINDING[1]}",
+                f"    path: {FINDING[2]}",
+                f"    criterion: {FINDING[3]}",
+                f"    required_change: {declared}",
+                "```",
+            ]
+        )
+        loop, repo = self._grammar_loop(block)
+        outcome = loop.evaluate(repo, _refs())
+        assert outcome.packet is not None
+        self.assertEqual(outcome.packet.findings[0].required_change, declared)
+
+
 class ChangesRequestedReobservationTests(LoopFixtureMixin):
     """AC6: idempotent re-observation at CHANGES_REQUESTED."""
 
@@ -745,6 +895,77 @@ class HandoffTests(LoopFixtureMixin):
         outcome = loop.evaluate(repo, _refs(worker_session=issued))
         assert outcome.handoff is not None
         self.assertEqual(outcome.handoff.session_id, SESSION_ID)
+
+    def test_subclassed_issued_session_cannot_produce_handoff(self) -> None:
+        """FZ-CTRL007-005 regression: a ZaiIssuedWorkerSession subclass
+        with every governed ordinary field exact, an arbitrary/invalid
+        proof, and an overridden is_adapter_issued() returning True is
+        still refused — the handoff boundary never dispatches on the
+        value's virtual method; it pins the exact dynamic type and
+        invokes the sealed adapter verifier against the carried proof
+        and ordinary fields directly, so subclass dispatch cannot
+        establish adapter provenance."""
+        genuine = _issued_session()
+
+        class SubversiveIssuedSession(ZaiIssuedWorkerSession):
+            """The directed attack: override the virtual verifier."""
+
+            def is_adapter_issued(self) -> bool:
+                return True
+
+        subversive = SubversiveIssuedSession(
+            session_id=genuine.session_id,
+            repository=genuine.repository,
+            work_item=genuine.work_item,
+            base_sha=genuine.base_sha,
+            pr_number=genuine.pr_number,
+            head_sha=genuine.head_sha,
+            status=genuine.status,
+            updated_at=genuine.updated_at,
+            _proof=object(),  # arbitrary/invalid proof
+        )
+        # the virtual claim itself lies: only the boundary check matters
+        self.assertTrue(subversive.is_adapter_issued())
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+        )
+        with self.assertRaises(ReviewContradictionError) as raised:
+            loop.evaluate(repo, _refs(worker_session=subversive))
+        self.assertIn("FZ-CTRL007-005", str(raised.exception))
+        self.assertIn("SubversiveIssuedSession", str(raised.exception))
+        self.assertTrue(all(call[0] == "GET" for call in self._transport(loop).calls))
+
+    def test_subclassed_issued_session_with_genuine_proof_is_still_refused(self) -> None:
+        """FZ-CTRL007-005 strongest subclass case: even a subclass carrying
+        a GENUINE proof object (stolen from real issued evidence) is
+        refused at the exact-type pin — no subclass of the issued type
+        is the sealed construction-path value form."""
+        genuine = _issued_session()
+
+        class PlainSubclassSession(ZaiIssuedWorkerSession):
+            """No override at all: only the dynamic type differs."""
+
+        stolen = PlainSubclassSession(
+            session_id=genuine.session_id,
+            repository=genuine.repository,
+            work_item=genuine.work_item,
+            base_sha=genuine.base_sha,
+            pr_number=genuine.pr_number,
+            head_sha=genuine.head_sha,
+            status=genuine.status,
+            updated_at=genuine.updated_at,
+            _proof=genuine._proof,  # noqa: SLF001 - the transplant under test
+        )
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+        )
+        with self.assertRaises(ReviewContradictionError) as raised:
+            loop.evaluate(repo, _refs(worker_session=stolen))
+        self.assertIn("FZ-CTRL007-005", str(raised.exception))
 
     def test_absent_session_leaves_packet_exposed_without_handoff(self) -> None:
         loop, repo = self._loop(

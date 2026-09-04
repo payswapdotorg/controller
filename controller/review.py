@@ -32,27 +32,39 @@ criterion):
   frozen grammar below, which instantiates the packet of
   ``spec/governance/review-protocol.md`` — is parsed strictly,
   cross-validated field-by-field against the observed evidence, and
-  transported verbatim as a typed :class:`ReviewPacket`. Structural
-  packet fields are never guessed: a block that does not match the
-  current evidence exactly (work item, PR, head, base, iteration,
-  decision) is not the current packet; findings are never dropped,
-  rewritten, or invented.
+  transported verbatim as a typed :class:`ReviewPacket`. The grammar
+  is exact in the raw block as it stands (FZ-CTRL007-006): blank
+  lines are never discarded, structural lines match their exact
+  forms (no trailing whitespace or garbage absorbed into values,
+  canonical decimal integers, exact ``findings:`` / ``findings: []``
+  lines), and any deviation fails closed. Structural packet fields
+  are never guessed: a block that does not match the current
+  evidence exactly (work item, PR, head, base, iteration, decision)
+  is not the current packet; findings are never dropped, rewritten,
+  or invented.
 * **Same-worker/same-PR handoff (AC5).** A validated packet plus the
   carried worker-session evidence produce a typed :class:`ReviewHandoff`
   only after the carried session's **ordinary binding** (repository, work
   item, dispatch base, PR identity when reported) is proven locally
   against authority and the session's **adapter-issued provenance** is
-  verified locally (FZ-CTRL007-001/002): the carried value must be
+  verified locally (FZ-CTRL007-001/002/005): the carried value must be
   :class:`controller.zai.ZaiIssuedWorkerSession` — evidence sealed at the
   CTRL-004 boundary when the adapter normalized the provider response —
   and its construction-path proof must verify (a pure local check with
-  no source-reproducible key material). A structurally exact session value
+  no source-reproducible key material). The provenance check is
+  non-overridable (FZ-CTRL007-005): the loop never dispatches on the
+  value's virtual ``is_adapter_issued`` method, but pins the exact
+  dynamic type to the sealed evidence class and invokes the sealed
+  adapter verifier directly against the carried proof and ordinary
+  fields — a subclass of the issued type cannot establish provenance,
+  whatever its overridden methods claim. A structurally exact session value
   constructed by hand (the public ``ZaiWorkerSession`` form), a
   caller-constructed value of the issued type, or a genuine proof
   transplanted onto different fields, therefore cannot produce a
   handoff. The loop establishes provenance **without any Z.ai provider
   I/O** — it performs zero worker-provider calls of any kind
-  (observation-only contract): live provider re-proof/resume belongs to
+  (observation-only contract): the one sealed-verifier reference is a
+  pure local computation, and live provider re-proof/resume belongs to
   the consuming worker boundary, which re-establishes the execution
   through the accepted CTRL-004 contracts before acting. The handoff is
   a *request* for that boundary, never an execution. Identity, base,
@@ -119,7 +131,12 @@ from controller.errors import (
 from controller.github import GithubAdapter, GithubComment, GithubPullRequest, GithubReview
 from controller.orchestrator import OrchestrationReferences
 from controller.states import LifecycleState
-from controller.zai import ZaiIssuedWorkerSession, ZaiWorkerSession
+from controller.zai import (
+    ZaiAdapter,
+    ZaiIssuedWorkerSession,
+    ZaiWorkerSession,
+    _ordinary_field_values,
+)
 
 #: The lifecycle positions the review loop owns: the Architect's
 #: decision position and the change-iteration handoff position.
@@ -129,6 +146,15 @@ _LOOP_POSITIONS: Final[frozenset[LifecycleState]] = frozenset(
 
 #: 40-character lowercase hexadecimal SHA.
 _SHA_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
+
+#: Canonical decimal digits for ``pr`` (a non-negative integer: ``0`` or
+#: no leading zero) — the exact vocabulary; ``int()`` laxity (signs,
+#: whitespace, underscores, leading zeros) never normalizes a packet
+#: (FZ-CTRL007-006).
+_PR_PATTERN: Final[re.Pattern[str]] = re.compile(r"0|[1-9][0-9]*")
+
+#: Canonical decimal digits for ``iteration`` (a positive integer).
+_ITERATION_PATTERN: Final[re.Pattern[str]] = re.compile(r"[1-9][0-9]*")
 
 #: The fenced-block tag introducing a machine-readable review packet.
 _PACKET_TAG: Final = "```review-packet"
@@ -648,23 +674,35 @@ class ArchitectReviewLoop:
 
     def _require_issued_evidence(self, session: ZaiWorkerSession) -> ZaiIssuedWorkerSession:
         """Require the carried session to be adapter-issued evidence
-        (FZ-CTRL007-001/002), verified locally with zero provider I/O.
+        (FZ-CTRL007-001/002/005), verified locally with zero provider
+        I/O and without trusting the value's own behavior.
 
         The carried value must be the evidence the CTRL-004 adapter
         sealed when it normalized the provider response
         (:class:`ZaiIssuedWorkerSession`), and its construction-path
         proof must verify — a pure local check over the carried value
         with no source-reproducible key material involved and no
-        reachable mint operation anywhere (FZ-CTRL007-003). A
-        structurally exact value built through the public
-        ``ZaiWorkerSession`` constructor is not evidence of any
-        provider-observed execution; a caller-constructed value of the
-        issued type — including one carrying a genuine proof object
-        transplanted onto different fields — fails verification,
-        because the proof binds the exact fields it was sealed for.
-        The loop never re-proves provenance by invoking Z.ai: live
-        provider re-proof/resume is the consuming worker boundary's
-        responsibility.
+        reachable mint operation anywhere (FZ-CTRL007-003).
+
+        The check is **non-overridable** (FZ-CTRL007-005): the loop
+        never dispatches on the value's virtual ``is_adapter_issued``
+        method — a subclass of the issued type could override it —
+        but instead pins the exact dynamic type to the sealed
+        evidence class and invokes the sealed adapter verifier
+        directly against the carried proof and the canonical
+        ordinary fields, so adapter provenance remains
+        construction-path evidence, never behavior supplied by the
+        carried object's dynamic type. A structurally exact value
+        built through the public ``ZaiWorkerSession`` constructor is
+        not evidence of any provider-observed execution; a
+        caller-constructed value of the issued type — including one
+        carrying a genuine proof object transplanted onto different
+        fields — fails verification, because the proof binds the
+        exact fields it was sealed for; and a subclass of the issued
+        type is rejected before verification regardless of what its
+        overridden methods claim. The loop never re-proves
+        provenance by invoking Z.ai: live provider re-proof/resume
+        is the consuming worker boundary's responsibility.
         """
         if not isinstance(session, ZaiIssuedWorkerSession):
             raise ReviewContradictionError(
@@ -674,7 +712,17 @@ class ArchitectReviewLoop:
                 "CTRL-004 adapter when normalizing a provider response produces "
                 "a handoff (FZ-CTRL007-001)"
             )
-        if not session.is_adapter_issued():
+        if type(session) is not ZaiIssuedWorkerSession:
+            raise ReviewContradictionError(
+                f"the carried worker session '{session.session_id}' is a "
+                f"{type(session).__name__} subclass of the adapter-issued "
+                "evidence type: subclass dispatch cannot establish adapter "
+                "provenance — the handoff accepts exactly the sealed "
+                "ZaiIssuedWorkerSession construction-path value form, never "
+                "behavior supplied by the carried object's dynamic type "
+                "(FZ-CTRL007-005)"
+            )
+        if not ZaiAdapter._verify_issuance(session._proof, _ordinary_field_values(session)):
             raise ReviewContradictionError(
                 f"the carried worker session '{session.session_id}' presents "
                 "issued-shaped evidence that was not sealed by the CTRL-004 "
@@ -786,8 +834,30 @@ def _parse_packet(block: str) -> ReviewPacket:
     Exact keys, exact order, exact indentation, exact vocabularies —
     any deviation raises :class:`ReviewPacketError`; nothing is
     guessed, defaulted, or repaired.
+
+    The raw block is validated exactly as it stands (FZ-CTRL007-006):
+    no line is ever dropped, trimmed, or normalized — a blank or
+    whitespace-only line inside a packet is a grammar deviation that
+    fails closed, not noise to discard — and every structural line
+    must match its exact form: the exact key spelling with one
+    separating space, ``findings:`` / ``findings: []`` as whole
+    exact lines (trailing whitespace is never absorbed into a
+    value), ``pr`` and ``iteration`` as canonical decimal digit
+    strings, SHAs as exactly 40 lowercase hex characters, and the
+    declared vocabularies for ``decision``, ``severity``, and
+    ``work_item`` (the exact identity token, no surrounding
+    whitespace). Findings' declared text — the value following the
+    exact ``    key: `` form — is transported verbatim, never
+    trimmed or rewritten.
     """
-    lines = [line for line in block.splitlines() if line.strip()]
+    lines = block.split("\n")
+    for index, line in enumerate(lines):
+        if not line.strip():
+            raise ReviewPacketError(
+                f"review packet block contains a blank line at line "
+                f"{index + 1}: the packet grammar is exact, blank lines are "
+                "never discarded (FZ-CTRL007-006)"
+            )
     if len(lines) < len(_PACKET_KEYS) + 1:
         raise ReviewPacketError(
             "review packet block is incomplete: expected the keys "
@@ -805,15 +875,16 @@ def _parse_packet(block: str) -> ReviewPacket:
         values[key] = line[len(expected) :]
         position += 1
     findings_line = lines[position]
-    if not findings_line.startswith("findings:") or findings_line.strip() != "findings:":
-        if findings_line.strip() != "findings: []":
-            raise ReviewPacketError(
-                f"review packet expected 'findings:' or 'findings: []' at line "
-                f"{position + 1}; found {findings_line!r}"
-            )
+    if findings_line not in ("findings:", "findings: []"):
+        raise ReviewPacketError(
+            f"review packet expected exactly 'findings:' or 'findings: []' "
+            f"at line {position + 1}; found {findings_line!r}: exact line "
+            "forms — trailing characters or whitespace are not absorbed "
+            "into a value (FZ-CTRL007-006)"
+        )
     position += 1
     findings: list[ReviewFinding] = []
-    if findings_line.strip() == "findings: []":
+    if findings_line == "findings: []":
         if position != len(lines):
             raise ReviewPacketError(
                 "review packet with 'findings: []' must end the block; "
@@ -858,28 +929,27 @@ def _parse_packet(block: str) -> ReviewPacket:
             )
         if not findings:
             raise ReviewPacketError("review packet declared findings but none were parsed")
-    try:
-        pr_number = int(values["pr"])
-    except ValueError:
+    if values["work_item"] != values["work_item"].strip():
         raise ReviewPacketError(
-            f"review packet 'pr' must be a non-negative integer; found {values['pr']!r}"
-        ) from None
-    if pr_number < 0:
-        raise ReviewPacketError(
-            f"review packet 'pr' must be a non-negative integer; found {values['pr']!r}"
+            f"review packet 'work_item' must be the exact identity token "
+            f"without surrounding whitespace; found {values['work_item']!r} "
+            "(FZ-CTRL007-006: exact line forms)"
         )
-    try:
-        iteration = int(values["iteration"])
-    except ValueError:
+    if not _PR_PATTERN.fullmatch(values["pr"]):
         raise ReviewPacketError(
-            f"review packet 'iteration' must be a positive integer; found {values['iteration']!r}"
-        ) from None
-    if iteration < 1:
-        raise ReviewPacketError(
-            f"review packet 'iteration' must be a positive integer; found {values['iteration']!r}"
+            f"review packet 'pr' must be a non-negative integer written as "
+            f"canonical decimal digits (no sign, whitespace, underscores, or "
+            f"leading zeros); found {values['pr']!r}"
         )
+    pr_number = int(values["pr"])
+    if not _ITERATION_PATTERN.fullmatch(values["iteration"]):
+        raise ReviewPacketError(
+            f"review packet 'iteration' must be a positive integer written as "
+            f"canonical decimal digits; found {values['iteration']!r}"
+        )
+    iteration = int(values["iteration"])
     for field_name in ("head_sha", "base_sha"):
-        if not _SHA_PATTERN.match(values[field_name]):
+        if not _SHA_PATTERN.fullmatch(values[field_name]):
             raise ReviewPacketError(
                 f"review packet '{field_name}' must be 40 lowercase hex "
                 f"characters; found {values[field_name]!r}"

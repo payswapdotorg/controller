@@ -492,14 +492,16 @@ class DeterminismTests(unittest.TestCase):
 
 
 class IssuedEvidenceTests(unittest.TestCase):
-    """FZ-CTRL007-001/002/003/004: adapter-issued session evidence — genuine
-    construction-path provenance. The boundary lives at the adapter's
+    """FZ-CTRL007-001/002/003/004/005: adapter-issued session evidence —
+    genuine construction-path provenance. The boundary lives at the adapter's
     provider-response path, is verifiable locally with zero provider I/O
     and no source-level secret, and cannot be forged from
     repository-source knowledge: not by constructing the ordinary value,
     not by constructing the issued type, not by transplanting a genuine
-    proof onto different fields, and not by invoking any module-level
-    normalization helper (there is none — FZ-CTRL007-004)."""
+    proof onto different fields, not by invoking any module-level
+    normalization helper (there is none — FZ-CTRL007-004), and not by
+    subclassing the issued type (the consumer check pins the exact
+    dynamic type — FZ-CTRL007-005)."""
 
     def test_start_worker_returns_verified_issued_evidence(self) -> None:
         transport = FakeZaiTransport({START_PATH: worker_session()})
@@ -738,6 +740,33 @@ class IssuedEvidenceTests(unittest.TestCase):
         self.assertNotIsInstance(plain, ZaiIssuedWorkerSession)
         self.assertEqual(plain.session_id, issued.session_id)
         self.assertNotEqual(plain, issued)
+
+    def test_issued_session_subclass_never_verifies(self) -> None:
+        """FZ-CTRL007-005 (adapter-side pin): a subclass of the issued
+        type never verifies — the consumer check pins the exact dynamic
+        type before invoking the sealed verifier, so even a GENUINE
+        proof carried by a subclass instance fails, and a subclass that
+        overrides nothing cannot borrow the base implementation to
+        claim issuance."""
+        genuine = _issued_session()
+
+        class PlainSubclassSession(ZaiIssuedWorkerSession):
+            """No override at all: only the dynamic type differs."""
+
+        stolen = PlainSubclassSession(
+            session_id=genuine.session_id,
+            repository=genuine.repository,
+            work_item=genuine.work_item,
+            base_sha=genuine.base_sha,
+            pr_number=genuine.pr_number,
+            head_sha=genuine.head_sha,
+            status=genuine.status,
+            updated_at=genuine.updated_at,
+            _proof=genuine._proof,  # noqa: SLF001 - the transplant under test
+        )
+        self.assertIsInstance(stolen, ZaiIssuedWorkerSession)
+        self.assertFalse(stolen.is_adapter_issued())
+        self.assertNotEqual(stolen, genuine)
 
     def test_issued_evidence_is_ordinary_session_value_for_consumers(self) -> None:
         """Not a second session model: the issued type IS the frozen
