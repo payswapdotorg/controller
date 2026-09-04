@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import unittest
 
+from controller.domain import DispatchEligibility
 from controller.errors import (
     GithubAdapterError,
     GithubAmbiguityError,
@@ -31,7 +32,6 @@ from controller.github import (
     _http_error,
     _normalize_pull_request,
 )
-from controller.states import LifecycleState
 from tests.github_fakes import (
     BASE_SHA,
     HEAD_SHA,
@@ -49,6 +49,17 @@ from tests.github_fakes import (
 )
 
 ARCHITECT = "pectoraux"
+
+
+def _eligible(
+    work_item: str = "CTRL-003",
+    eligible: bool = True,
+    basis: tuple[str, ...] = ("machine state and work-order status agree",),
+) -> DispatchEligibility:
+    """Authority-derived eligibility fixture (CTRL-002 typed value)."""
+    return DispatchEligibility(
+        work_item=work_item, eligible=eligible, basis=basis or ("fixture basis",)
+    )
 
 
 class TransportErrorMappingTests(unittest.TestCase):
@@ -373,18 +384,20 @@ class MergeGateTests(unittest.TestCase):
         self,
         transport: FakeTransport,
         *,
+        expected_base_ref: str = "main",
         expected_base_sha: str = BASE_SHA,
         expected_head_sha: str = HEAD_SHA,
-        machine_status: LifecycleState = LifecycleState.READY,
+        eligibility: DispatchEligibility | None = None,
         required_checks: tuple[str, ...] = (),
     ) -> MergeAuthorization:
         adapter = Adapter(transport, REPO)
         return adapter.authorize_merge(
             pr_number=7,
+            expected_base_ref=expected_base_ref,
             expected_base_sha=expected_base_sha,
             expected_head_sha=expected_head_sha,
             work_item="CTRL-003",
-            machine_status=machine_status,
+            eligibility=eligibility or _eligible(),
             architect_reviewer=ARCHITECT,
             required_checks=required_checks,
         )
@@ -393,12 +406,12 @@ class MergeGateTests(unittest.TestCase):
         self,
         status: dict[str, object],
         *,
-        machine_status: LifecycleState = LifecycleState.READY,
+        eligibility: DispatchEligibility | None = None,
         required_checks: tuple[str, ...] = (),
     ) -> MergeAuthorization:
         return self._authorize(
             _merge_ready_transport(status=status),
-            machine_status=machine_status,
+            eligibility=eligibility,
             required_checks=required_checks,
         )
 
@@ -406,6 +419,7 @@ class MergeGateTests(unittest.TestCase):
         authorization = self._authorize(_merge_ready_transport())
         self.assertEqual(authorization.pr_number, 7)
         self.assertEqual(authorization.head_sha, HEAD_SHA)
+        self.assertEqual(authorization.base_ref, "main")
         self.assertEqual(authorization.base_sha, BASE_SHA)
         self.assertEqual(authorization.work_item, "CTRL-003")
         self.assertEqual(authorization.merge_method, "merge")
@@ -432,6 +446,13 @@ class MergeGateTests(unittest.TestCase):
     def test_base_drift_is_blocked(self) -> None:
         with self.assertRaises(GithubStaleBaseError):
             self._authorize(_merge_ready_transport(), expected_base_sha="9" * 40)
+
+    def test_base_retarget_to_foreign_ref_at_same_sha_is_blocked(self) -> None:
+        """FZ-CTRL003-003: a PR retargeted to another ref at the identical
+        SHA must not be authorizable against an intended 'main' base."""
+        pr = pull_request(base_branch="develop", base_sha=BASE_SHA)
+        with self.assertRaises(GithubStaleBaseError):
+            self._authorize(_merge_ready_transport(pr=pr))
 
     def test_dirty_mergeable_state_is_blocked(self) -> None:
         pr = pull_request(mergeable_state="dirty")
@@ -473,6 +494,58 @@ class MergeGateTests(unittest.TestCase):
         authorization = self._authorize(_merge_ready_transport(reviews=reviews))
         self.assertEqual(authorization.pr_number, 7)
 
+    def test_approval_of_older_head_does_not_authorize_new_head(self) -> None:
+        """FZ-CTRL003-002: an APPROVE submitted against an earlier commit
+        must not survive a head change — the gate requires the review's
+        commit_id to equal the exact expected head SHA."""
+        reviews = [
+            review(10, state="APPROVED", submitted_at="2026-09-04T09:00:00Z", commit_id="old" * 10),
+            review(11, state="APPROVED", submitted_at="2026-09-04T10:00:00Z", commit_id=HEAD_SHA),
+        ]
+        # The LATEST approval (id 11) applies to the current head: passes.
+        authorization = self._authorize(_merge_ready_transport(reviews=reviews))
+        self.assertEqual(authorization.pr_number, 7)
+
+    def test_approval_only_for_old_commit_is_blocked(self) -> None:
+        """FZ-CTRL003-002 (core case): the only Architect APPROVE was
+        submitted for an older head; the current head is unauthorized."""
+        reviews = [
+            review(10, state="APPROVED", submitted_at="2026-09-04T09:00:00Z", commit_id="old" * 10)
+        ]
+        with self.assertRaises(GithubMergeBlockedError):
+            self._authorize(_merge_ready_transport(reviews=reviews))
+
+    def test_approval_without_reported_commit_is_blocked(self) -> None:
+        """FZ-CTRL003-002: an APPROVE that does not report commit identity
+        cannot prove it applies to the head — fail closed."""
+        reviews = [
+            review(10, state="APPROVED", submitted_at="2026-09-04T10:00:00Z", commit_id=None)
+        ]
+        with self.assertRaises(GithubMergeBlockedError):
+            self._authorize(_merge_ready_transport(reviews=reviews))
+
+    def test_head_change_after_approval_fails_closed_end_to_end(self) -> None:
+        """FZ-CTRL003-002 (scenario): approval exists for the reviewed head;
+        a later head change makes authorization fail closed."""
+        pr_new_head = pull_request(head_sha="f" * 40)
+        transport = FakeTransport(
+            adapter_responses(
+                prs=[pr_new_head],
+                pr=pr_new_head,
+                reviews=[review(10, state="APPROVED", commit_id=HEAD_SHA)],
+            )
+        )
+        with self.assertRaises(GithubStaleBaseError):
+            self._authorize(transport)  # expected_head_sha defaults to the old head
+
+    def test_approval_commit_id_is_normalized(self) -> None:
+        from controller.github import _normalize_review
+
+        normalized = _normalize_review(review(10, commit_id=HEAD_SHA), "review")
+        self.assertEqual(normalized.commit_id, HEAD_SHA)
+        no_commit = _normalize_review(review(10, commit_id=None), "review")
+        self.assertIsNone(no_commit.commit_id)
+
     def test_failing_required_check_is_blocked(self) -> None:
         status = commit_status("failure", [("ci/tests", "failure")])
         with self.assertRaises(GithubMergeBlockedError):
@@ -488,9 +561,25 @@ class MergeGateTests(unittest.TestCase):
         authorization = self._authorize_with_status(status, required_checks=("ci/tests",))
         self.assertEqual(authorization.pr_number, 7)
 
-    def test_machine_state_not_ready_is_a_contradiction(self) -> None:
+    def test_machine_state_not_eligible_is_a_contradiction(self) -> None:
+        ineligible = _eligible(eligible=False, basis=("lifecycle state is COMPLETE, not READY",))
         with self.assertRaises(GithubContradictionError):
-            self._authorize(_merge_ready_transport(), machine_status=LifecycleState.COMPLETE)
+            self._authorize(_merge_ready_transport(), eligibility=ineligible)
+
+    def test_different_active_item_cannot_authorize(self) -> None:
+        """FZ-CTRL003-001: authority naming a different active work item
+        must not authorize a merge for this PR's work item."""
+        foreign = _eligible(work_item="CTRL-004")
+        with self.assertRaises(GithubContradictionError):
+            self._authorize(_merge_ready_transport(), eligibility=foreign)
+
+    def test_contradiction_error_names_both_items(self) -> None:
+        foreign = _eligible(work_item="CTRL-004")
+        with self.assertRaises(GithubContradictionError) as ctx:
+            self._authorize(_merge_ready_transport(), eligibility=foreign)
+        message = str(ctx.exception)
+        self.assertIn("CTRL-004", message)
+        self.assertIn("CTRL-003", message)
 
     def test_merge_executes_with_exact_sha_and_method(self) -> None:
         pr = pull_request(base_sha=BASE_SHA, head_sha=HEAD_SHA)
@@ -506,10 +595,11 @@ class MergeGateTests(unittest.TestCase):
         adapter = Adapter(transport, REPO)
         authorization = adapter.authorize_merge(
             pr_number=7,
+            expected_base_ref="main",
             expected_base_sha=BASE_SHA,
             expected_head_sha=HEAD_SHA,
             work_item="CTRL-003",
-            machine_status=LifecycleState.READY,
+            eligibility=_eligible(),
             architect_reviewer=ARCHITECT,
         )
         merged = adapter.merge_pull_request(authorization)
@@ -531,6 +621,7 @@ class MergeGateTests(unittest.TestCase):
         stale_authorization = MergeAuthorization(
             pr_number=7,
             work_item="CTRL-003",
+            base_ref="main",
             base_sha=BASE_SHA,
             head_sha=HEAD_SHA,
             merge_method="merge",
@@ -538,12 +629,32 @@ class MergeGateTests(unittest.TestCase):
         with self.assertRaises(GithubStaleBaseError):
             adapter.merge_pull_request(stale_authorization)
 
+    def test_merge_refuses_base_retarget_since_authorization(self) -> None:
+        """FZ-CTRL003-003: execution-time refusal when the PR is retargeted
+        to another base ref after authorization."""
+        pr = pull_request(base_sha=BASE_SHA, head_sha=HEAD_SHA)
+        retargeted = pull_request(base_branch="develop", base_sha=BASE_SHA, head_sha=HEAD_SHA)
+        transport = FakeTransport(
+            adapter_responses(prs=[pr], pr=retargeted, reviews=[review(11, state="APPROVED")])
+        )
+        authorization = MergeAuthorization(
+            pr_number=7,
+            work_item="CTRL-003",
+            base_ref="main",
+            base_sha=BASE_SHA,
+            head_sha=HEAD_SHA,
+            merge_method="merge",
+        )
+        with self.assertRaises(GithubStaleBaseError):
+            Adapter(transport, REPO).merge_pull_request(authorization)
+
     def test_merge_refuses_already_merged_pr(self) -> None:
         pr = pull_request(merged=True)
         transport = FakeTransport(adapter_responses(prs=[], pr=pr, reviews=[]))
         authorization = MergeAuthorization(
             pr_number=7,
             work_item="CTRL-003",
+            base_ref="main",
             base_sha=BASE_SHA,
             head_sha=HEAD_SHA,
             merge_method="merge",
@@ -565,10 +676,11 @@ class MergeGateTests(unittest.TestCase):
         adapter = Adapter(transport, REPO)
         authorization = adapter.authorize_merge(
             pr_number=7,
+            expected_base_ref="main",
             expected_base_sha=BASE_SHA,
             expected_head_sha=HEAD_SHA,
             work_item="CTRL-003",
-            machine_status=LifecycleState.READY,
+            eligibility=_eligible(),
             architect_reviewer=ARCHITECT,
         )
         with self.assertRaises(GithubMergeBlockedError):
@@ -600,6 +712,7 @@ class DomainCompatibilityTests(unittest.TestCase):
         authorization = MergeAuthorization(
             pr_number=7,
             work_item="CTRL-003",
+            base_ref="main",
             base_sha=BASE_SHA,
             head_sha=HEAD_SHA,
             merge_method="merge",

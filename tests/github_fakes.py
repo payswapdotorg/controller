@@ -13,6 +13,8 @@ from controller.errors import GithubAdapterError
 
 REPO = "pectoraux/controller"
 OWNER = "pectoraux"
+BASE_SHA = "a" * 40
+HEAD_SHA = "b" * 40
 
 
 class FakeTransport:
@@ -79,12 +81,14 @@ def review(
     author: str = "pectoraux",
     state: str = "APPROVED",
     submitted_at: str = "2026-09-04T10:00:00Z",
+    commit_id: str | None = HEAD_SHA,
 ) -> dict[str, object]:
     return {
         "id": review_id,
         "user": {"login": author},
         "state": state,
         "submitted_at": submitted_at,
+        "commit_id": commit_id,
     }
 
 
@@ -138,10 +142,6 @@ def pull_request(
         "merged": merged,
         "mergeable_state": mergeable_state,
     }
-
-
-BASE_SHA = "a" * 40
-HEAD_SHA = "b" * 40
 
 
 def merge_success(pr_number: int = 7) -> dict[str, object]:

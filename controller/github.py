@@ -56,6 +56,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from controller.domain import DispatchEligibility
 from controller.errors import (
     GithubAdapterError,
     GithubAmbiguityError,
@@ -68,7 +69,6 @@ from controller.errors import (
     GithubStaleBaseError,
     GithubTransportError,
 )
-from controller.states import LifecycleState
 
 DEFAULT_API_ROOT = "https://api.github.com"
 
@@ -184,12 +184,20 @@ class GithubCommit:
 
 @dataclass(frozen=True)
 class GithubReview:
-    """A pull-request review. ``submitted_at`` is the raw ISO string."""
+    """A pull-request review.
+
+    ``commit_id`` is the exact head SHA the review was submitted against
+    (GitHub's ``commit_id``); it may be ``None`` when GitHub does not
+    report one, in which case the review cannot prove it applies to a
+    specific head and the merge gate treats it as not binding
+    (fail closed). ``submitted_at`` is the raw ISO string.
+    """
 
     review_id: int
     author: str
     state: str
     submitted_at: str
+    commit_id: str | None
 
 
 @dataclass(frozen=True)
@@ -242,14 +250,16 @@ class MergeAuthorization:
     """Proof that the frozen merge predicate was satisfied at issue time.
 
     Constructed only by :meth:`GithubAdapter.authorize_merge` (the policy
-    gate); :meth:`GithubAdapter.merge_pull_request` re-verifies identity at
-    execution time. The authorization records the exact PR, SHAs, work item,
-    and merge method so the executed mutation cannot drift from the
-    evaluated predicate.
+    gate); :meth:`GithubAdapter.merge_pull_request` re-verifies identity
+    (base ref + base SHA + head SHA, PR state) at execution time. The
+    authorization records the exact PR, refs and SHAs, work item, and merge
+    method so the executed mutation cannot drift from the evaluated
+    predicate.
     """
 
     pr_number: int
     work_item: str
+    base_ref: str
     base_sha: str
     head_sha: str
     merge_method: str
@@ -337,6 +347,7 @@ def _normalize_review(data: object, context: str) -> GithubReview:
         author=_require_str(user, "login", f"{context}.user"),
         state=_require_str(mapping, "state", context),
         submitted_at=_require_optional_str(mapping, "submitted_at", context) or "",
+        commit_id=_require_optional_str(mapping, "commit_id", context),
     )
 
 
@@ -554,22 +565,29 @@ class GithubAdapter:
         self,
         *,
         pr_number: int,
+        expected_base_ref: str,
         expected_base_sha: str,
         expected_head_sha: str,
         work_item: str,
-        machine_status: LifecycleState,
+        eligibility: DispatchEligibility,
         architect_reviewer: str,
         required_checks: tuple[str, ...] = (),
     ) -> MergeAuthorization:
         """Evaluate the frozen architecture's merge predicate (AC6).
 
-        GitHub-side checks: PR open, non-draft, unmerged, exact base and
-        head SHAs, mergeable state ``clean``, exactly one open PR for the
-        branch, required CI checks terminal-success, an APPROVE review by
-        ``architect_reviewer``, and no CHANGES_REQUESTED review submitted
-        after that approval. Repository-side facts (``work_item`` and
-        ``machine_status``, provided by the caller from repository
-        authority) must identify the work item as the active eligible item.
+        GitHub-side checks: PR open, non-draft, unmerged, the intended base
+        *ref and SHA*, exact head SHA, mergeable state ``clean``, exactly
+        one open PR for the branch, required CI checks terminal-success,
+        an APPROVE review by ``architect_reviewer`` **that applies to the
+        exact expected head SHA** (the review's ``commit_id`` must match;
+        an approval of an older commit does not survive a head change),
+        and no CHANGES_REQUESTED review submitted after that approval.
+
+        Repository-side facts are bound through ``eligibility`` — the
+        CTRL-002 authority-derived value the domain layer produces from
+        repository machine state — which must identify exactly
+        ``work_item`` as the active, eligible (READY, not completed) work
+        item (FZ-CTRL003-001). GitHub is never the source of this fact.
 
         Any unsatisfied predicate fails closed with a typed error and no
         authorization is issued. Nothing is auto-repaired or retried.
@@ -585,6 +603,11 @@ class GithubAdapter:
             raise GithubStaleBaseError(
                 f"PR #{pr_number} head {pr.head_sha} does not match the "
                 f"authorized head {expected_head_sha}"
+            )
+        if pr.base_ref != expected_base_ref:
+            raise GithubStaleBaseError(
+                f"PR #{pr_number} targets base ref '{pr.base_ref}', not the "
+                f"intended base ref '{expected_base_ref}'"
             )
         if pr.base_sha != expected_base_sha:
             raise GithubStaleBaseError(
@@ -629,6 +652,13 @@ class GithubAdapter:
                 f"PR #{pr_number} has no APPROVED review by '{architect_reviewer}'"
             )
         latest_approval = max(approvals, key=lambda review: (review.submitted_at, review.review_id))
+        if latest_approval.commit_id != expected_head_sha:
+            reported = latest_approval.commit_id or "(unreported)"
+            raise GithubMergeBlockedError(
+                f"APPROVE review {latest_approval.review_id} applies to commit "
+                f"{reported[:12]}, not the current head {expected_head_sha[:12]}; "
+                f"the reviewed head must match exactly"
+            )
         for review in reviews:
             after = (review.submitted_at, review.review_id) > (
                 latest_approval.submitted_at,
@@ -640,15 +670,22 @@ class GithubAdapter:
                     f"after the latest approval"
                 )
 
-        if machine_status != LifecycleState.READY:
+        if eligibility.work_item != work_item:
             raise GithubContradictionError(
-                f"repository machine state is {machine_status.value}, not READY: "
-                f"'{work_item}' is not the active eligible item"
+                f"repository authority identifies '{eligibility.work_item}' as the "
+                f"active work item; '{work_item}' is not the active item seeking "
+                f"merge authorization"
+            )
+        if not eligibility.eligible:
+            raise GithubContradictionError(
+                f"repository authority does not mark '{work_item}' as the active "
+                f"eligible item: " + "; ".join(eligibility.basis)
             )
 
         return MergeAuthorization(
             pr_number=pr_number,
             work_item=work_item,
+            base_ref=expected_base_ref,
             base_sha=expected_base_sha,
             head_sha=expected_head_sha,
             merge_method="merge",
@@ -657,11 +694,12 @@ class GithubAdapter:
     def merge_pull_request(self, authorization: MergeAuthorization) -> GithubPullRequest:
         """Execute a governed merge, re-verifying identity at execution time.
 
-        Refuses if the PR moved after authorization (head drift, closed,
-        or already merged) or if GitHub declines the merge. The worker role
-        (Z.ai) must never call this method — enforcement of that role rule
-        is governance plus the authorize gate, which requires an Architect
-        APPROVE review on GitHub.
+        Refuses if the PR moved after authorization (head drift, base
+        retarget or drift, closed, or already merged) or if GitHub declines
+        the merge. The worker role (Z.ai) must never call this method —
+        enforcement of that role rule is governance plus the authorize gate,
+        which requires an Architect APPROVE review on GitHub bound to the
+        exact head SHA.
         """
         pr = self.get_pull_request(authorization.pr_number)
         if pr.merged:
@@ -672,6 +710,16 @@ class GithubAdapter:
             raise GithubStaleBaseError(
                 f"PR #{authorization.pr_number} head moved to {pr.head_sha} "
                 f"since authorization ({authorization.head_sha})"
+            )
+        if pr.base_ref != authorization.base_ref:
+            raise GithubStaleBaseError(
+                f"PR #{authorization.pr_number} was retargeted to base ref "
+                f"'{pr.base_ref}' since authorization ('{authorization.base_ref}')"
+            )
+        if pr.base_sha != authorization.base_sha:
+            raise GithubStaleBaseError(
+                f"PR #{authorization.pr_number} base moved to {pr.base_sha} "
+                f"since authorization ({authorization.base_sha})"
             )
         payload: dict[str, object] = {
             "sha": authorization.head_sha,
