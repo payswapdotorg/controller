@@ -6,21 +6,19 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
+- **current state:** `IMPLEMENTING`
 - **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `READY`)
-- **PR:** #6 — https://github.com/pectoraux/controller/pull/6 (Architect governance/activation)
-- **head SHA awaiting review:** `5afd6a72862df78be1ba807c81a6f8e3d1b1408c`
-  (CTRL-003 work-order definition/activation governance change; branch tip may
-  advance with status-dashboard-only commits, which do not alter the Work Order
-  or authority intent)
-- **last completed Architect action:** CTRL-003 Work Order defined and machine
-  state prepared for activation from reconciled main `b9e7402476f94a7a52ef6cd248ee5bf18d9d1ca2`;
-  CTRL-004 remains planned; Stage 1 remains active.
-- **ARCHITECT ACTION: REVIEW REQUIRED**
-- **last update (UTC):** 2026-09-04T11:50:30Z
-- **next step:** the human operator should say `go` to invoke the Architect
-  review cycle for PR #6; after merge, Z.ai may implement CTRL-003 from the
-  resulting main SHA.
+- **PR:** (implementation PR opening from main `8171bf46b8f29b4e894791a7437251a64226678c` after PR #6 merged)
+- **head SHA for this Work Order:** main `8171bf46b8f29b4e894791a7437251a64226678c` (verified dispatch base)
+- **last completed worker action:** CTRL-003 dispatched by the Architect POST-MERGE
+  HANDOFF (PR #6); pre-dispatch authority validation passed (machine state
+  CTRL-003 READY, work order frozen, roadmap sequencing, no conflicting
+  implementation); worker is implementing the GitHub adapter boundary now
+- **ARCHITECT ACTION:** (none — worker implementing)
+- **last update (UTC):** 2026-09-04T11:54:24Z
+- **next step:** worker implements CTRL-003, runs the full validation suite,
+  opens one PR, and returns this file to `WAITING_FOR_ARCHITECT` with the
+  PR/head SHA.
 
 ## Maintenance protocol
 
