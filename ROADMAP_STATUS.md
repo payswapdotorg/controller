@@ -6,28 +6,24 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `RECONCILING`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `COMPLETE`)
-- **PR:** #7 — https://github.com/pectoraux/controller/pull/7 (merged) +
-  post-merge reconciliation PR (open, from `arch-ctrl-003-post-merge-reconciliation`)
+- **PR:** #8 — https://github.com/pectoraux/controller/pull/8 (merged)
 - **implementation merge evidence:** PR #7 merged at
   `7cc340375dcd9768d986b1245303d7006f54fbf1` (base
   `8171bf46b8f29b4e894791a7437251a64226678c`, including FZ-CTRL003-001/002/003
-  and FZ-CTRL003-004/004A fixes); Architect APPROVE recorded 2026-09-04T13:42:57Z
-- **reconciliation scope (per the Architect POST-MERGE RECONCILIATION HANDOFF,
-  comment 5541326234):** machine state CTRL-003 → COMPLETE with `completed`
-  recording all three items; work-order status + merge evidence; roadmap
-  sequencing (CTRL-004 planned, not activated); build-process bootstrap
-  position (Stage 1 remains active; next milestone CTRL-004 — Z.ai adapter);
-  real-repository test pins updated to the reconciled state; this dashboard
-  records RECONCILING while the reconciliation PR is under review
-- **last completed worker action:** FZ-CTRL003-004A resolved and delivered
-  (fix `e2c52a6`, PR head `7cfe30d`); PR #7 approved and merged by the
-  Architect; post-merge reconciliation change prepared
-- **last update (UTC):** 2026-09-04T14:05:00Z
-- **next step:** Architect review of the reconciliation PR; after merge,
-  CTRL-004 becomes the next planned item (Architect defines/freezes its work
-  order and marks it READY before any dispatch)
+  and FZ-CTRL003-004/004A fixes); post-merge reconciliation PR #8 merged at
+  `10896631596999ebef0f4e8de1d315c69b04fe0e`
+- **last completed architect action:** CTRL-003 post-merge reconciliation
+  accepted and merged; repository machine state records CTRL-003 COMPLETE
+- **last completed worker action:** FZ-CTRL003-004A resolved and delivered;
+  PR #7 approved/merged; reconciliation PR #8 prepared and accepted
+- **last update (UTC):** 2026-09-04T14:30:00Z
+- **next planned item:** CTRL-004 — Z.ai adapter
+- **next step:** Architect definition/freezing of CTRL-004 is complete in
+  the current activation PR; machine state remains on reconciled CTRL-003
+  until the activation change is accepted and CTRL-004 is explicitly marked
+  READY for worker dispatch
 
 ## Maintenance protocol
 
