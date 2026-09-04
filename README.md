@@ -46,6 +46,16 @@ Validate repository authority and reconstruct controller state (offline smoke te
 python -m controller validate --repo .
 ```
 
+Reconstruct and inspect the governed work-item domain model (identity, lifecycle position, authority-derived dispatch eligibility):
+
+```sh
+python -m controller domain --repo .
+```
+
+### Domain model (CTRL-002)
+
+`controller/domain.py` defines the typed domain model for the single active governed work item: `WorkItemIdentity` (repository-resolved identity), `AuthorityContext` (governing documents and automation stage), `DispatchEligibility` (authority-derived dispatch verdict with an auditable basis), `GovernedWorkItem` (the immutable aggregate), and `DomainCommand`/`DomainEvent` (the domain-level command/event contracts with deterministic `serialize()`/`deserialize()` for future GitHub and Z.ai adapters — no transport is implemented). The domain layer delegates all lifecycle semantics to the CTRL-001 frozen transition table and never redefines transition policy. Dispatch eligibility requires the active work item to be READY with machine state and its work order in agreement, and not already recorded in `completed`; anything else fails closed with typed errors. The model is a pure projection of repository authority: no database, cache, or runtime state.
+
 Static/type checks (where configured, via `pyproject.toml`):
 
 ```sh
@@ -54,4 +64,4 @@ ruff check controller tests
 ruff format --check controller tests
 ```
 
-The test suite exercises: happy-path lifecycle transitions (deterministic), invalid transitions (fail closed), restart/state reconstruction from repository authority, contradictory authority rejection, and a forbidden-surface guard (no network/subprocess/persistence imports in the controller package). No external service or credential is required to run any of the above.
+The test suite exercises: happy-path lifecycle transitions (deterministic), invalid transitions (fail closed), restart/state reconstruction from repository authority, contradictory authority rejection, domain construction/eligibility/serialization/idempotency, and a forbidden-surface guard (no network/subprocess/persistence imports in the controller package). No external service or credential is required to run any of the above.

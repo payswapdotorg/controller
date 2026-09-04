@@ -67,7 +67,7 @@ def make_repo(
     (root / "spec/operations").mkdir(parents=True, exist_ok=True)
     (root / "spec/work-items").mkdir(parents=True, exist_ok=True)
 
-    state = canonical_state(status=status, active_work_item=work_item)
+    state = canonical_state(status=status, activeWorkItem=work_item)
     if state_overrides is not None:
         state.update(state_overrides)
         if "status" in state_overrides and work_item_status is None:
