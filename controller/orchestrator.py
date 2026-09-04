@@ -12,7 +12,12 @@ active governed Work Order. Doctrine:
 * **Exact active-item correlation (AC2).** The work-item identity flows
   from repository authority into every GitHub PR correlation and every
   Z.ai worker context; foreign, ambiguous, or drifted correlation is
-  refused by the underlying adapters and re-checked here.
+  refused by the underlying adapters and re-checked here. The worker
+  execution reference is carried as **typed** adapter-issued
+  :class:`ZaiWorkerSession` evidence (never a bare session-id string) and
+  its binding — session id, repository, active Work Item, and dispatch
+  base SHA — is re-proved against reconstructed authority before any
+  lifecycle event that depends on it (FZ-CTRL005-001).
 * **Adapter coordination (AC3).** Remote I/O happens only through the
   injected adapters. Start/resume calls carry the exact repository-
   derived context and preserve the same governed worker/PR identity
@@ -27,9 +32,9 @@ active governed Work Order. Doctrine:
 * **Runtime non-authority (AC6).** No state, cache, or database: the
   orchestrator holds only the two adapters. Non-authoritative carried
   references (:class:`OrchestrationReferences` — the governed branch,
-  dispatch base, worker session id, architect reviewer) are caller
-  inputs, cross-validated against evidence; restart with the same
-  inputs reproduces the same decision.
+  dispatch base, the typed worker-session evidence, architect reviewer)
+  are caller inputs, cross-validated against evidence; restart with the
+  same inputs reproduces the same decision.
 * **Downstream policy boundary (AC7).** Review approval, merge,
   reconciliation, and advance are *exposed* (typed handoff outcomes),
   never executed. CI/evidence gate policy belongs to CTRL-006.
@@ -71,16 +76,20 @@ class OrchestrationReferences:
 
     * ``branch`` — the governed implementation branch (PR correlation);
     * ``base_sha`` — the exact dispatch base SHA (PR correlation and the
-      worker context identity);
-    * ``worker_session_id`` — the Z.ai execution reference returned at
-      dispatch (implementation-start evidence and resume targeting);
+      worker-session binding proof);
+    * ``worker_session`` — the **typed** :class:`ZaiWorkerSession`
+      evidence returned by the accepted Z.ai adapter at dispatch; a bare
+      session-id string is deliberately not accepted (FZ-CTRL005-001),
+      because the typed value is the only carried form whose repository,
+      work-item, and base binding the orchestrator can re-prove against
+      authority before emitting a lifecycle event;
     * ``architect_reviewer`` — the GitHub identity whose reviews are the
       Architect's authority-recorded decisions.
     """
 
     branch: str | None = None
     base_sha: str | None = None
-    worker_session_id: str | None = None
+    worker_session: ZaiWorkerSession | None = None
     architect_reviewer: str | None = None
 
 
@@ -110,7 +119,7 @@ class WorkerDispatched(OrchestrationOutcome):
 
 @dataclass(frozen=True)
 class ImplementationStarted(OrchestrationOutcome):
-    """DISPATCHED + worker-session evidence: implementation began."""
+    """DISPATCHED + proven worker-session evidence: implementation began."""
 
     session_id: str
 
@@ -268,13 +277,26 @@ class Orchestrator:
     def _begin_implementation(
         self, item: GovernedWorkItem, refs: OrchestrationReferences
     ) -> OrchestrationOutcome:
-        """DISPATCHED: the carried worker-session reference is the evidence
-        that implementation began; without it the cycle only observes."""
-        if refs.worker_session_id is None:
+        """DISPATCHED: the carried typed worker-session evidence is the
+        proof that implementation began. The session's binding — session
+        id, repository, active Work Item, dispatch base SHA — is re-proved
+        against reconstructed authority *before* the lifecycle event
+        (FZ-CTRL005-001); a missing, foreign, swapped, or forged
+        session-id-only reference never advances the lifecycle, and a
+        dispatch-position session must not already carry PR identity
+        (none is invented while still DISPATCHED)."""
+        if refs.worker_session is None:
             return AwaitingWorker(
                 work_item=item.identity.work_item,
                 lifecycle=item.lifecycle,
                 event=None,
+            )
+        session = self._prove_worker_session(item, refs)
+        if session.pr_number is not None or session.head_sha is not None:
+            raise OrchestrationContradictionError(
+                f"worker session '{session.session_id}' reports PR identity "
+                f"(#{session.pr_number}) while '{item.identity.work_item}' is "
+                "still DISPATCHED and authority records no governed pull request"
             )
         event = item.handle(
             DomainCommand(item.identity.work_item, CommandName.BEGIN_IMPLEMENTATION)
@@ -283,7 +305,7 @@ class Orchestrator:
             work_item=item.identity.work_item,
             lifecycle=item.lifecycle,
             event=event,
-            session_id=refs.worker_session_id,
+            session_id=session.session_id,
         )
 
     def _observe_pull_request(
@@ -400,9 +422,12 @@ class Orchestrator:
         self, item: GovernedWorkItem, refs: OrchestrationReferences
     ) -> OrchestrationOutcome:
         """CHANGES_REQUESTED: re-observe the review evidence (restart-safe:
-        findings come from GitHub, never stored state), validate the
-        RESUME_IMPLEMENTATION command, then resume the *same* governed
-        worker/PR context with the verbatim review packet (AC3)."""
+        findings come from GitHub, never stored state), prove the carried
+        typed worker-session evidence against authority (FZ-CTRL005-001:
+        before the lifecycle event), validate the RESUME_IMPLEMENTATION
+        command, then resume the *same* governed worker/PR context with
+        the verbatim review packet (AC3). The adapter re-proves the
+        session identity from live provider state on the resume call."""
         pr = self._require_pull_request(item, refs)
         reviews = self._github.get_reviews(pr.number)
         reviewer = self._require_reviewer(refs)
@@ -418,11 +443,13 @@ class Orchestrator:
                 f"machine state records CHANGES_REQUESTED for '{item.identity.work_item}' "
                 f"but the latest architect review is {latest.state}"
             )
-        if refs.worker_session_id is None:
+        if refs.worker_session is None:
             raise OrchestrationMissingReferenceError(
-                "resuming the governed worker requires the carried worker-session "
-                "reference (returned at dispatch); it is never guessed"
+                "resuming the governed worker requires the carried typed "
+                "worker-session evidence (returned at dispatch); a bare session "
+                "id is never guessed or trusted"
             )
+        session = self._prove_worker_session(item, refs)
         findings = _findings_from_reviews((latest,))
         event = item.handle(
             DomainCommand(item.identity.work_item, CommandName.RESUME_IMPLEMENTATION)
@@ -436,12 +463,12 @@ class Orchestrator:
             head_sha=pr.head_sha,
             review_findings=findings,
         )
-        session = self._zai.resume_worker(context, refs.worker_session_id)
+        reported = self._zai.resume_worker(context, session.session_id)
         return WorkerResumed(
             work_item=item.identity.work_item,
             lifecycle=item.lifecycle,
             event=event,
-            session=session,
+            session=reported,
             findings=findings,
         )
 
@@ -484,6 +511,49 @@ class Orchestrator:
                 f"'{item.identity.work_item}' but no governed pull request "
                 f"is observed for branch '{branch}'"
             ) from exc
+
+    def _prove_worker_session(
+        self, item: GovernedWorkItem, refs: OrchestrationReferences
+    ) -> ZaiWorkerSession:
+        """Re-prove the carried typed worker-session evidence against
+        reconstructed authority and the dispatch-base reference before any
+        lifecycle event that depends on it (FZ-CTRL005-001, AC2/AC5).
+
+        Proves exactly: the session id (present and well-formed by the
+        frozen CTRL-004 value type), the repository, the active Work Item,
+        and the dispatch base SHA. A foreign, swapped, or forged binding
+        fails closed with a typed error *before* event emission and
+        before any remote mutation.
+        """
+        session = refs.worker_session
+        if session is None:
+            raise OrchestrationMissingReferenceError(
+                f"'{item.identity.work_item}' requires the carried typed "
+                "worker-session evidence; it is never guessed"
+            )
+        if refs.base_sha is None:
+            raise OrchestrationMissingReferenceError(
+                "proving the worker-session binding requires the carried "
+                "dispatch-base reference; it is never guessed"
+            )
+        if session.repository != item.identity.repository:
+            raise OrchestrationContradictionError(
+                f"carried worker session '{session.session_id}' is bound to "
+                f"repository '{session.repository}', but repository authority "
+                f"identifies '{item.identity.repository}'"
+            )
+        if session.work_item != item.identity.work_item:
+            raise OrchestrationContradictionError(
+                f"carried worker session '{session.session_id}' is bound to work "
+                f"item '{session.work_item}', but repository authority identifies "
+                f"'{item.identity.work_item}' as the active item"
+            )
+        if session.base_sha != refs.base_sha:
+            raise OrchestrationContradictionError(
+                f"carried worker session '{session.session_id}' is bound to base "
+                f"{session.base_sha}, but the dispatch base is {refs.base_sha}"
+            )
+        return session
 
     def _require_reviewer(self, refs: OrchestrationReferences) -> str:
         if refs.architect_reviewer is None:

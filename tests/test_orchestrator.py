@@ -33,13 +33,16 @@ from controller.orchestrator import (
     WorkerDispatched,
 )
 from controller.orchestrator import (
+    ImplementationStarted as ImplementationStartedOutcome,
+)
+from controller.orchestrator import (
     OrchestrationReferences as Refs,
 )
 from controller.orchestrator import (
     WorkerResumed as WorkerResumedOutcome,
 )
 from controller.states import LifecycleState
-from controller.zai import ZaiAdapter
+from controller.zai import ZaiAdapter, ZaiWorkerSession
 from tests.github_fakes import (
     BASE_SHA,
     HEAD_SHA,
@@ -60,11 +63,28 @@ BRANCH = "ctrl-005-orchestrator"
 WORK_ITEM = "CTRL-005"
 
 
+def _session(**overrides: object) -> ZaiWorkerSession:
+    """Typed worker-session evidence as the accepted adapter would issue
+    it at dispatch (binding fields match the governed fixture context)."""
+    defaults: dict[str, object] = {
+        "session_id": SESSION_ID,
+        "repository": REPO,
+        "work_item": WORK_ITEM,
+        "base_sha": BASE_SHA,
+        "pr_number": None,
+        "head_sha": None,
+        "status": "active",
+        "updated_at": "2026-09-04T15:00:00Z",
+    }
+    defaults.update(overrides)
+    return ZaiWorkerSession(**defaults)  # type: ignore[arg-type]
+
+
 def _refs(**overrides: object) -> Refs:
     defaults: dict[str, object] = {
         "branch": BRANCH,
         "base_sha": BASE_SHA,
-        "worker_session_id": SESSION_ID,
+        "worker_session": _session(),
         "architect_reviewer": ARCHITECT,
     }
     defaults.update(overrides)
@@ -198,7 +218,7 @@ class ImplementationCycleTests(OrchestrationFixture):
     def test_dispatched_without_session_reference_only_observes(self) -> None:
         repo = self._repo("DISPATCHED")
         orchestrator, _, zai = self._orchestrator()
-        outcome = orchestrator.run_cycle(repo, _refs(worker_session_id=None))
+        outcome = orchestrator.run_cycle(repo, _refs(worker_session=None))
         self.assertIsNone(outcome.event)
         self.assertEqual(zai.calls, [])
 
@@ -397,7 +417,7 @@ class ReviewCycleTests(OrchestrationFixture):
         github = _github(reviews=[review(11, state="CHANGES_REQUESTED", commit_id=HEAD_SHA)])
         orchestrator, _, zai = self._orchestrator(github=github)
         with self.assertRaises(OrchestrationMissingReferenceError):
-            orchestrator.run_cycle(repo, _refs(worker_session_id=None))
+            orchestrator.run_cycle(repo, _refs(worker_session=None))
         self.assertEqual(zai.calls, [])
 
     def test_changes_requested_with_cleared_evidence_is_a_contradiction(self) -> None:
@@ -422,6 +442,113 @@ class ReviewCycleTests(OrchestrationFixture):
         orchestrator, _, _ = self._orchestrator(github=github, zai=zai)
         with self.assertRaises(ZaiContextMismatchError):
             orchestrator.run_cycle(repo, _refs())
+
+
+class SessionEvidenceProofTests(OrchestrationFixture):
+    """FZ-CTRL005-001: the DISPATCHED->IMPLEMENTING transition (and the
+    resume path) prove the carried typed worker-session binding — session
+    id, repository, active Work Item, dispatch base SHA — against
+    reconstructed authority BEFORE any lifecycle event or remote mutation.
+    A bare session-id string is not an accepted carried form."""
+
+    def _assert_no_lifecycle_effect(self, github: FakeTransport, zai: FakeZaiTransport) -> None:
+        """No lifecycle event can have been emitted (the run failed closed)
+        and no remote mutation occurred."""
+        self.assertEqual(zai.calls, [])
+        self.assertEqual(github.calls_matching("POST", "/"), [])
+        self.assertEqual(github.calls_matching("PUT", "/"), [])
+
+    def test_references_have_no_bare_session_id_field(self) -> None:
+        """The raw-string carried reference is gone from the API: only the
+        typed adapter-issued session evidence exists."""
+        fields = set(Refs.__dataclass_fields__)
+        self.assertIn("worker_session", fields)
+        self.assertNotIn("worker_session_id", fields)
+
+    def test_dispatched_foreign_work_item_session_refuses(self) -> None:
+        repo = self._repo("DISPATCHED")
+        orchestrator, github, zai = self._orchestrator()
+        forged = _session(work_item="CTRL-006")
+        with self.assertRaises(OrchestrationContradictionError) as ctx:
+            orchestrator.run_cycle(repo, _refs(worker_session=forged))
+        self.assertIn("CTRL-006", str(ctx.exception))
+        self._assert_no_lifecycle_effect(github, zai)
+
+    def test_dispatched_foreign_repository_session_refuses(self) -> None:
+        repo = self._repo("DISPATCHED")
+        orchestrator, github, zai = self._orchestrator()
+        swapped = _session(repository="someone-else/other-repo")
+        with self.assertRaises(OrchestrationContradictionError) as ctx:
+            orchestrator.run_cycle(repo, _refs(worker_session=swapped))
+        self.assertIn("someone-else/other-repo", str(ctx.exception))
+        self._assert_no_lifecycle_effect(github, zai)
+
+    def test_dispatched_wrong_base_sha_session_refuses(self) -> None:
+        repo = self._repo("DISPATCHED")
+        orchestrator, github, zai = self._orchestrator()
+        drifted = _session(base_sha="c" * 40)
+        with self.assertRaises(OrchestrationContradictionError) as ctx:
+            orchestrator.run_cycle(repo, _refs(worker_session=drifted))
+        self.assertIn("dispatch base", str(ctx.exception))
+        self._assert_no_lifecycle_effect(github, zai)
+
+    def test_dispatched_session_only_reference_never_advances(self) -> None:
+        """The structurally weakest carried form — no typed session
+        evidence at all — can only observe; the lifecycle never advances
+        on a session id alone."""
+        repo = self._repo("DISPATCHED")
+        orchestrator, github, zai = self._orchestrator()
+        outcome = orchestrator.run_cycle(repo, _refs(worker_session=None))
+        self.assertIsNone(outcome.event)
+        self._assert_no_lifecycle_effect(github, zai)
+
+    def test_dispatched_forged_session_with_pr_identity_refuses(self) -> None:
+        """A structurally valid forged session that already claims PR
+        identity contradicts the DISPATCHED position (authority records no
+        governed pull request; none is invented)."""
+        repo = self._repo("DISPATCHED")
+        orchestrator, github, zai = self._orchestrator()
+        forged = _session(pr_number=7, head_sha=HEAD_SHA)
+        with self.assertRaises(OrchestrationContradictionError) as ctx:
+            orchestrator.run_cycle(repo, _refs(worker_session=forged))
+        self.assertIn("still DISPATCHED", str(ctx.exception))
+        self._assert_no_lifecycle_effect(github, zai)
+
+    def test_dispatched_missing_base_reference_fails_closed(self) -> None:
+        """Session evidence cannot be proven without the dispatch-base
+        reference; nothing is guessed."""
+        repo = self._repo("DISPATCHED")
+        orchestrator, github, zai = self._orchestrator()
+        with self.assertRaises(OrchestrationMissingReferenceError):
+            orchestrator.run_cycle(repo, _refs(base_sha=None))
+        self._assert_no_lifecycle_effect(github, zai)
+
+    def test_resume_foreign_session_binding_fails_before_event_or_mutation(self) -> None:
+        """The same proof gates the CHANGES_REQUESTED resume path: a
+        foreign bound session refuses before the RESUME_IMPLEMENTATION
+        event and before any provider call."""
+        repo = self._repo("CHANGES_REQUESTED")
+        github = _github(reviews=[review(11, state="CHANGES_REQUESTED", commit_id=HEAD_SHA)])
+        orchestrator, github, zai = self._orchestrator(github=github)
+        forged = _session(work_item="CTRL-006")
+        with self.assertRaises(OrchestrationContradictionError):
+            orchestrator.run_cycle(repo, _refs(worker_session=forged))
+        self._assert_no_lifecycle_effect(github, zai)
+
+    def test_dispatched_valid_session_evidence_advances_exactly_once(self) -> None:
+        """The honest path still works: proven evidence emits exactly one
+        BEGIN_IMPLEMENTATION event bound to the proven session id."""
+        repo = self._repo("DISPATCHED")
+        orchestrator, github, zai = self._orchestrator()
+        outcome = orchestrator.run_cycle(repo, _refs())
+        assert isinstance(outcome, ImplementationStartedOutcome)
+        assert outcome.event is not None
+        self.assertEqual(
+            (outcome.event.from_state, outcome.event.to_state),
+            (LifecycleState.DISPATCHED, LifecycleState.IMPLEMENTING),
+        )
+        self.assertEqual(outcome.session_id, SESSION_ID)
+        self._assert_no_lifecycle_effect(github, zai)
 
 
 class DownstreamBoundaryTests(OrchestrationFixture):
