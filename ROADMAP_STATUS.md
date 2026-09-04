@@ -6,13 +6,19 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `CHANGES_REQUESTED`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-005 — Orchestrator (`spec/work-items/CTRL-005.md`, `READY`)
 - **PR:** PR #14 (open, from `ctrl-005-orchestrator`; dispatch
-  base `039177b27a3cdf38ec4ceed033ab7420c13c152c`) — follow-up
-  FZ-CTRL005-002 (HIGH): the typed session value was still forgeable
-  evidence (binding proven, provenance not); fix in progress on the same PR
-- **head SHA awaiting review:** fix landing on top of `a045371` (FZ-001 fix)
+  base `039177b27a3cdf38ec4ceed033ab7420c13c152c`) — FZ-CTRL005-002 (HIGH)
+  closed by the worker: DISPATCHED→IMPLEMENTING now re-establishes session
+  provenance from live provider state through the accepted adapter's
+  start/identify contract (provider-identified session must be the carried
+  session); structurally exact hand-constructed values cannot advance the
+  lifecycle; 3 deterministic regression tests added
+- **head SHA awaiting review:** `e523713` (FZ-CTRL005-002 fix, on top of
+  `a045371` FZ-001 fix and `a0367e3` implementation; the branch tip
+  may additionally advance with status-dashboard-only commits, which do not
+  alter the implementation)
 - **implementation merge evidence:** prior CTRL-004 implementation PR #11 merged at
   `c873b467fc7f4381f7c213723a69071eb9953168` (reviewed head
   `165fb959281619b0e635b603ef2660834a60571e`, base
@@ -32,11 +38,10 @@
   operational documentation); full validation green (293/293 tests, strict mypy
   on 26 files, ruff, CLI validate/domain, forbidden-surface audit vs
   `039177b` PASS)
-- **last update (UTC):** 2026-09-04T16:05:00Z
+- **last update (UTC):** 2026-09-04T16:15:00Z
 - **next planned item:** CTRL-006 (per the roadmap; not defined, not eligible —
   no worker action)
-- **next step:** worker closes FZ-CTRL005-002 on PR #14 and returns to
-  `WAITING_FOR_ARCHITECT`
+- **next step:** Architect re-reviews PR #14 (FZ-CTRL005-002 resolution)
 
 ## Maintenance protocol
 
