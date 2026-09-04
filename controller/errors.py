@@ -135,13 +135,16 @@ class GithubMergeBlockedError(GithubAdapterError):
 
 
 class GithubAuthorizationForgedError(GithubAdapterError):
-    """A MergeAuthorization was not issued by the adapter's merge gate.
+    """A presented merge authorization is not a valid merge request.
 
-    FZ-CTRL003-004: ``merge_pull_request`` is executable only with an
-    authorization issued by ``GithubAdapter.authorize_merge``. That
-    invariant is enforced — not documented — through a module-private,
-    non-forgeable issuance proof carried by every genuine
-    ``MergeAuthorization``. A caller-manufactured or altered
-    authorization (structurally valid or not) fails closed with this
-    error before any remote mutation executes.
+    FZ-CTRL003-004A: ``merge_pull_request`` treats the presented
+    ``MergeAuthorization`` as a merge request, never as evidence, and
+    independently re-establishes the complete merge-policy proof before
+    the remote mutation. This error fires closed when the presented
+    object is not a structurally complete ``MergeAuthorization`` value
+    (a non-authorization object, or a forgery with missing or malformed
+    fields), or when it is not field-identical to the freshly
+    re-established proof (for example a merge method the frozen policy
+    never issues). Possession of such a value can never substitute for
+    the predicate actually holding at execution time.
     """

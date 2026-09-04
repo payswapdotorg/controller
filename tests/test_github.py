@@ -4,7 +4,8 @@ All behavior is exercised against deterministic fakes — no network, no
 credentials, no live GitHub access (AC7). Covers: typed contract,
 deterministic normalization, work-order correlation, fail-closed remote
 errors, policy-gated mutations, the merge authorization gate (including
-the FZ-CTRL003-004 non-forgeable capability invariant), and domain
+the FZ-CTRL003-004A execution-time merge-policy re-proof: possession of
+a fabricated authorization cannot bypass policy), and domain
 compatibility.
 """
 
@@ -14,6 +15,7 @@ import ast
 import copy
 import dataclasses
 import unittest
+from collections.abc import Callable
 
 from controller.domain import DispatchEligibility
 from controller.errors import (
@@ -607,7 +609,9 @@ class MergeGateTests(unittest.TestCase):
             eligibility=_eligible(),
             architect_reviewer=ARCHITECT,
         )
-        merged = adapter.merge_pull_request(authorization)
+        merged = adapter.merge_pull_request(
+            authorization, eligibility=_eligible(), architect_reviewer=ARCHITECT
+        )
         put_calls = transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge")
         self.assertEqual(len(put_calls), 1)
         _, _, payload = put_calls[0]
@@ -617,16 +621,18 @@ class MergeGateTests(unittest.TestCase):
         self.assertEqual(merged.number, 7)
 
     def test_merge_refuses_head_drift_since_authorization(self) -> None:
-        """FZ-CTRL003-004: authorizations must be *issued* by the gate —
-        stale-state tests now use a genuinely issued authorization and
-        drift the GitHub state between issuance and execution."""
+        """FZ-CTRL003-004A: the complete predicate is re-evaluated at
+        execution — stale-state tests use a genuinely issued authorization
+        and drift the GitHub state between issuance and execution."""
         authorization = self._authorize(_merge_ready_transport())
         moved = pull_request(base_sha=BASE_SHA, head_sha="e" * 40)
         execute_transport = FakeTransport(
             adapter_responses(prs=[moved], pr=moved, reviews=[review(11, state="APPROVED")])
         )
         with self.assertRaises(GithubStaleBaseError):
-            Adapter(execute_transport, REPO).merge_pull_request(authorization)
+            Adapter(execute_transport, REPO).merge_pull_request(
+                authorization, eligibility=_eligible(), architect_reviewer=ARCHITECT
+            )
         self.assertEqual(
             execute_transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), []
         )
@@ -642,7 +648,9 @@ class MergeGateTests(unittest.TestCase):
             )
         )
         with self.assertRaises(GithubStaleBaseError):
-            Adapter(execute_transport, REPO).merge_pull_request(authorization)
+            Adapter(execute_transport, REPO).merge_pull_request(
+                authorization, eligibility=_eligible(), architect_reviewer=ARCHITECT
+            )
         self.assertEqual(
             execute_transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), []
         )
@@ -654,7 +662,9 @@ class MergeGateTests(unittest.TestCase):
         closed = pull_request(state="closed", merged=False)
         execute_transport = FakeTransport(adapter_responses(prs=[], pr=closed, reviews=[]))
         with self.assertRaises(GithubMergeBlockedError):
-            Adapter(execute_transport, REPO).merge_pull_request(authorization)
+            Adapter(execute_transport, REPO).merge_pull_request(
+                authorization, eligibility=_eligible(), architect_reviewer=ARCHITECT
+            )
         self.assertEqual(
             execute_transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), []
         )
@@ -664,7 +674,9 @@ class MergeGateTests(unittest.TestCase):
         merged_pr = pull_request(merged=True)
         execute_transport = FakeTransport(adapter_responses(prs=[], pr=merged_pr, reviews=[]))
         with self.assertRaises(GithubMergeBlockedError):
-            Adapter(execute_transport, REPO).merge_pull_request(authorization)
+            Adapter(execute_transport, REPO).merge_pull_request(
+                authorization, eligibility=_eligible(), architect_reviewer=ARCHITECT
+            )
         self.assertEqual(
             execute_transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), []
         )
@@ -691,29 +703,46 @@ class MergeGateTests(unittest.TestCase):
             architect_reviewer=ARCHITECT,
         )
         with self.assertRaises(GithubMergeBlockedError):
-            adapter.merge_pull_request(authorization)
+            adapter.merge_pull_request(
+                authorization, eligibility=_eligible(), architect_reviewer=ARCHITECT
+            )
 
 
-class AuthorizationCapabilityTests(unittest.TestCase):
-    """FZ-CTRL003-004: MergeAuthorization is a non-forgeable capability.
+class AuthorizationReproofTests(unittest.TestCase):
+    """FZ-CTRL003-004A: possession of a fabricated authorization cannot
+    bypass policy — ``merge_pull_request`` independently re-establishes
+    the complete merge-policy proof before the remote mutation.
 
-    ``merge_pull_request`` must execute only with an authorization issued
-    by ``authorize_merge``. A caller-manufactured — even structurally
-    valid — authorization, or one altered after issuance, fails closed
-    with ``GithubAuthorizationForgedError`` before any remote mutation.
+    A caller with access to every public and module symbol can construct
+    a structurally perfect ``MergeAuthorization`` (the finding's exact
+    bypass), but the merge only executes when the re-proven predicate —
+    including the Architect APPROVE bound to the exact head — genuinely
+    holds at execution time.
     """
 
-    def _issue(self) -> tuple[Adapter, FakeTransport, MergeAuthorization]:
-        """Issue a genuine authorization over a merge-ready fake GitHub."""
-        transport = FakeTransport(
+    def _policy_transport(self, *, approved: bool = True) -> FakeTransport:
+        """A fake GitHub whose merge-policy state is fully served.
+
+        ``approved=False`` removes the Architect APPROVE — the one policy
+        fact a caller cannot fabricate on GitHub — while everything else
+        (PR identity, mergeability, one-PR, status) remains valid.
+        """
+        reviews = [review(11, state="APPROVED")] if approved else [review(11, state="COMMENTED")]
+        return FakeTransport(
             adapter_responses(
                 prs=[pull_request()],
                 pr=pull_request(),
-                reviews=[review(11, state="APPROVED")],
+                reviews=reviews,
                 status=commit_status("success", []),
                 merge_result=merge_success(7),
             )
         )
+
+    def _issue(
+        self, transport: FakeTransport | None = None
+    ) -> tuple[Adapter, FakeTransport, MergeAuthorization]:
+        """Issue a genuine authorization over a merge-ready fake GitHub."""
+        transport = transport if transport is not None else self._policy_transport()
         adapter = Adapter(transport, REPO)
         authorization = adapter.authorize_merge(
             pr_number=7,
@@ -726,7 +755,34 @@ class AuthorizationCapabilityTests(unittest.TestCase):
         )
         return adapter, transport, authorization
 
+    def _direct_request(self) -> MergeAuthorization:
+        """Manufacture a structurally perfect authorization directly.
+
+        The caller constructs the value from public symbols and knowledge
+        it can legitimately obtain by observing live GitHub state (exact
+        PR number, refs, SHAs, work item, policy merge method) — the
+        FZ-CTRL003-004A bypass scenario: no authorize_merge call, no
+        module internals unavailable to the caller.
+        """
+        return MergeAuthorization(
+            pr_number=7,
+            work_item="CTRL-003",
+            base_ref="main",
+            base_sha=BASE_SHA,
+            head_sha=HEAD_SHA,
+            merge_method="merge",
+        )
+
+    def _attempt_merge(self, transport: FakeTransport, request: object) -> None:
+        Adapter(transport, REPO).merge_pull_request(
+            request,  # type: ignore[arg-type]
+            eligibility=_eligible(),
+            architect_reviewer=ARCHITECT,
+        )
+
     def test_authorize_merge_issues_valid_authorization(self) -> None:
+        """Required test 1: the gate issues an authorization that, with the
+        policy genuinely satisfied, executes exactly one merge PUT."""
         adapter, transport, authorization = self._issue()
         self.assertEqual(authorization.pr_number, 7)
         self.assertEqual(authorization.work_item, "CTRL-003")
@@ -734,79 +790,128 @@ class AuthorizationCapabilityTests(unittest.TestCase):
         self.assertEqual(authorization.base_sha, BASE_SHA)
         self.assertEqual(authorization.head_sha, HEAD_SHA)
         self.assertEqual(authorization.merge_method, "merge")
-        merged = adapter.merge_pull_request(authorization)
+        merged = adapter.merge_pull_request(
+            authorization, eligibility=_eligible(), architect_reviewer=ARCHITECT
+        )
         self.assertEqual(merged.number, 7)
         self.assertEqual(len(transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge")), 1)
 
-    def test_caller_constructed_authorization_fails_closed(self) -> None:
-        """Required test 2: structurally valid caller-created data cannot
-        even construct an authorization — construction itself fails."""
-        with self.assertRaises(GithubAuthorizationForgedError):
-            MergeAuthorization(
-                pr_number=7,
-                work_item="CTRL-003",
-                base_ref="main",
-                base_sha=BASE_SHA,
-                head_sha=HEAD_SHA,
-                merge_method="merge",
-            )
+    def test_module_symbols_do_not_grant_merge_execution(self) -> None:
+        """Required regression test (FZ-CTRL003-004A, exact bypass): the
+        caller imports the module, accesses its public *and* module-level
+        symbols, manufactures a structurally perfect authorization, and
+        supplies a genuine eligibility — yet cannot reach the PUT merge
+        mutation, because the re-established policy (Architect APPROVE
+        bound to the exact head) is absent on GitHub."""
+        import controller
+        import controller.github as github_module
 
-    def test_structurally_valid_forgery_cannot_execute(self) -> None:
-        """Required test 2 (core): an object built via ``object.__new__``
-        with all public fields set bypasses ``__init__`` entirely — and
-        still cannot cause ``merge_pull_request`` to execute."""
-        adapter, transport, _ = self._issue()
-        forged = object.__new__(MergeAuthorization)
-        object.__setattr__(forged, "pr_number", 7)
-        object.__setattr__(forged, "work_item", "CTRL-003")
-        object.__setattr__(forged, "base_ref", "main")
-        object.__setattr__(forged, "base_sha", BASE_SHA)
-        object.__setattr__(forged, "head_sha", HEAD_SHA)
-        object.__setattr__(forged, "merge_method", "merge")
-        with self.assertRaises(GithubAuthorizationForgedError):
-            adapter.merge_pull_request(forged)
+        # Full access to normal public and module symbols, including the
+        # adapter class and its policy machinery:
+        self.assertIs(github_module.MergeAuthorization, MergeAuthorization)
+        self.assertTrue(hasattr(github_module, "_as_merge_request"))
+        self.assertTrue(hasattr(github_module, "_POLICY_MERGE_METHOD"))
+        self.assertTrue(hasattr(github_module.GithubAdapter, "_require_merge_policy"))
+        self.assertTrue(hasattr(controller, "MergeAuthorization"))
+        transport = self._policy_transport(approved=False)
+        with self.assertRaises(GithubMergeBlockedError):
+            self._attempt_merge(transport, self._direct_request())
         self.assertEqual(transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), [])
 
-    def test_forged_proof_attribute_cannot_execute(self) -> None:
-        """A forged object that also carries a bogus ``_proof`` value is
-        refused the same way."""
-        adapter, transport, _ = self._issue()
+    def test_module_symbol_forgery_is_refused_by_the_predicate(self) -> None:
+        """The finding's literal scenario: a caller that reaches into the
+        module's own symbols to build the request (here, even reading the
+        policy merge method constant) still fails closed when policy does
+        not hold — with a typed predicate refusal and zero PUTs."""
+        from controller.github import _POLICY_MERGE_METHOD
+
         forged = object.__new__(MergeAuthorization)
         object.__setattr__(forged, "pr_number", 7)
         object.__setattr__(forged, "work_item", "CTRL-003")
         object.__setattr__(forged, "base_ref", "main")
         object.__setattr__(forged, "base_sha", BASE_SHA)
         object.__setattr__(forged, "head_sha", HEAD_SHA)
-        object.__setattr__(forged, "merge_method", "merge")
-        object.__setattr__(forged, "_proof", object())
+        object.__setattr__(forged, "merge_method", _POLICY_MERGE_METHOD)
+        transport = self._policy_transport(approved=False)
+        with self.assertRaises(GithubMergeBlockedError):
+            self._attempt_merge(transport, forged)
+        self.assertEqual(transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), [])
+
+    def test_non_authorization_object_is_refused(self) -> None:
+        """Garbage presented as an authorization fails closed with the
+        typed forgery error, never an untyped attribute crash."""
+        transport = self._policy_transport()
         with self.assertRaises(GithubAuthorizationForgedError):
-            adapter.merge_pull_request(forged)
+            self._attempt_merge(transport, object())
+        self.assertEqual(transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), [])
+
+    def test_incomplete_forged_authorization_is_refused(self) -> None:
+        """An object built via ``object.__new__`` with missing fields is
+        refused with the typed forgery error before any remote call."""
+        partial = object.__new__(MergeAuthorization)
+        object.__setattr__(partial, "pr_number", 7)
+        object.__setattr__(partial, "work_item", "CTRL-003")
+        transport = self._policy_transport()
+        with self.assertRaises(GithubAuthorizationForgedError):
+            self._attempt_merge(transport, partial)
+        self.assertEqual(transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), [])
+
+    def test_non_policy_merge_method_is_refused(self) -> None:
+        """A genuinely issued authorization whose merge method is tampered
+        to a non-policy value is not field-identical to a fresh issuance
+        and fails closed — even with policy fully satisfied."""
+        _, transport, authorization = self._issue()
+        tampered = dataclasses.replace(authorization, merge_method="squash")
+        with self.assertRaises(GithubAuthorizationForgedError):
+            self._attempt_merge(transport, tampered)
         self.assertEqual(transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), [])
 
     def test_altered_authorization_fails_closed(self) -> None:
-        """``dataclasses.replace`` on a genuine authorization changes the
-        public fields but not the proof — tamper detection fails closed."""
-        _, _, authorization = self._issue()
-        with self.assertRaises(GithubAuthorizationForgedError):
-            dataclasses.replace(authorization, head_sha="e" * 40)
+        """``dataclasses.replace`` on a genuine authorization (head tamper)
+        is caught by the re-proven predicate — the altered target no
+        longer matches live GitHub state — with zero PUTs."""
+        _, transport, authorization = self._issue()
+        altered = dataclasses.replace(authorization, head_sha="e" * 40)
+        with self.assertRaises(GithubStaleBaseError):
+            self._attempt_merge(transport, altered)
+        self.assertEqual(transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge"), [])
 
     def test_issued_authorization_copy_remains_valid(self) -> None:
-        """Capability semantics: copying an authorization you already
-        hold transfers it within the process; it forges nothing (the
-        copy is field-identical and carries the same genuine proof)."""
-        adapter, transport, authorization = self._issue()
+        """Request semantics: copying an authorization you already hold
+        transfers the request within the process (field-identical value);
+        execution is gated by the re-proven policy, not by provenance."""
+        _, transport, authorization = self._issue()
         duplicate = copy.copy(authorization)
-        merged = adapter.merge_pull_request(duplicate)
+        merged = Adapter(transport, REPO).merge_pull_request(
+            duplicate, eligibility=_eligible(), architect_reviewer=ARCHITECT
+        )
         self.assertEqual(merged.number, 7)
         self.assertEqual(len(transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge")), 1)
 
     def test_equivalent_issuance_produces_equal_authorizations(self) -> None:
-        """Determinism: two identical gate evaluations produce equal
-        authorization values (the opaque proof never affects equality)."""
+        """Determinism: two identical gate evaluations produce equal,
+        hashable authorization values (plain data, no hidden state)."""
         _, _, first = self._issue()
         _, _, second = self._issue()
         self.assertEqual(first, second)
         self.assertEqual(hash(first), hash(second))
+
+    def test_merge_execution_is_gated_by_policy_not_provenance(self) -> None:
+        """Pins the Architect-accepted path-2 semantics. The same
+        directly-constructed authorization as the bypass scenario, against
+        a GitHub where the complete predicate *genuinely holds* (Architect
+        APPROVE bound to the exact head, clean state, one-PR, eligible
+        active item): execution proceeds with exactly one PUT. The gate is
+        the re-established policy — an in-process type system cannot
+        enforce object provenance without authoritative runtime state,
+        which AC5 forbids. Possession of a value never substitutes for
+        the predicate holding; when the predicate holds, the merge is
+        policy-authorized regardless of how the request value was
+        obtained."""
+        transport = self._policy_transport(approved=True)
+        self._attempt_merge(transport, self._direct_request())
+        put_calls = transport.calls_matching("PUT", f"/repos/{REPO}/pulls/7/merge")
+        self.assertEqual(len(put_calls), 1)
 
 
 def _github_tree() -> ast.Module:
@@ -865,9 +970,11 @@ def _mutation_path_text(call: ast.Call) -> str | None:
 
 
 class MergePathStructuralTests(unittest.TestCase):
-    """FZ-CTRL003-004 (structural): the adapter offers exactly one merge
-    path, it is reached only through ``merge_pull_request``, and it is
-    gated by issuance verification before any remote call."""
+    """FZ-CTRL003-004A (structural): the adapter offers exactly one merge
+    path; it is reached only through ``merge_pull_request``; the complete
+    policy predicate precedes the mutation; the predicate is single-sourced
+    (gate and execution share it); and the adapter holds no authoritative
+    runtime state (AC5 — no issuance registry or cache)."""
 
     def test_merge_endpoint_appears_only_in_merge_pull_request(self) -> None:
         merge_calls: list[str] = []
@@ -877,42 +984,69 @@ class MergePathStructuralTests(unittest.TestCase):
                 merge_calls.append(owner)
         self.assertEqual(merge_calls, ["merge_pull_request"])
 
-    def test_merge_pull_request_verifies_issuance_before_any_adapter_call(self) -> None:
+    def test_merge_pull_request_re_proves_policy_before_any_mutation(self) -> None:
+        """In ``merge_pull_request``: the request is normalized, the
+        complete policy predicate is re-evaluated, and only then does the
+        remote mutation (PUT) occur — no mutation can precede the proof."""
         method = _adapter_methods(_github_tree())["merge_pull_request"]
         calls = [node for node in ast.walk(method) if isinstance(node, ast.Call)]
         calls.sort(key=lambda node: (node.lineno, node.col_offset))
-        verify_positions = [
-            index
-            for index, call in enumerate(calls)
-            if isinstance(call.func, ast.Name) and call.func.id == "_verify_issuance"
-        ]
-        self.assertEqual(len(verify_positions), 1)
-        adapter_call_positions = [
-            index
-            for index, call in enumerate(calls)
-            if isinstance(call.func, ast.Attribute)
-            and isinstance(call.func.value, ast.Name)
-            and call.func.value.id == "self"
-        ]
-        self.assertTrue(adapter_call_positions)
-        self.assertLess(verify_positions[0], adapter_call_positions[0])
 
-    def test_authorization_construction_confined_to_the_gate(self) -> None:
-        """The only ``MergeAuthorization(...)`` construction site in the
-        package is inside ``authorize_merge`` — no public issuance path
-        other than the gate exists."""
-        constructions = [
+        def matching(predicate: Callable[[ast.Call], bool]) -> list[int]:
+            return [i for i, call in enumerate(calls) if predicate(call)]
+
+        normalize = matching(
+            lambda call: isinstance(call.func, ast.Name) and call.func.id == "_as_merge_request"
+        )
+        policy = matching(
+            lambda call: (
+                isinstance(call.func, ast.Attribute) and call.func.attr == "_require_merge_policy"
+            )
+        )
+        mutations = matching(
+            lambda call: (
+                isinstance(call.func, ast.Attribute) and call.func.attr in ("put_json", "post_json")
+            )
+        )
+        self.assertEqual(len(mutations), 1)
+        self.assertLess(mutations[0], len(calls))
+        self.assertLess(policy[0], mutations[0])
+        self.assertLess(normalize[0], policy[0])
+
+    def test_merge_policy_is_single_sourced(self) -> None:
+        """The complete merge predicate lives in exactly one place and is
+        evaluated by both the issuance gate and the execution path — the
+        two can never drift apart."""
+        owners = [
             owner
             for call, owner in _calls_with_owner(_github_tree())
-            if isinstance(call.func, ast.Name) and call.func.id == "MergeAuthorization"
+            if isinstance(call.func, ast.Attribute) and call.func.attr == "_require_merge_policy"
         ]
-        self.assertEqual(constructions, ["authorize_merge"])
+        self.assertEqual(sorted(set(owners)), ["authorize_merge", "merge_pull_request"])
 
-    def test_issuance_proof_type_is_not_exported(self) -> None:
-        import controller
-
-        self.assertFalse(hasattr(controller, "_IssuanceProof"))
-        self.assertTrue(hasattr(controller, "MergeAuthorization"))
+    def test_adapter_holds_no_authoritative_runtime_state(self) -> None:
+        """AC5: the adapter keeps no runtime registry/cache of issuances —
+        ``__init__`` binds only the transport/repository/owner, and no
+        other method ever assigns an instance attribute."""
+        methods = _adapter_methods(_github_tree())
+        assignments: set[tuple[str, str]] = set()
+        for name, method in methods.items():
+            for node in ast.walk(method):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if (
+                            isinstance(target, ast.Attribute)
+                            and isinstance(target.value, ast.Name)
+                            and target.value.id == "self"
+                        ):
+                            assignments.add((name, target.attr))
+                if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Attribute):
+                    if isinstance(node.target.value, ast.Name) and node.target.value.id == "self":
+                        assignments.add((name, node.target.attr))
+        self.assertEqual(
+            assignments,
+            {("__init__", "_transport"), ("__init__", "_repository"), ("__init__", "_owner")},
+        )
 
 
 class DomainCompatibilityTests(unittest.TestCase):
