@@ -64,3 +64,87 @@ class CommandTargetError(DomainError):
     The domain model executes exactly one active work item; commands for
     any other identifier fail closed rather than being routed or guessed.
     """
+
+
+class GithubAdapterError(ControllerError):
+    """Base class for GitHub adapter failures (CTRL-003).
+
+    Every adapter failure — transport, authentication, missing resource,
+    malformed response, ambiguity, drift, contradiction, or policy
+    refusal — raises a subclass of this type and stops the operation.
+    Nothing is guessed, retried implicitly, or silently defaulted.
+    """
+
+
+class GithubTransportError(GithubAdapterError):
+    """Network/timeout/unexpected-HTTP failure in the GitHub transport."""
+
+
+class GithubAuthError(GithubAdapterError):
+    """Authentication or permission failure (HTTP 401 / plain 403)."""
+
+
+class GithubRateLimitError(GithubAdapterError):
+    """GitHub rate limit exceeded (HTTP 429 or rate-limited 403)."""
+
+
+class GithubNotFoundError(GithubAdapterError):
+    """A requested GitHub resource does not exist (HTTP 404)."""
+
+
+class GithubMalformedResponseError(GithubAdapterError):
+    """A GitHub response did not match the shape required for normalization.
+
+    Missing fields, wrong types, or non-object/list bodies fail closed
+    rather than being defaulted or partially parsed.
+    """
+
+
+class GithubAmbiguityError(GithubAdapterError):
+    """GitHub state is ambiguous where exactly one match is required.
+
+    Primary case: more than one open pull request for a work-order branch,
+    violating the one-PR-per-work-item rule.
+    """
+
+
+class GithubStaleBaseError(GithubAdapterError):
+    """A base or head SHA does not match the expected, authority-derived SHA.
+
+    Raised for base drift, head drift, and stale-SHA conditions; the
+    adapter never guesses which SHA was intended.
+    """
+
+
+class GithubContradictionError(GithubAdapterError):
+    """Repository authority and GitHub state contradict each other.
+
+    For example: the merge predicate requires the work item to be the
+    active eligible item in machine state, but the provided authority
+    snapshot says otherwise. Contradictions stop the operation.
+    """
+
+
+class GithubMergeBlockedError(GithubAdapterError):
+    """The frozen merge predicate is not satisfied.
+
+    Raised by the adapter's merge authorization gate when GitHub-side
+    evidence (PR state, CI, reviews, mergeability) does not satisfy the
+    frozen architecture's merge predicate. Never bypassed.
+    """
+
+
+class GithubAuthorizationForgedError(GithubAdapterError):
+    """A presented merge authorization is not a valid merge request.
+
+    FZ-CTRL003-004A: ``merge_pull_request`` treats the presented
+    ``MergeAuthorization`` as a merge request, never as evidence, and
+    independently re-establishes the complete merge-policy proof before
+    the remote mutation. This error fires closed when the presented
+    object is not a structurally complete ``MergeAuthorization`` value
+    (a non-authorization object, or a forgery with missing or malformed
+    fields), or when it is not field-identical to the freshly
+    re-established proof (for example a merge method the frozen policy
+    never issues). Possession of such a value can never substitute for
+    the predicate actually holding at execution time.
+    """

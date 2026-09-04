@@ -5,8 +5,11 @@ transitions, a command/event boundary for future adapters, and repository
 authority loading/reconstruction. CTRL-002 domain model: typed work-item
 identity, authority-derived dispatch eligibility, the governed execution
 context, and domain commands/events with deterministic serialization.
-No GitHub, no Z.ai, no merging, no database — those belong to later work
-orders.
+CTRL-003 GitHub adapter: a typed, dependency-injected observation/mutation
+boundary with strict normalization, work-order correlation, and a
+policy-gated merge authorization enforcing the frozen merge predicate.
+No Z.ai integration, no merging by workers, no database — those belong
+to later work orders.
 """
 
 from __future__ import annotations
@@ -42,9 +45,33 @@ from controller.errors import (
     ContradictionError,
     ControllerError,
     DomainError,
+    GithubAdapterError,
+    GithubAmbiguityError,
+    GithubAuthError,
+    GithubAuthorizationForgedError,
+    GithubContradictionError,
+    GithubMalformedResponseError,
+    GithubMergeBlockedError,
+    GithubNotFoundError,
+    GithubRateLimitError,
+    GithubStaleBaseError,
+    GithubTransportError,
     IneligibleDispatchError,
     InvalidTransitionError,
     SpecError,
+)
+from controller.github import (
+    DEFAULT_API_ROOT,
+    GithubAdapter,
+    GithubComment,
+    GithubCommit,
+    GithubCommitStatus,
+    GithubPullRequest,
+    GithubRef,
+    GithubReview,
+    GithubTransport,
+    MergeAuthorization,
+    UrllibGithubTransport,
 )
 from controller.states import (
     ALL_STATES,
@@ -70,23 +97,45 @@ __all__ = [
     "ControllerError",
     "ControllerState",
     "ContradictionError",
+    "DEFAULT_API_ROOT",
     "DispatchEligibility",
     "DomainCommand",
     "DomainError",
     "DomainEvent",
     "Event",
     "EXCEPTION_COMMANDS",
+    "GithubAdapter",
+    "GithubAdapterError",
+    "GithubAmbiguityError",
+    "GithubAuthError",
+    "GithubAuthorizationForgedError",
+    "GithubComment",
+    "GithubCommit",
+    "GithubCommitStatus",
+    "GithubContradictionError",
+    "GithubMalformedResponseError",
+    "GithubMergeBlockedError",
+    "GithubNotFoundError",
+    "GithubPullRequest",
+    "GithubRateLimitError",
+    "GithubRef",
+    "GithubReview",
+    "GithubStaleBaseError",
+    "GithubTransport",
+    "GithubTransportError",
     "GovernedWorkItem",
     "IneligibleDispatchError",
     "InvalidTransitionError",
-    "SpecError",
     "LIFECYCLE_SEQUENCE",
     "LifecycleState",
+    "MergeAuthorization",
     "ProgramState",
     "STATE_FILE",
     "SUPPORTED_SCHEMA_VERSION",
+    "SpecError",
     "TERMINAL_EXCEPTION_STATES",
     "TRANSITIONS",
+    "UrllibGithubTransport",
     "WORK_ITEMS_DIR",
     "WorkItemIdentity",
     "allowed_commands",

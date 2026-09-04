@@ -8,19 +8,25 @@
 
 - **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `READY`)
-- **PR:** #6 — https://github.com/pectoraux/controller/pull/6 (Architect governance/activation)
-- **head SHA awaiting review:** `5afd6a72862df78be1ba807c81a6f8e3d1b1408c`
-  (CTRL-003 work-order definition/activation governance change; branch tip may
-  advance with status-dashboard-only commits, which do not alter the Work Order
-  or authority intent)
-- **last completed Architect action:** CTRL-003 Work Order defined and machine
-  state prepared for activation from reconciled main `b9e7402476f94a7a52ef6cd248ee5bf18d9d1ca2`;
-  CTRL-004 remains planned; Stage 1 remains active.
+- **PR:** #7 — https://github.com/pectoraux/controller/pull/7 (implementation)
+- **head SHA awaiting review:** `e2c52a6c33c1573dfc39ed05743634dc3ed8ac8c`
+  (CTRL-003 implementation + FZ-CTRL003-001/002/003/004/004A fixes; the branch tip
+  may additionally advance with status-dashboard-only commits, which do not
+  alter the implementation)
+- **last completed worker action:** FZ-CTRL003-004A resolved via the
+  Architect-accepted execution-time re-proof path — the complete frozen merge
+  predicate now lives in one private method shared by `authorize_merge` and
+  `merge_pull_request`, which re-evaluates it *in full* from live GitHub state
+  plus fresh execution-time policy inputs (eligibility, architect reviewer,
+  required checks) immediately before the remote mutation; `MergeAuthorization`
+  is an honest merge request (never evidence), policy parameters are not
+  carried in it, and a caller with access to all public/module symbols cannot
+  reach the PUT merge mutation unless the re-proven predicate (Architect
+  APPROVE bound to the exact head) genuinely holds; full validation green
+  (212/212 tests, strict mypy, ruff, CLI, guard, forbidden-surface audit PASS)
 - **ARCHITECT ACTION: REVIEW REQUIRED**
-- **last update (UTC):** 2026-09-04T11:50:30Z
-- **next step:** the human operator should say `go` to invoke the Architect
-  review cycle for PR #6; after merge, Z.ai may implement CTRL-003 from the
-  resulting main SHA.
+- **last update (UTC):** 2026-09-04T13:55:00Z
+- **next step:** Architect review iteration 4 for PR #7
 
 ## Maintenance protocol
 
