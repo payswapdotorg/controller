@@ -21,8 +21,16 @@ restart/interruption classification over repository authority and
 observed GitHub evidence — the first incomplete governed boundary,
 exact identity binding, observed-evidence conditions, and a typed
 resume plan directed to the boundary that owns it (never executed
-here). No worker merging, no database, no scheduler — those stay
-outside the frozen authority.
+here). CTRL-010 end-to-end dogfood: one deterministic composed
+scenario that proves the assembled boundaries execute a complete
+governed Work Item loop — dispatch, PR/CI evidence, one
+REQUEST_CHANGES change iteration, the single authorized merge, a
+deliberate restart recovered through CTRL-009, reconciliation, and
+explicit Stage-6 prerequisite evidence — while every governed decision
+remains with the boundary that owns it (the dogfood layer composes;
+it never re-implements a predicate, never advances the stage, and
+writes only the synthetic scenario repository). No worker merging, no
+database, no scheduler — those stay outside the frozen authority.
 """
 
 from __future__ import annotations
@@ -43,6 +51,14 @@ from controller.commands import (
     Command,
     CommandName,
     Event,
+)
+from controller.dogfood import (
+    DogfoodExecutionRecord,
+    DogfoodFailureRecord,
+    DogfoodRestartRecord,
+    DogfoodStepRecord,
+    run_fail_closed_probes,
+    run_governed_dogfood,
 )
 from controller.domain import (
     AuthorityContext,
@@ -176,6 +192,10 @@ __all__ = [
     "ContradictionError",
     "DEFAULT_API_ROOT",
     "DispatchEligibility",
+    "DogfoodExecutionRecord",
+    "DogfoodFailureRecord",
+    "DogfoodRestartRecord",
+    "DogfoodStepRecord",
     "DomainCommand",
     "DomainError",
     "DomainEvent",
@@ -285,6 +305,8 @@ __all__ = [
     "load_work_item_status",
     "reconstruct",
     "reconstruct_domain",
+    "run_fail_closed_probes",
+    "run_governed_dogfood",
     "target_state",
     "verify_authority",
 ]
