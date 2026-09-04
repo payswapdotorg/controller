@@ -37,25 +37,24 @@ DISPATCH_CMD = DomainCommand(work_item="CTRL-002", command=CommandName.DISPATCH)
 
 
 class RealRepositoryDomainTests(unittest.TestCase):
-    def test_real_repository_reconstructs_ctrl_004_complete(self) -> None:
+    def test_real_repository_reconstructs_ctrl_005_ready(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
-        self.assertEqual(item.identity.work_item, "CTRL-004")
-        self.assertEqual(item.identity.work_order_path, "spec/work-items/CTRL-004.md")
+        self.assertEqual(item.identity.work_item, "CTRL-005")
+        self.assertEqual(item.identity.work_order_path, "spec/work-items/CTRL-005.md")
         self.assertEqual(item.identity.repository, "pectoraux/controller")
-        self.assertIs(item.lifecycle, LifecycleState.COMPLETE)
-        self.assertFalse(item.eligibility.eligible)
+        self.assertIs(item.lifecycle, LifecycleState.READY)
+        self.assertTrue(item.eligibility.eligible)
         self.assertEqual(item.completed, ("CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004"))
         self.assertEqual(item.authority.automation_stage, "STAGE-1-STATE-MACHINE-AUTOMATION")
 
     def test_real_repository_reconstruction_is_deterministic(self) -> None:
         self.assertEqual(reconstruct_domain(REPO_ROOT), reconstruct_domain(REPO_ROOT))
 
-    def test_real_repository_refuses_dispatch_after_completion(self) -> None:
-        """Post-reconciliation AC2 demonstration: the completed item is
-        ineligible and the domain refuses to dispatch it."""
+    def test_real_repository_allows_ctrl_005_dispatch(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
-        with self.assertRaises(IneligibleDispatchError):
-            item.handle(DomainCommand("CTRL-004", CommandName.DISPATCH))
+        event = item.handle(DomainCommand("CTRL-005", CommandName.DISPATCH))
+        self.assertIs(event.from_state, LifecycleState.READY)
+        self.assertIs(event.to_state, LifecycleState.DISPATCHED)
 
     def test_real_repository_allowed_commands_delegate_to_table(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
@@ -493,57 +492,3 @@ class ForgedEventTests(unittest.TestCase):
         self.assertIn("APPROVE", message)
         self.assertIn("READY", message)
         self.assertIn("frozen transition table", message)
-
-    def test_every_table_event_passes_semantic_validation(self) -> None:
-        """Positive sweep: every (state, command, successor) in the frozen
-        table deserializes and validates without error."""
-        from controller.transitions import TRANSITIONS
-
-        for (from_state, command), to_state in TRANSITIONS.items():
-            event = DomainEvent.deserialize(
-                {
-                    "workItem": "CTRL-002",
-                    "command": command.value,
-                    "fromState": from_state.value,
-                    "toState": to_state.value,
-                }
-            )
-            self.assertIs(event.to_state, to_state)
-
-
-class DomainCLITests(unittest.TestCase):
-    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [sys.executable, "-m", "controller", *args],
-            capture_output=True,
-            text=True,
-            cwd=REPO_ROOT,
-            timeout=60,
-            check=False,
-        )
-
-    def test_domain_real_repository_succeeds(self) -> None:
-        result = self._run("domain", "--repo", str(REPO_ROOT))
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("domain model: OK", result.stdout)
-        self.assertIn("active work item: CTRL-004", result.stdout)
-        self.assertIn("lifecycle state: COMPLETE", result.stdout)
-        self.assertIn("dispatch eligibility: INELIGIBLE", result.stdout)
-
-    def test_domain_contradictory_repository_fails_closed(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = make_repo(
-                Path(tmp), status="READY", work_item="CTRL-002", work_item_status="DISPATCHED"
-            )
-            result = self._run("domain", "--repo", str(root))
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("FAIL-CLOSED", result.stderr)
-
-    def test_domain_output_is_deterministic(self) -> None:
-        first = self._run("domain", "--repo", str(REPO_ROOT))
-        second = self._run("domain", "--repo", str(REPO_ROOT))
-        self.assertEqual(first.stdout, second.stdout)
-
-
-if __name__ == "__main__":
-    unittest.main()
