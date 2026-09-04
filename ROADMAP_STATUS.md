@@ -6,15 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
+- **current state:** `CHANGES_REQUESTED`
 - **active Work Order:** CTRL-009 — Recovery / Idempotency (`spec/work-items/CTRL-009.md`, `READY`)
-- **PR:** #26 (branch `ctrl-009-recovery`, implementation head `e13dfd5`, opened from the exact governance activation base `4f9faf577526fe06af4e4ad7ab592d0d408752a1` plus the absorbed dashboard-only dispatch marker `80edeadfbc5de6b95f716a0731c2adf8e17ab171`), returned to `WAITING_FOR_ARCHITECT` with a green validation transcript
-- **last completed architect action:** CTRL-009 defined/frozen/activated as the sole READY item after CTRL-008 reconciliation; durable worker dispatch issued against exact base `4f9faf577526fe06af4e4ad7ab592d0d408752a1`
+- **PR:** #26 (branch `ctrl-009-recovery`, implementation head `e13dfd5`, opened from the exact governance activation base `4f9faf577526fe06af4e4ad7ab592d0d408752a1` plus the absorbed dashboard-only dispatch marker `80edeadfbc5de6b95f716a0731c2adf8e17ab171`)
+- **last completed architect action:** ARCHITECT DECISION — REQUEST_CHANGES on PR #26 (comment 5547202721, 2026-09-04T22:33:27Z): FZ-CTRL009-001 (HIGH — recovery can direct a replay of already-observed dispatch/start work: at READY with an observed governed PR the plan directed `DISPATCH`, at DISPATCHED it directed `BEGIN_IMPLEMENTATION`, and the orchestrator's READY/DISPATCHED cycles re-perform the worker provider start) and FZ-CTRL009-002 (MEDIUM — the CHANGES_REQUESTED resume was emitted without the required carried worker-session reference); both to be resolved on the same PR without changing frozen CTRL-001..CTRL-008 semantics
 - **last completed worker action:** CTRL-009 implementation delivered — `controller/recovery.py` (the governed recovery boundary: deterministic restart/interruption classification, the typed RecoveryPlan, the RecoveryLoopError family) and `tests/test_recovery.py` (71 new tests; suite 480 → 551); mechanical real-repository test-pin correction to the CTRL-009 authority (the worker-PR precedent); no frozen module touched
-- **current implementation action:** awaiting Architect semantic review of the CTRL-009 implementation PR (AC1–AC8 evidence in the PR transcript)
-- **last update (UTC):** 2026-09-04T22:24:00Z
+- **current implementation action:** resolving FZ-CTRL009-001 and FZ-CTRL009-002 in place on PR #26 — the recovery contract corrected so already-observed dispatch/start work is never replayed (READY/DISPATCHED with an observed PR direct no next step; regression tests prove no Z.ai invocation can be caused by the recovery continuation) and the required session fails closed at the CHANGES_REQUESTED resume
+- **last update (UTC):** 2026-09-04T22:45:18Z
 - **next planned item:** CTRL-010 — End-to-end dogfood (per the roadmap; not yet defined, not eligible)
-- **next step:** Architect reviews the CTRL-009 implementation PR; on REQUEST_CHANGES the worker iterates on the same PR, on APPROVE + merge predicates the merge proceeds and post-merge reconciliation records CTRL-009/COMPLETE
+- **next step:** worker resolves both findings on the same PR, returns with a fresh green validation transcript, and re-enters `WAITING_FOR_ARCHITECT` for review iteration 2
 
 ## Maintenance protocol
 
