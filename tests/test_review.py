@@ -658,10 +658,11 @@ class HandoffTests(LoopFixtureMixin):
         self.assertTrue(all(call[0] == "GET" for call in self._transport(loop).calls))
 
     def test_forged_issuance_proof_cannot_produce_handoff(self) -> None:
-        """FZ-CTRL007-001 regression at the provenance boundary itself:
-        a value of the issued type whose ordinary fields are all exact
-        for the governed context but whose proof was not computed by the
-        adapter fails verification — provenance, not a field mismatch."""
+        """FZ-CTRL007-002 regression at the provenance boundary itself:
+        a caller-constructed value of the issued type whose ordinary
+        fields are all exact for the governed context but whose proof is
+        not an object the issuance boundary sealed fails verification —
+        construction-path provenance, not a field mismatch."""
         forged = ZaiIssuedWorkerSession(
             session_id=SESSION_ID,
             repository=REPO,
@@ -673,7 +674,7 @@ class HandoffTests(LoopFixtureMixin):
             updated_at="2026-09-04T16:50:00Z",
             _proof="00" * 32,
         )
-        self.assertFalse(forged.verify_issuance())
+        self.assertFalse(forged.is_adapter_issued())
         loop, repo = self._loop(
             "REVIEW_PENDING",
             reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
@@ -681,15 +682,44 @@ class HandoffTests(LoopFixtureMixin):
         )
         with self.assertRaises(ReviewContradictionError) as raised:
             loop.evaluate(repo, _refs(worker_session=forged))
-        self.assertIn("does not verify", str(raised.exception))
+        self.assertIn("FZ-CTRL007-002", str(raised.exception))
+        self.assertIn("not sealed", str(raised.exception))
         self.assertTrue(all(call[0] == "GET" for call in self._transport(loop).calls))
+
+    def test_transplanted_proof_cannot_produce_handoff(self) -> None:
+        """FZ-CTRL007-002 strongest caller-constructed case: a genuine
+        proof object (obtained through the actual adapter path) attached
+        to DIFFERENT ordinary fields fails verification — the proof binds
+        the exact fields it was sealed for."""
+        genuine = _issued_session()
+        self.assertTrue(genuine.is_adapter_issued())
+        transplanted = ZaiIssuedWorkerSession(
+            session_id="zai-sess-foreign-999",
+            repository=REPO,
+            work_item=WORK_ITEM,
+            base_sha=BASE_SHA,
+            pr_number=None,
+            head_sha=None,
+            status="active",
+            updated_at="2026-09-04T16:50:00Z",
+            _proof=genuine._proof,  # noqa: SLF001 - the transplant under test
+        )
+        self.assertFalse(transplanted.is_adapter_issued())
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+        )
+        with self.assertRaises(ReviewContradictionError) as raised:
+            loop.evaluate(repo, _refs(worker_session=transplanted))
+        self.assertIn("FZ-CTRL007-002", str(raised.exception))
 
     def test_tampered_issued_evidence_cannot_produce_handoff(self) -> None:
         """Issued evidence whose fields were altered after issuance
-        (here: the session identity) fails its own proof — the MAC binds
+        (here: the session identity) fails its own proof — the seal binds
         every ordinary field, so tampering is detected locally."""
         tampered = dataclasses.replace(_issued_session(), session_id="zai-sess-tampered-999")
-        self.assertFalse(tampered.verify_issuance())
+        self.assertFalse(tampered.is_adapter_issued())
         loop, repo = self._loop(
             "REVIEW_PENDING",
             reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
@@ -697,15 +727,16 @@ class HandoffTests(LoopFixtureMixin):
         )
         with self.assertRaises(ReviewContradictionError) as raised:
             loop.evaluate(repo, _refs(worker_session=tampered))
-        self.assertIn("does not verify", str(raised.exception))
+        self.assertIn("FZ-CTRL007-002", str(raised.exception))
 
     def test_issued_evidence_verifies_and_produces_the_handoff(self) -> None:
-        """The positive boundary: evidence actually issued by the adapter
-        (normalizing a provider response) verifies locally and produces
-        the handoff without any provider call from the loop."""
+        """The positive boundary (Architect-required): evidence actually
+        issued by the CTRL-004 adapter normalization path verifies
+        locally and produces the handoff without any provider call from
+        the loop."""
         issued = _issued_session()
         self.assertIsInstance(issued, ZaiIssuedWorkerSession)
-        self.assertTrue(issued.verify_issuance())
+        self.assertTrue(issued.is_adapter_issued())
         loop, repo = self._loop(
             "REVIEW_PENDING",
             reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],

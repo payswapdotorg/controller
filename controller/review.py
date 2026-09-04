@@ -42,12 +42,14 @@ criterion):
   only after the carried session's **ordinary binding** (repository, work
   item, dispatch base, PR identity when reported) is proven locally
   against authority and the session's **adapter-issued provenance** is
-  verified locally (FZ-CTRL007-001): the carried value must be
+  verified locally (FZ-CTRL007-001/002): the carried value must be
   :class:`controller.zai.ZaiIssuedWorkerSession` — evidence sealed at the
   CTRL-004 boundary when the adapter normalized the provider response —
-  and its issuance proof must verify. A structurally exact session value
-  constructed by hand (the public ``ZaiWorkerSession`` form), or issued
-  evidence with a forged or tampered proof, therefore cannot produce a
+  and its construction-path proof must verify (a pure local check with
+  no source-reproducible key material). A structurally exact session value
+  constructed by hand (the public ``ZaiWorkerSession`` form), a
+  caller-constructed value of the issued type, or a genuine proof
+  transplanted onto different fields, therefore cannot produce a
   handoff. The loop establishes provenance **without any Z.ai provider
   I/O** — it performs zero worker-provider calls of any kind
   (observation-only contract): live provider re-proof/resume belongs to
@@ -646,33 +648,38 @@ class ArchitectReviewLoop:
 
     def _require_issued_evidence(self, session: ZaiWorkerSession) -> ZaiIssuedWorkerSession:
         """Require the carried session to be adapter-issued evidence
-        (FZ-CTRL007-001), verified locally with zero provider I/O.
+        (FZ-CTRL007-001/002), verified locally with zero provider I/O.
 
         The carried value must be the evidence the CTRL-004 adapter
         sealed when it normalized the provider response
-        (:class:`ZaiIssuedWorkerSession`), and its issuance proof must
-        verify — a pure recomputation over the carried fields. A
-        structurally exact value built through the public
-        ``ZaiWorkerSession`` constructor is not evidence of any
-        provider-observed execution; issued evidence with a forged or
-        tampered proof fails verification. The loop never re-proves
-        provenance by invoking Z.ai: live provider re-proof/resume is
-        the consuming worker boundary's responsibility.
+        (:class:`ZaiIssuedWorkerSession`), and its construction-path
+        proof must verify — a pure local check over the carried value
+        with no source-reproducible key material involved. A structurally exact value
+        built through the public ``ZaiWorkerSession`` constructor is not
+        evidence of any provider-observed execution; a caller-constructed
+        value of the issued type — including one carrying a genuine
+        proof object transplanted onto different fields — fails
+        verification, because the proof binds the exact fields it was
+        sealed for. The loop never re-proves provenance by invoking
+        Z.ai: live provider re-proof/resume is the consuming worker
+        boundary's responsibility.
         """
         if not isinstance(session, ZaiIssuedWorkerSession):
             raise ReviewContradictionError(
                 f"the carried worker session '{session.session_id}' is not "
                 "adapter-issued evidence: the ordinary ZaiWorkerSession value "
-                "form is constructible by hand, so only evidence issued by the "
+                "form is constructible by hand, so only evidence sealed by the "
                 "CTRL-004 adapter when normalizing a provider response produces "
                 "a handoff (FZ-CTRL007-001)"
             )
-        if not session.verify_issuance():
+        if not session.is_adapter_issued():
             raise ReviewContradictionError(
                 f"the carried worker session '{session.session_id}' presents "
-                "adapter-issued evidence whose proof does not verify for its "
-                "own fields: forged or tampered session evidence cannot produce "
-                "a handoff"
+                "issued-shaped evidence that was not sealed by the CTRL-004 "
+                "adapter's provider-response normalization path for exactly "
+                "these fields: a caller-constructed value (or a proof "
+                "transplanted onto different fields) does not establish "
+                "adapter issuance (FZ-CTRL007-002)"
             )
         return session
 

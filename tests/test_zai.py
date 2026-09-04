@@ -15,6 +15,7 @@ import inspect
 import unittest
 from typing import Any
 
+from controller import zai as controller_zai_module
 from controller.errors import (
     ZaiAdapterError,
     ZaiAuthError,
@@ -481,16 +482,19 @@ class DeterminismTests(unittest.TestCase):
 
 
 class IssuedEvidenceTests(unittest.TestCase):
-    """FZ-CTRL007-001: adapter-issued session evidence — the provenance
-    boundary lives at provider-response normalization, is verifiable
-    locally with zero provider I/O, and cannot be forged by constructing
-    values by hand."""
+    """FZ-CTRL007-001/002: adapter-issued session evidence — genuine
+    construction-path provenance. The boundary lives at provider-response
+    normalization, is verifiable locally with zero provider I/O and no
+    source-level secret, and cannot be forged from repository-source
+    knowledge: not by constructing the ordinary value, not by constructing
+    the issued type, and not by transplanting a genuine proof onto
+    different fields."""
 
     def test_start_worker_returns_verified_issued_evidence(self) -> None:
         transport = FakeZaiTransport({START_PATH: worker_session()})
         session = Adapter(transport, REPO).start_worker(_context())
         self.assertIsInstance(session, ZaiIssuedWorkerSession)
-        self.assertTrue(session.verify_issuance())
+        self.assertTrue(session.is_adapter_issued())
 
     def test_resume_worker_returns_verified_issued_evidence(self) -> None:
         transport = FakeZaiTransport(
@@ -500,26 +504,57 @@ class IssuedEvidenceTests(unittest.TestCase):
             _context(pr_number=7, head_sha=HEAD_SHA), SESSION_ID
         )
         self.assertIsInstance(session, ZaiIssuedWorkerSession)
-        self.assertTrue(session.verify_issuance())
+        self.assertTrue(session.is_adapter_issued())
 
-    def test_issuance_is_deterministic_across_instances_and_restarts(self) -> None:
-        """Restart safety: the proof verifies from any process, with no
-        runtime registry or adapter state (AC7 — the key material is
-        in-code, the value is self-certifying)."""
+    def test_issuance_is_deterministic_and_no_source_level_secret_exists(self) -> None:
+        """Restart/in-process safety: equivalent reports seal to equal
+        evidence, verification is a pure local check, and the module
+        exposes no key, MAC function, or issuance callable that a caller
+        could use to reproduce a proof from repository source
+        (FZ-CTRL007-002)."""
         first = _normalize_session(worker_session(), "a")
         second = _normalize_session(worker_session(), "b")
-        self.assertTrue(first.verify_issuance())
-        self.assertTrue(second.verify_issuance())
+        self.assertTrue(first.is_adapter_issued())
+        self.assertTrue(second.is_adapter_issued())
         self.assertEqual(first, second)
+        self.assertEqual(hash(first), hash(second))
+        public_names = {name for name in vars(controller_zai_module) if not name.startswith("__")}
+        for forbidden in ("_ISSUANCE_KEY", "_issuance_proof", "_FIELD_SEPARATOR"):
+            self.assertNotIn(forbidden, public_names)
+        self.assertNotIn("hmac", vars(controller_zai_module))
+        self.assertNotIn("hashlib", vars(controller_zai_module))
 
     def test_forged_proof_fails_local_verification(self) -> None:
-        """A value of the issued type with every ordinary field exact but
-        a proof not computed by the adapter is not evidence — provenance,
-        not a field mismatch (the FZ-CTRL007-001 regression at the
-        boundary itself)."""
+        """A caller-constructed value of the issued type with every
+        ordinary field exact but a proof the boundary never sealed is
+        not evidence — construction-path provenance, not a field
+        mismatch (the FZ-CTRL007-002 regression at the boundary
+        itself)."""
         genuine = _normalize_session(worker_session(), "a")
-        forged = ZaiIssuedWorkerSession(
-            session_id=genuine.session_id,
+        for bogus in ("00" * 32, object(), None, 123):
+            forged = ZaiIssuedWorkerSession(
+                session_id=genuine.session_id,
+                repository=genuine.repository,
+                work_item=genuine.work_item,
+                base_sha=genuine.base_sha,
+                pr_number=genuine.pr_number,
+                head_sha=genuine.head_sha,
+                status=genuine.status,
+                updated_at=genuine.updated_at,
+                _proof=bogus,
+            )
+            self.assertFalse(forged.is_adapter_issued(), repr(bogus))
+            self.assertNotEqual(forged, genuine)
+
+    def test_transplanted_genuine_proof_fails_local_verification(self) -> None:
+        """The strongest caller-constructed case: a genuine proof object
+        (obtained through the actual adapter normalization path) attached
+        to different ordinary fields fails verification — the seal binds
+        the exact fields it was sealed for."""
+        genuine = _normalize_session(worker_session(), "a")
+        self.assertTrue(genuine.is_adapter_issued())
+        transplanted = ZaiIssuedWorkerSession(
+            session_id="zai-sess-foreign-999",
             repository=genuine.repository,
             work_item=genuine.work_item,
             base_sha=genuine.base_sha,
@@ -527,13 +562,12 @@ class IssuedEvidenceTests(unittest.TestCase):
             head_sha=genuine.head_sha,
             status=genuine.status,
             updated_at=genuine.updated_at,
-            _proof="00" * 32,
+            _proof=genuine._proof,  # noqa: SLF001 - the transplant under test
         )
-        self.assertFalse(forged.verify_issuance())
-        self.assertNotEqual(forged, genuine)
+        self.assertFalse(transplanted.is_adapter_issued())
 
     def test_tampered_fields_fail_local_verification(self) -> None:
-        """The MAC binds every ordinary field: altering any field after
+        """The seal binds every ordinary field: altering any field after
         issuance invalidates the proof, detected locally with zero
         provider I/O."""
         genuine = _normalize_session(worker_session(), "a")
@@ -545,7 +579,7 @@ class IssuedEvidenceTests(unittest.TestCase):
         ]
         for field, value in tampers:
             tampered = dataclasses.replace(genuine, **{field: value})
-            self.assertFalse(tampered.verify_issuance(), field)
+            self.assertFalse(tampered.is_adapter_issued(), field)
 
     def test_ordinary_session_value_is_not_issued_evidence(self) -> None:
         """The public ZaiWorkerSession form — structurally exact for the
