@@ -38,3 +38,29 @@ class InvalidTransitionError(ControllerError):
     Raised for any (state, command) pair that is not present in the frozen
     transition table, including commands issued from terminal states.
     """
+
+
+class DomainError(ControllerError):
+    """Domain-level validation failure (CTRL-002).
+
+    Raised when domain objects cannot be constructed, deserialized, or
+    applied consistently — for example malformed serialized values, events
+    that do not match the current lifecycle position, or other semantically
+    invalid domain state.
+    """
+
+
+class IneligibleDispatchError(DomainError):
+    """A command attempts to dispatch a work item that is not READY and eligible.
+
+    The domain model refuses to dispatch any work item whose eligibility
+    (derived from repository authority) is not explicitly affirmed.
+    """
+
+
+class CommandTargetError(DomainError):
+    """A command targets a work item other than the active governed item.
+
+    The domain model executes exactly one active work item; commands for
+    any other identifier fail closed rather than being routed or guessed.
+    """
