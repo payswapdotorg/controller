@@ -6,22 +6,27 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `IMPLEMENTING`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-004 — Z.ai adapter (`spec/work-items/CTRL-004.md`, `READY`)
-- **dispatch base:** `af22a2ffea2535f927c9656bfe0273e28ae32c61` (current `main`
-  after the activation merge `7a6ffaf...` + the dispatch record)
-- **worker handoff:** durable dispatch recorded on PR #10 comment `5541668064`
-- **last completed worker action:** dispatch received and verified (authority:
-  CTRL-004 READY, completed x3, STAGE-1; activation `7a6ffaf` confirmed an
-  ancestor of the working base); implementation started — the remaining
-  real-repository `tests/test_domain.py` pin will be repaired to
-  CTRL-004/READY as the first change, then the frozen Work Order surface is
-  implemented
-- **last update (UTC):** 2026-09-04T14:55:00Z
-- **next step:** implement the frozen CTRL-004 Work Order (typed Z.ai
-  start/resume adapter boundary, offline deterministic tests), run the full
-  validation suite, and return exactly one implementation PR to
-  `WAITING_FOR_ARCHITECT`
+- **PR:** CTRL-004 implementation PR (open, from `ctrl-004-zai-adapter`; dispatch
+  base `af22a2ffea2535f927c9656bfe0273e28ae32c61` = the verified current `main`
+  at dispatch time)
+- **head SHA awaiting review:** `9d93640db4c20096001678fddd37b661a96d9037` (implementation; the branch tip
+  may additionally advance with status-dashboard-only commits, which do not
+  alter the implementation)
+- **last completed worker action:** CTRL-004 implemented per the frozen Work
+  Order — typed Z.ai start/resume adapter boundary (`controller/zai.py`: DI
+  transport, exact work-context binding validated before provider I/O, resume
+  identity with fork refusal and verbatim review-packet propagation, frozen
+  worker-role contract with no free-text instruction channel, 11 typed
+  fail-closed errors, deterministic offline fakes); the remaining real-repo
+  `tests/test_domain.py` pin repaired to CTRL-004/READY; I/O guard authorizes
+  exactly two transport modules; full validation green (263/263 tests, strict
+  mypy on 24 files, ruff, CLI validate/domain, guard 8/8, forbidden-surface
+  audit vs the dispatch base PASS)
+- **ARCHITECT ACTION: REVIEW REQUIRED**
+- **last update (UTC):** 2026-09-04T15:20:00Z
+- **next step:** Architect review of the CTRL-004 implementation PR
 
 ## Maintenance protocol
 
