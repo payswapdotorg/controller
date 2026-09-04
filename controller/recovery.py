@@ -22,7 +22,12 @@ never through a parallel path. Doctrine:
   boundary (APPROVED through RECONCILING). COMPLETE and NEXT_READY are
   Architect-side (post-reconciliation advancement) — the worker never
   advances or claims completion. Terminal exception states have no
-  recovery by definition.
+  recovery by definition. At READY/DISPATCHED with an already observed
+  governed PR the plan directs NO next step: the PR is durable
+  evidence the dispatch/start work already ran, the orchestrator's
+  READY/DISPATCHED cycles re-perform the provider start, and a second
+  worker/provider execution for one Work Item is never caused by the
+  recovery continuation (FZ-CTRL009-001).
 * **Evidence-correlated classification (AC3).** The governed pull
   request is observed across its whole history (the CTRL-008
   correlation vocabulary: unique PR for the carried branch, intended
@@ -163,8 +168,20 @@ _PR_REQUIRED_POSITIONS = frozenset(
 )
 
 #: Positions at which the worker-session reference is required for the
-#: owning boundary's next step (the CHANGES_REQUESTED resume).
+#: owning boundary's next step (the CHANGES_REQUESTED resume). An
+#: absent required session fails closed with the typed
+#: missing-reference error — a resume directive without the exact
+#: session identity is never emitted (FZ-CTRL009-002).
 _SESSION_REQUIRED_POSITIONS = frozenset({LifecycleState.CHANGES_REQUESTED})
+
+#: Pre-merge positions whose frozen orchestrator step performs the
+#: worker provider start. When a governed PR is already observed at
+#: one of these positions the start work is durably performed — the
+#: PR is its evidence — so the plan directs NO next step: the
+#: orchestrator's READY/DISPATCHED cycles re-perform the provider
+#: start, and a second worker/provider execution for one Work Item is
+#: never caused by the recovery continuation (FZ-CTRL009-001).
+_START_PERFORMING_POSITIONS = frozenset({LifecycleState.READY, LifecycleState.DISPATCHED})
 
 
 class RecoveryCondition(str, Enum):
@@ -295,7 +312,10 @@ class RecoveryPlan:
     ci_state: str | None
     #: The frozen-table transition the owning boundary applies next
     #: (None when the condition has no worker-side step: awaiting
-    #: governance, unresolved partial mutation, or pure observation).
+    #: governance, unresolved partial mutation, pure observation, or
+    #: evidence ahead of the start boundary — the dispatch/start work
+    #: is already durably performed and is never replayed,
+    #: FZ-CTRL009-001).
     next_step: str | None
     #: The carried session id and its verified binding form, when a
     #: session reference is carried.
@@ -403,7 +423,10 @@ class RecoveryBoundary:
         never trusted; a subclass is refused before verification).
         A plain request-form session is carried as REQUEST_FORM — its
         live provenance re-proof belongs to the consuming worker
-        boundary (FZ-CTRL005-002), never to this boundary.
+        boundary (FZ-CTRL005-002), never to this boundary. A position
+        that requires the session (the CHANGES_REQUESTED resume) fails
+        closed at classification when none is carried — absence is
+        never tolerated into a resume directive (FZ-CTRL009-002).
         """
         session = refs.worker_session
         if session is None:
@@ -606,9 +629,21 @@ class RecoveryBoundary:
             )
             condition = RecoveryCondition.EVIDENCE_AHEAD
             boundary = GovernedBoundary.ORCHESTRATOR
-            next_step = _ORCHESTRATOR_NEXT_STEP.get(state)
             if state in _PR_REQUIRED_POSITIONS:
                 condition = RecoveryCondition.IN_PROGRESS
+                next_step = _ORCHESTRATOR_NEXT_STEP.get(state)
+            elif state in _START_PERFORMING_POSITIONS:
+                next_step = None
+                basis.append(
+                    "the observed governed PR is durable evidence the "
+                    "dispatch/start work already ran, and the orchestrator's "
+                    "READY/DISPATCHED cycles re-perform the provider start: "
+                    "no next step is directed, so the recovery continuation "
+                    "can never cause a second worker/provider execution for "
+                    "one Work Item"
+                )
+            else:
+                next_step = _ORCHESTRATOR_NEXT_STEP.get(state)
 
         if state in _CI_POSITIONS and pr is not None:
             status = self._github.get_commit_status(pr.head_sha)
@@ -635,6 +670,15 @@ class RecoveryBoundary:
                 boundary = GovernedBoundary.ORCHESTRATOR
                 next_step = "RESUME_IMPLEMENTATION"
                 self._check_changes_requested_stability(item, decision)
+                if session_id is None:
+                    raise RecoveryMissingReferenceError(
+                        f"the CHANGES_REQUESTED resume for "
+                        f"'{item.identity.work_item}' requires the carried "
+                        "worker-session reference, but none is carried: a "
+                        "resume directive without the exact session identity "
+                        "is never emitted (AC3 — required session evidence "
+                        "must correlate exactly)"
+                    )
                 condition = RecoveryCondition.IN_PROGRESS
             else:
                 next_step = None
@@ -652,10 +696,12 @@ class RecoveryBoundary:
 
         session_required = state in _SESSION_REQUIRED_POSITIONS
         if session_required:
+            # Unreachable with no carried session: the CHANGES_REQUESTED
+            # classification above fails closed when the required carried
+            # worker session is absent (FZ-CTRL009-002).
             basis.append(
                 "the CHANGES_REQUESTED resume requires the worker-session "
-                "reference"
-                + (" (carried and verified)" if session_id is not None else " (not carried)")
+                "reference (carried and verified)"
             )
 
         return RecoveryPlan(

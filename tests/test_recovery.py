@@ -17,6 +17,16 @@ merge-time base (c67bc66) legitimately differs from the dispatch
 provenance (f55f519) at the merge boundary (FZ-CTRL008-001), while a
 base that differs at a PRE-merge position is a contradiction the frozen
 pre-merge correlation already refuses.
+
+The FZ-CTRL009-001 regressions pin the no-start-replay contract: at
+READY/DISPATCHED with an observed governed PR the plan directs NO
+next step (the observed PR is durable evidence the dispatch/start
+work already ran, and the orchestrator's own READY/DISPATCHED cycles
+re-perform the provider start), so no Z.ai invocation can be caused
+by the recovery continuation. The FZ-CTRL009-002 regression pins the
+required-session fail-closed at the CHANGES_REQUESTED resume: an
+absent required carried worker session is a typed missing-reference
+error, never a resume directive without session identity.
 """
 
 from __future__ import annotations
@@ -77,6 +87,14 @@ ALL_LIST_PATH = f"/repos/{REPO}/pulls?state=all&head={OWNER}:{BRANCH}"
 STATUS_PATH = f"/repos/{REPO}/commits/{HEAD_SHA}/status"
 REVIEWS_PATH = f"/repos/{REPO}/pulls/{PR_NUMBER}/reviews"
 SESSION_ID = "zai-sess-009"
+
+#: The recovery boundary's own source, for the FZ-CTRL009-001
+#: structural guard: the boundary surface can never invoke the worker
+#: provider (no provider-start call site, no adapter construction,
+#: exactly one sealed static verifier invocation).
+RECOVERY_SOURCE = (Path(__file__).resolve().parent.parent / "controller" / "recovery.py").read_text(
+    encoding="utf-8"
+)
 
 
 def open_pr(**overrides: Any) -> dict[str, object]:
@@ -304,7 +322,7 @@ class FreshStartTests(RecoveryFixtureMixin):
         plan = self._evaluate(transport, self._repo("READY"))
         self.assertEqual(plan.condition, RecoveryCondition.EVIDENCE_AHEAD)
         self.assertEqual(plan.boundary, GovernedBoundary.ORCHESTRATOR)
-        self.assertEqual(plan.next_step, "DISPATCH")
+        self.assertIsNone(plan.next_step)
         assert plan.pull_request is not None
         self.assertEqual(plan.pull_request.number, PR_NUMBER)
         self.assertEqual(plan.base_sha, BASE_SHA)
@@ -344,7 +362,7 @@ class PreMergeBandTests(RecoveryFixtureMixin):
         transport = FakeTransport({ALL_LIST_PATH: [open_pr()]})
         plan = self._evaluate(transport, self._repo("DISPATCHED"))
         self.assertEqual(plan.condition, RecoveryCondition.EVIDENCE_AHEAD)
-        self.assertEqual(plan.next_step, "BEGIN_IMPLEMENTATION")
+        self.assertIsNone(plan.next_step)
 
     def test_implementing_in_progress(self) -> None:
         transport = FakeTransport({ALL_LIST_PATH: []})
@@ -354,7 +372,11 @@ class PreMergeBandTests(RecoveryFixtureMixin):
 
     def test_implementing_with_open_pr_is_evidence_ahead(self) -> None:
         """The canonical restart case: the PR opening already performed,
-        the machine-state write did not survive — record, never repeat."""
+        the machine-state write did not survive — record, never repeat.
+        OPEN_PR is a pure GitHub observation through the orchestrator's
+        IMPLEMENTING cycle (no provider invocation), so the direction
+        stands (contrast the READY/DISPATCHED no-step contract,
+        NoStartReplayTests)."""
         transport = FakeTransport({ALL_LIST_PATH: [open_pr()]})
         plan = self._evaluate(transport, self._repo("IMPLEMENTING"))
         self.assertEqual(plan.condition, RecoveryCondition.EVIDENCE_AHEAD)
@@ -541,26 +563,33 @@ class ReviewBandTests(RecoveryFixtureMixin):
                 REVIEWS_PATH: [architect_review(502, state="CHANGES_REQUESTED")],
             }
         )
-        plan = self._evaluate(transport, self._repo("CHANGES_REQUESTED"))
+        plan = self._evaluate(
+            transport, self._repo("CHANGES_REQUESTED"), worker_session=_plain_session()
+        )
         self.assertEqual(plan.condition, RecoveryCondition.IN_PROGRESS)
         self.assertEqual(plan.boundary, GovernedBoundary.ORCHESTRATOR)
         self.assertEqual(plan.next_step, "RESUME_IMPLEMENTATION")
         self.assertTrue(plan.session_required)
+        self.assertEqual(plan.session_id, SESSION_ID)
+        self.assertEqual(plan.session_binding, SessionBinding.REQUEST_FORM)
 
-    def test_changes_requested_without_session_notes_the_requirement(self) -> None:
-        """An absent session reference is exposed, not guessed — the
-        resume boundary requires it (mirrors the review loop's
-        absent-session packet exposure)."""
+    def test_changes_requested_without_session_fails_closed(self) -> None:
+        """FZ-CTRL009-002: the CHANGES_REQUESTED resume requires the
+        carried worker-session reference (AC3 — exact identity
+        correlation for required session evidence); an absent required
+        session is a typed fail-closed missing reference, never a
+        resume directive without session identity. The
+        decision-stability contradiction still fires first (the
+        flipped/vanished tests below carry no session either)."""
         transport = FakeTransport(
             {
                 ALL_LIST_PATH: [open_pr()],
                 REVIEWS_PATH: [architect_review(502, state="CHANGES_REQUESTED")],
             }
         )
-        plan = self._evaluate(transport, self._repo("CHANGES_REQUESTED"))
-        self.assertTrue(plan.session_required)
-        self.assertIsNone(plan.session_id)
-        self.assertIsNone(plan.session_binding)
+        self._assert_fail_closed(
+            transport, self._repo("CHANGES_REQUESTED"), RecoveryMissingReferenceError
+        )
 
     def test_changes_requested_flipped_decision_is_a_contradiction(self) -> None:
         transport = FakeTransport(
@@ -580,6 +609,65 @@ class ReviewBandTests(RecoveryFixtureMixin):
         self._assert_fail_closed(
             transport, self._repo("CHANGES_REQUESTED"), RecoveryContradictionError
         )
+
+
+class NoStartReplayTests(RecoveryFixtureMixin):
+    """FZ-CTRL009-001: already-observed dispatch/start work is never
+    replayed. The orchestrator's READY and DISPATCHED cycles perform
+    the worker provider start (its accepted dispatch and
+    provenance-re-proof semantics), so a recovery plan that directed
+    DISPATCH or BEGIN_IMPLEMENTATION while a governed PR is already
+    observed would cause a second worker/provider execution for one
+    Work Item — even though the PR is itself durable evidence of prior
+    work. The corrected contract: those positions direct NO next step,
+    so the recovery continuation (the runtime following the plan)
+    invokes no boundary path, and the boundary's own surface holds no
+    worker-execution site — no Z.ai invocation can be caused."""
+
+    def test_ready_with_pr_directs_no_step_never_the_dispatch_replay(self) -> None:
+        transport = FakeTransport({ALL_LIST_PATH: [open_pr()]})
+        plan = self._evaluate(transport, self._repo("READY"))
+        self.assertEqual(plan.condition, RecoveryCondition.EVIDENCE_AHEAD)
+        self.assertEqual(plan.boundary, GovernedBoundary.ORCHESTRATOR)
+        self.assertIsNone(plan.next_step)
+        self.assertTrue(any("second worker/provider execution" in entry for entry in plan.basis))
+
+    def test_dispatched_with_pr_directs_no_step_never_the_start_replay(self) -> None:
+        transport = FakeTransport({ALL_LIST_PATH: [open_pr()]})
+        plan = self._evaluate(transport, self._repo("DISPATCHED"))
+        self.assertEqual(plan.condition, RecoveryCondition.EVIDENCE_AHEAD)
+        self.assertEqual(plan.boundary, GovernedBoundary.ORCHESTRATOR)
+        self.assertIsNone(plan.next_step)
+        self.assertTrue(any("second worker/provider execution" in entry for entry in plan.basis))
+
+    def test_the_no_step_direction_is_evidence_conditional(self) -> None:
+        """The fresh-start/no-PR cases still direct their frozen steps —
+        the first dispatch and the accepted provenance re-proof are not
+        replays when no PR evidence exists — and IMPLEMENTING with an
+        observed PR still directs OPEN_PR (a pure GitHub observation
+        that records the already-open PR, never a provider call)."""
+        transport = FakeTransport({ALL_LIST_PATH: []})
+        ready = self._evaluate(transport, self._repo("READY"))
+        self.assertEqual(ready.condition, RecoveryCondition.FRESH_START)
+        self.assertEqual(ready.next_step, "DISPATCH")
+        dispatched = self._evaluate(transport, self._repo("DISPATCHED"))
+        self.assertEqual(dispatched.condition, RecoveryCondition.IN_PROGRESS)
+        self.assertEqual(dispatched.next_step, "BEGIN_IMPLEMENTATION")
+        observed = FakeTransport({ALL_LIST_PATH: [open_pr()]})
+        implementing = self._evaluate(observed, self._repo("IMPLEMENTING"))
+        self.assertEqual(implementing.condition, RecoveryCondition.EVIDENCE_AHEAD)
+        self.assertEqual(implementing.next_step, "OPEN_PR")
+
+    def test_recovery_surface_holds_no_worker_execution_site(self) -> None:
+        """The structural half of the proof: the boundary itself can
+        never invoke the worker provider — no provider-start call site,
+        no adapter construction, exactly one sealed static verifier
+        invocation (the session types are the only other Z.ai
+        references). With no directed step and no execution site, no
+        Z.ai invocation can be caused by the recovery continuation."""
+        self.assertNotIn("start_worker", RECOVERY_SOURCE)
+        self.assertNotIn("ZaiAdapter(", RECOVERY_SOURCE)
+        self.assertEqual(RECOVERY_SOURCE.count("_verify_issuance"), 1)
 
 
 class MergeBandTests(RecoveryFixtureMixin):
@@ -939,7 +1027,12 @@ class PositionCoverageTests(RecoveryFixtureMixin):
         for state, responses in cases:
             with self.subTest(state=state):
                 transport = FakeTransport(responses)
-                plan = self._evaluate(transport, self._repo(state.value))
+                ref_overrides = (
+                    {"worker_session": _plain_session()}
+                    if state is LifecycleState.CHANGES_REQUESTED
+                    else {}
+                )
+                plan = self._evaluate(transport, self._repo(state.value), **ref_overrides)
                 self.assertEqual(plan.lifecycle, state)
                 self.assertEqual(plan.work_item, WORK_ITEM)
                 self.assertEqual(plan.repository, REPO)
