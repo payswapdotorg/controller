@@ -1,6 +1,6 @@
 # CTRL-004 — Z.ai adapter
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Objective
 
@@ -85,3 +85,12 @@ No GitHub reimplementation, orchestration engine, persistence database/cache, CI
 ## Handoff
 
 Worker must verify the current `main` SHA and authority state before implementation, implement only this Work Order's owned surface, run the full validation suite, create/update exactly one PR for CTRL-004, and provide an implementation transcript with base/head SHAs and evidence for every acceptance criterion. Worker may not merge and must return to `WAITING_FOR_ARCHITECT` for review.
+
+## Merge / reconciliation evidence
+
+- Implementation PR: #11
+- Reviewed implementation head: `165fb959281619b0e635b603ef2660834a60571e`
+- Implementation base: `af22a2ffea2535f927c9656bfe0273e28ae32c61`
+- Merge commit: `c873b467fc7f4381f7c213723a69071eb9953168`
+- Architect approval: durable PR comment `5541849354`
+- Post-merge reconciliation: required repository-state transition from `READY` to `COMPLETE`; acceptance criteria and scope unchanged.
