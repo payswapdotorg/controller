@@ -16,11 +16,16 @@ The controlled repository remains authoritative for roadmap, work-item scope, ac
 
 The Controller itself is built using the same governed work-item process it will eventually automate. No implementation work should bypass the repository roadmap or work-order contract.
 
+## Bootstrap rule
+
+The Controller does not exist yet, so the human operator initially performs its mechanical orchestration role. Automation is introduced incrementally; the Architect must explicitly announce each automation stage and tell the operator which manual duties have been removed. See `spec/operations/controller-build-process.md` for the exact bootstrap loop and stage-by-stage responsibility transition.
+
 See:
 
 - `spec/architecture/controller-architecture.md`
 - `spec/governance/worker-protocol.md`
 - `spec/governance/review-protocol.md`
+- `spec/operations/controller-build-process.md`
 - `spec/roadmap/roadmap.md`
 - `spec/work-items/CTRL-001.md`
 - `spec/state/controller-program-state.json`
