@@ -5,9 +5,9 @@
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-008",
-  "status": "READY",
+  "status": "COMPLETE",
   "automationStage": "STAGE-1-STATE-MACHINE-AUTOMATION",
-  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007"],
+  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": true,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-008 — Merge + reconciliation is explicitly defined, frozen, and activated as the sole READY work item. Z.ai may implement only spec/work-items/CTRL-008.md from the exact current main base; the worker may not merge, approve, redefine authority, or claim completion. Stage 1 remains active; activation of CTRL-008 does not silently advance the automation stage."
+  "nextAction": "CTRL-008 is complete and reconciled from observed merge commit e733e37a1ecf7a86c12e3baac0fd325c5806aaa4. Stage 1 remains active. CTRL-009 is the next roadmap item but is not yet defined, frozen, or READY."
 }
