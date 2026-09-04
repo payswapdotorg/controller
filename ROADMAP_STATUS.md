@@ -6,15 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
+- **current state:** `APPROVED`
 - **active Work Order:** CTRL-008 — Merge + Reconciliation (`spec/work-items/CTRL-008.md`, `READY`)
-- **PR:** #23 (branch `ctrl-008-merge-reconciliation`, fix head `925dba3f15659a40a7bdad8a8902b4ca9bae489b`, opened from the exact dispatch base `f55f5190a82a0fb774285a03347e6df71163cbd5` plus the absorbed post-dispatch governance drift `c67bc666e08a4ac3162bd18a296ba05c499069b7`), returned to `WAITING_FOR_ARCHITECT` (review iteration 2) with a green validation transcript
-- **last completed architect action:** CTRL-008 implementation reviewed — APPROVE (comment `5546009078`, 2026-09-04T20:20:49Z) superseded by REQUEST_CHANGES FZ-CTRL008-001 (HIGH, comment `5546019426`, 2026-09-04T20:21:53Z): the merge-boundary correlation must operate on the correlated PR's observed current `main` base SHA with the dispatch base carried as provenance only
-- **last completed worker action:** FZ-CTRL008-001 correction delivered on the same PR — the merge-boundary base identity is now the correlated PR's observed current `main` base (dispatch base `f55f519` recorded as provenance only, never a predicate input); correlation fails closed on a foreign base ref; execution-time base drift still refuses the mutation (zero PUT); the real PR #23 shape pinned with literal production SHAs in 5 new regressions (suite 476 → 480)
-- **current implementation action:** awaiting Architect re-review of the corrected CTRL-008 head (review iteration 2; AC1–AC8 + FZ-CTRL008-001 evidence in the PR transcript)
-- **last update (UTC):** 2026-09-04T21:03:38Z
+- **PR:** #23 (branch `ctrl-008-merge-reconciliation`, reviewed head `5b9333bc3d1ed4a22d614b161f51c3df2a84781d`); current main `917d5b17e75bee94cebe18f1ab6a0500e482de6f`
+- **last completed architect action:** corrected CTRL-008 implementation APPROVED after resolving FZ-CTRL008-001; approval is bound to exact PR head `5b9333b...`
+- **last completed worker action:** FZ-CTRL008-001 correction delivered; 480 tests + 167 subtests, strict mypy clean, ruff clean, external-I/O guard green, scope audit PASS
+- **current implementation action:** merge PR #23 under the frozen merge predicate
+- **last update (UTC):** 2026-09-04T21:20:00Z
 - **next planned item:** CTRL-009 — Recovery / idempotency (per the roadmap; not defined, not eligible)
-- **next step:** Architect re-reviews the corrected PR #23 head; on APPROVE + merge predicates the merge proceeds (the corrected boundary now operates on the live PR's observed current base `c67bc66`) and post-merge reconciliation records CTRL-008/COMPLETE
+- **next step:** execute one merge attempt using exact current PR head; on observed success, enter immediate reconciliation
 
 ## Maintenance protocol
 
