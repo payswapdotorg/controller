@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import unittest
+from typing import Any
 
 from controller.errors import (
     ZaiAdapterError,
@@ -30,7 +31,9 @@ from controller.errors import (
 from controller.zai import DEFAULT_API_ROOT as ZAI_ROOT
 from controller.zai import (
     UrllibZaiTransport,
+    ZaiIssuedWorkerSession,
     ZaiWorkerContext,
+    ZaiWorkerSession,
     _http_error,
     _normalize_session,
     _require_payload_policy,
@@ -475,6 +478,122 @@ class DeterminismTests(unittest.TestCase):
         session = _normalize_session(worker_session(), "a")
         with self.assertRaises(dataclasses.FrozenInstanceError):
             session.status = "finished"  # type: ignore[misc]
+
+
+class IssuedEvidenceTests(unittest.TestCase):
+    """FZ-CTRL007-001: adapter-issued session evidence — the provenance
+    boundary lives at provider-response normalization, is verifiable
+    locally with zero provider I/O, and cannot be forged by constructing
+    values by hand."""
+
+    def test_start_worker_returns_verified_issued_evidence(self) -> None:
+        transport = FakeZaiTransport({START_PATH: worker_session()})
+        session = Adapter(transport, REPO).start_worker(_context())
+        self.assertIsInstance(session, ZaiIssuedWorkerSession)
+        self.assertTrue(session.verify_issuance())
+
+    def test_resume_worker_returns_verified_issued_evidence(self) -> None:
+        transport = FakeZaiTransport(
+            {resume_path(): worker_session(pr_number=7, head_sha=HEAD_SHA)}
+        )
+        session = Adapter(transport, REPO).resume_worker(
+            _context(pr_number=7, head_sha=HEAD_SHA), SESSION_ID
+        )
+        self.assertIsInstance(session, ZaiIssuedWorkerSession)
+        self.assertTrue(session.verify_issuance())
+
+    def test_issuance_is_deterministic_across_instances_and_restarts(self) -> None:
+        """Restart safety: the proof verifies from any process, with no
+        runtime registry or adapter state (AC7 — the key material is
+        in-code, the value is self-certifying)."""
+        first = _normalize_session(worker_session(), "a")
+        second = _normalize_session(worker_session(), "b")
+        self.assertTrue(first.verify_issuance())
+        self.assertTrue(second.verify_issuance())
+        self.assertEqual(first, second)
+
+    def test_forged_proof_fails_local_verification(self) -> None:
+        """A value of the issued type with every ordinary field exact but
+        a proof not computed by the adapter is not evidence — provenance,
+        not a field mismatch (the FZ-CTRL007-001 regression at the
+        boundary itself)."""
+        genuine = _normalize_session(worker_session(), "a")
+        forged = ZaiIssuedWorkerSession(
+            session_id=genuine.session_id,
+            repository=genuine.repository,
+            work_item=genuine.work_item,
+            base_sha=genuine.base_sha,
+            pr_number=genuine.pr_number,
+            head_sha=genuine.head_sha,
+            status=genuine.status,
+            updated_at=genuine.updated_at,
+            _proof="00" * 32,
+        )
+        self.assertFalse(forged.verify_issuance())
+        self.assertNotEqual(forged, genuine)
+
+    def test_tampered_fields_fail_local_verification(self) -> None:
+        """The MAC binds every ordinary field: altering any field after
+        issuance invalidates the proof, detected locally with zero
+        provider I/O."""
+        genuine = _normalize_session(worker_session(), "a")
+        tampers: list[tuple[str, Any]] = [
+            ("session_id", "zai-sess-tampered-999"),
+            ("work_item", "CTRL-999"),
+            ("base_sha", "d" * 40),
+            ("status", "finished"),
+        ]
+        for field, value in tampers:
+            tampered = dataclasses.replace(genuine, **{field: value})
+            self.assertFalse(tampered.verify_issuance(), field)
+
+    def test_ordinary_session_value_is_not_issued_evidence(self) -> None:
+        """The public ZaiWorkerSession form — structurally exact for the
+        same provider report — is not an instance of the evidence type:
+        consuming boundaries distinguish it by type plus verification."""
+        issued = _normalize_session(worker_session(), "a")
+        plain = ZaiWorkerSession(
+            session_id=issued.session_id,
+            repository=issued.repository,
+            work_item=issued.work_item,
+            base_sha=issued.base_sha,
+            pr_number=issued.pr_number,
+            head_sha=issued.head_sha,
+            status=issued.status,
+            updated_at=issued.updated_at,
+        )
+        self.assertNotIsInstance(plain, ZaiIssuedWorkerSession)
+        self.assertEqual(plain.session_id, issued.session_id)
+        self.assertNotEqual(plain, issued)
+
+    def test_issued_evidence_is_ordinary_session_value_for_consumers(self) -> None:
+        """Not a second session model: the issued type IS the frozen
+        ZaiWorkerSession value type (isinstance-compatible, identical
+        ordinary fields) — only the issuance proof differs."""
+        session = _normalize_session(worker_session(), "a")
+        self.assertIsInstance(session, ZaiWorkerSession)
+        self.assertEqual(
+            {
+                "session_id": session.session_id,
+                "repository": session.repository,
+                "work_item": session.work_item,
+                "base_sha": session.base_sha,
+                "pr_number": session.pr_number,
+                "head_sha": session.head_sha,
+                "status": session.status,
+                "updated_at": session.updated_at,
+            },
+            {
+                "session_id": SESSION_ID,
+                "repository": REPO,
+                "work_item": WORK_ITEM,
+                "base_sha": BASE_SHA,
+                "pr_number": None,
+                "head_sha": None,
+                "status": "active",
+                "updated_at": "2026-09-04T15:00:00Z",
+            },
+        )
 
 
 class DomainCompatibilityTests(unittest.TestCase):

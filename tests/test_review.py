@@ -1,13 +1,15 @@
 """Unit tests: the CTRL-007 Architect review loop (packet grammar and
 value forms, position discipline, decision observation and correlation,
 REQUEST_CHANGES packet construction, iteration control, the
-CHANGES_REQUESTED re-observation, the same-worker/same-PR handoff, and
-restart determinism). Fully offline: the fake GitHub transport serves
-canned JSON, the synthetic authority tree is local, and no
-worker-provider surface is ever constructed."""
+CHANGES_REQUESTED re-observation, the same-worker/same-PR handoff with
+adapter-issued session evidence, and restart determinism). Fully
+offline: the fake GitHub transport serves canned JSON, the synthetic
+authority tree is local, and the loop is exercised with zero
+worker-provider surface of any kind."""
 
 from __future__ import annotations
 
+import dataclasses
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,7 +32,12 @@ from controller.review import (
     ReviewPacket,
 )
 from controller.states import LifecycleState
-from controller.zai import ZaiAdapter, ZaiWorkerSession
+from controller.zai import (
+    ZaiAdapter,
+    ZaiIssuedWorkerSession,
+    ZaiWorkerContext,
+    ZaiWorkerSession,
+)
 from tests.github_fakes import (
     BASE_SHA,
     HEAD_SHA,
@@ -59,8 +66,9 @@ FINDING = (
 
 
 def _session(**overrides: object) -> ZaiWorkerSession:
-    """Typed worker-session evidence as the accepted adapter would issue
-    it at dispatch (binding fields match the governed fixture context)."""
+    """A hand-constructed ordinary session value: structurally exact for
+    the governed fixture context, but NOT adapter-issued evidence (the
+    public value form any caller can build by hand)."""
     defaults: dict[str, object] = {
         "session_id": SESSION_ID,
         "repository": REPO,
@@ -75,11 +83,33 @@ def _session(**overrides: object) -> ZaiWorkerSession:
     return ZaiWorkerSession(**defaults)  # type: ignore[arg-type]
 
 
+def _issued_session(session_id: str = SESSION_ID) -> ZaiIssuedWorkerSession:
+    """Adapter-issued session evidence, produced by the actual issuance
+    boundary: the ZaiAdapter normalizing a (fake) provider response for
+    the exact governed fixture context (FZ-CTRL007-001)."""
+    report = worker_session(
+        session_id=session_id,
+        repository=REPO,
+        work_item=WORK_ITEM,
+        base_sha=BASE_SHA,
+        pr_number=None,
+        head_sha=None,
+    )
+    adapter = ZaiAdapter(FakeZaiTransport({START_PATH: report}), REPO)
+    context = ZaiWorkerContext(
+        repository=REPO,
+        work_item=WORK_ITEM,
+        work_order_path="spec/work-items/CTRL-007.md",
+        base_sha=BASE_SHA,
+    )
+    return adapter.start_worker(context)
+
+
 def _refs(**overrides: object) -> OrchestrationReferences:
     defaults: dict[str, object] = {
         "branch": BRANCH,
         "base_sha": BASE_SHA,
-        "worker_session": _session(),
+        "worker_session": _issued_session(),
         "architect_reviewer": ARCHITECT,
     }
     defaults.update(overrides)
@@ -145,7 +175,6 @@ class LoopFixtureMixin(unittest.TestCase):
         comments: list[dict[str, Any]] | None = None,
         with_pr: bool = True,
         pr_head_sha: str = HEAD_SHA,
-        identify: dict[str, Any] | None = None,
     ) -> tuple[ArchitectReviewLoop, Path]:
         single = pull_request(
             number=17,
@@ -167,33 +196,12 @@ class LoopFixtureMixin(unittest.TestCase):
         else:
             responses[f"/repos/{REPO}/issues/17/comments"] = []
         transport = FakeTransport(responses=responses)
-        identify_response = (
-            identify
-            if identify is not None
-            else worker_session(
-                session_id=SESSION_ID,
-                repository=REPO,
-                work_item=WORK_ITEM,
-                base_sha=BASE_SHA,
-                pr_number=17,
-                head_sha=HEAD_SHA,
-            )
-        )
-        zai_transport = FakeZaiTransport({START_PATH: identify_response})
-        loop = ArchitectReviewLoop(
-            github=GithubAdapter(transport, REPO),
-            zai=ZaiAdapter(zai_transport, REPO),
-        )
+        loop = ArchitectReviewLoop(github=GithubAdapter(transport, REPO))
         return loop, self._repo(status)
 
     def _transport(self, loop: ArchitectReviewLoop) -> FakeTransport:
         transport = loop._github._transport  # noqa: SLF001 - test seam
         assert isinstance(transport, FakeTransport)
-        return transport
-
-    def _zai_transport(self, loop: ArchitectReviewLoop) -> FakeZaiTransport:
-        transport = loop._zai._transport  # noqa: SLF001 - test seam
-        assert isinstance(transport, FakeZaiTransport)
         return transport
 
 
@@ -297,10 +305,7 @@ class LoopPositionTests(LoopFixtureMixin):
         self.assertEqual(self._transport(loop).calls, [])
 
     def test_real_repository_is_currently_outside_loop_positions(self) -> None:
-        loop = ArchitectReviewLoop(
-            github=GithubAdapter(FakeTransport(), REPO),
-            zai=ZaiAdapter(FakeZaiTransport(), REPO),
-        )
+        loop = ArchitectReviewLoop(github=GithubAdapter(FakeTransport(), REPO))
         with self.assertRaises(ReviewLoopPositionError):
             loop.evaluate(REPO_ROOT, _refs())
 
@@ -607,7 +612,8 @@ class ChangesRequestedReobservationTests(LoopFixtureMixin):
 
 
 class HandoffTests(LoopFixtureMixin):
-    """AC5: the typed same-worker/same-PR handoff."""
+    """AC5: the typed same-worker/same-PR handoff over adapter-issued
+    session evidence, with zero worker-provider I/O (FZ-CTRL007-001)."""
 
     def _request_changes_outcome(self, **session_overrides: object) -> ReviewLoopOutcome:
         loop, repo = self._loop(
@@ -618,7 +624,12 @@ class HandoffTests(LoopFixtureMixin):
         return loop.evaluate(repo, _refs(worker_session=_session(**session_overrides)))
 
     def test_handoff_carries_exact_governed_facts(self) -> None:
-        outcome = self._request_changes_outcome()
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+        )
+        outcome = loop.evaluate(repo, _refs())
         assert outcome.handoff is not None
         self.assertEqual(outcome.handoff.session_id, SESSION_ID)
         self.assertEqual(outcome.handoff.repository, REPO)
@@ -631,42 +642,78 @@ class HandoffTests(LoopFixtureMixin):
         self.assertIs(outcome.handoff.packet, outcome.packet)
 
     def test_structurally_exact_non_adapter_session_cannot_produce_handoff(self) -> None:
-        """FZ-CTRL007-001 regression: a hand-constructed session value with
-        a structurally exact binding but an arbitrary session id is refused
-        — the provider identifies a different execution right now."""
+        """FZ-CTRL007-001 regression: a hand-constructed session value
+        with a structurally exact binding for the governed context is
+        refused — the ordinary public value form is not execution
+        evidence; only adapter-issued evidence produces a handoff."""
         loop, repo = self._loop(
             "REVIEW_PENDING",
             reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
             comments=[comment(500, author=ARCHITECT, body=_packet_block())],
-            identify=worker_session(
-                session_id="zai-sess-issued-by-provider",
-                repository=REPO,
-                work_item=WORK_ITEM,
-                base_sha=BASE_SHA,
-                pr_number=17,
-                head_sha=HEAD_SHA,
-            ),
         )
-        with self.assertRaises(ReviewContradictionError):
-            loop.evaluate(repo, _refs())
+        with self.assertRaises(ReviewContradictionError) as raised:
+            loop.evaluate(repo, _refs(worker_session=_session()))
+        self.assertIn("adapter-issued evidence", str(raised.exception))
+        self.assertIn("FZ-CTRL007-001", str(raised.exception))
+        self.assertTrue(all(call[0] == "GET" for call in self._transport(loop).calls))
 
-    def test_provider_session_on_foreign_pr_refuses_identification(self) -> None:
+    def test_forged_issuance_proof_cannot_produce_handoff(self) -> None:
+        """FZ-CTRL007-001 regression at the provenance boundary itself:
+        a value of the issued type whose ordinary fields are all exact
+        for the governed context but whose proof was not computed by the
+        adapter fails verification — provenance, not a field mismatch."""
+        forged = ZaiIssuedWorkerSession(
+            session_id=SESSION_ID,
+            repository=REPO,
+            work_item=WORK_ITEM,
+            base_sha=BASE_SHA,
+            pr_number=None,
+            head_sha=None,
+            status="active",
+            updated_at="2026-09-04T16:50:00Z",
+            _proof="00" * 32,
+        )
+        self.assertFalse(forged.verify_issuance())
         loop, repo = self._loop(
             "REVIEW_PENDING",
             reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
             comments=[comment(500, author=ARCHITECT, body=_packet_block())],
-            identify=worker_session(
-                session_id=SESSION_ID,
-                repository=REPO,
-                work_item=WORK_ITEM,
-                base_sha=BASE_SHA,
-                pr_number=99,
-                head_sha=HEAD_SHA,
-            ),
         )
-        with self.assertRaises(Exception) as raised:
-            loop.evaluate(repo, _refs())
-        self.assertIn("Zai", type(raised.exception).__name__)
+        with self.assertRaises(ReviewContradictionError) as raised:
+            loop.evaluate(repo, _refs(worker_session=forged))
+        self.assertIn("does not verify", str(raised.exception))
+        self.assertTrue(all(call[0] == "GET" for call in self._transport(loop).calls))
+
+    def test_tampered_issued_evidence_cannot_produce_handoff(self) -> None:
+        """Issued evidence whose fields were altered after issuance
+        (here: the session identity) fails its own proof — the MAC binds
+        every ordinary field, so tampering is detected locally."""
+        tampered = dataclasses.replace(_issued_session(), session_id="zai-sess-tampered-999")
+        self.assertFalse(tampered.verify_issuance())
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+        )
+        with self.assertRaises(ReviewContradictionError) as raised:
+            loop.evaluate(repo, _refs(worker_session=tampered))
+        self.assertIn("does not verify", str(raised.exception))
+
+    def test_issued_evidence_verifies_and_produces_the_handoff(self) -> None:
+        """The positive boundary: evidence actually issued by the adapter
+        (normalizing a provider response) verifies locally and produces
+        the handoff without any provider call from the loop."""
+        issued = _issued_session()
+        self.assertIsInstance(issued, ZaiIssuedWorkerSession)
+        self.assertTrue(issued.verify_issuance())
+        loop, repo = self._loop(
+            "REVIEW_PENDING",
+            reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
+            comments=[comment(500, author=ARCHITECT, body=_packet_block())],
+        )
+        outcome = loop.evaluate(repo, _refs(worker_session=issued))
+        assert outcome.handoff is not None
+        self.assertEqual(outcome.handoff.session_id, SESSION_ID)
 
     def test_absent_session_leaves_packet_exposed_without_handoff(self) -> None:
         loop, repo = self._loop(
@@ -677,7 +724,7 @@ class HandoffTests(LoopFixtureMixin):
         outcome = loop.evaluate(repo, _refs(worker_session=None))
         assert outcome.packet is not None
         self.assertIsNone(outcome.handoff)
-        self.assertEqual(self._zai_transport(loop).calls, [])
+        self.assertTrue(all(call[0] == "GET" for call in self._transport(loop).calls))
 
     def test_foreign_repository_session_fails_closed(self) -> None:
         with self.assertRaises(ReviewContradictionError):
@@ -699,7 +746,10 @@ class HandoffTests(LoopFixtureMixin):
         with self.assertRaises(ReviewContradictionError):
             self._request_changes_outcome(head_sha="f" * 40)
 
-    def test_local_binding_proof_precedes_provider_identification(self) -> None:
+    def test_local_binding_proof_precedes_evidence_verification(self) -> None:
+        """The ordinary binding proof (FZ-CTRL005-001 doctrine) fires on
+        locally carried fields with zero remote calls — a foreign-repo
+        session is refused before any GitHub mutation could occur."""
         loop, repo = self._loop(
             "REVIEW_PENDING",
             reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
@@ -707,9 +757,12 @@ class HandoffTests(LoopFixtureMixin):
         )
         with self.assertRaises(ReviewContradictionError):
             loop.evaluate(repo, _refs(worker_session=_session(repository="other/repo")))
-        self.assertEqual(self._zai_transport(loop).calls, [])
+        self.assertTrue(all(call[0] == "GET" for call in self._transport(loop).calls))
 
-    def test_handoff_identifies_without_resume_or_github_mutation(self) -> None:
+    def test_handoff_performs_no_worker_provider_io_at_all(self) -> None:
+        """AC5 observation-only contract: the happy-path handoff issues
+        GitHub reads only, and the loop instance carries no Z.ai surface
+        of any kind — zero worker-provider calls, structurally."""
         loop, repo = self._loop(
             "REVIEW_PENDING",
             reviews=[review(101, author=ARCHITECT, state="CHANGES_REQUESTED")],
@@ -718,10 +771,8 @@ class HandoffTests(LoopFixtureMixin):
         loop.evaluate(repo, _refs())
         transport = self._transport(loop)
         self.assertTrue(all(call[0] == "GET" for call in transport.calls))
-        zai_calls = self._zai_transport(loop).calls
-        self.assertEqual(len(zai_calls), 1)
-        self.assertEqual(zai_calls[0][0], START_PATH)
-        self.assertFalse(any("resume" in path for path, _ in zai_calls))
+        self.assertFalse(hasattr(loop, "_zai"))
+        self.assertFalse(hasattr(loop, "zai"))
 
 
 class RestartDeterminismTests(LoopFixtureMixin):
@@ -743,9 +794,9 @@ class RestartDeterminismTests(LoopFixtureMixin):
         other, _ = self._fixture()
         self.assertEqual(loop.evaluate(repo, _refs()), other.evaluate(repo, _refs()))
 
-    def test_loop_instance_holds_only_the_two_injected_adapters(self) -> None:
+    def test_loop_instance_holds_only_the_github_adapter(self) -> None:
         loop, _ = self._fixture()
-        self.assertEqual(sorted(loop.__dict__.keys()), ["_github", "_zai"])  # noqa: SLF001 - structural runtime-non-authority pin
+        self.assertEqual(sorted(loop.__dict__.keys()), ["_github"])  # noqa: SLF001 - structural runtime-non-authority pin
 
 
 if __name__ == "__main__":

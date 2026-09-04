@@ -41,6 +41,17 @@ Layering and doctrine (mirroring the CTRL-003 GitHub adapter):
   session identity, context mismatch, contradiction, policy violation — is
   a typed :class:`controller.errors.ZaiAdapterError` subclass. No silent
   fallback, guessed identity, or fabricated success.
+* **Adapter-issued evidence (FZ-CTRL007-001).** ``start_worker`` /
+  ``resume_worker`` return :class:`ZaiIssuedWorkerSession` — the ordinary
+  frozen ``ZaiWorkerSession`` value sealed at the response-normalization
+  boundary with a MAC proof over every binding field. There is no public
+  issuance function: only the adapter normalizing a provider response
+  creates evidence, and any boundary can verify it locally
+  (``verify_issuance()``, pure computation, zero provider I/O,
+  restart-safe). A structurally identical hand-constructed session value is
+  not evidence and fails such verification. This is not a second session
+  model, registry, cache, or database — it is the same frozen value type
+  carrying proof of the path that constructed it.
 
 No orchestration loop, scheduling, retry engine, or persistence exists here
 (CTRL-005+ non-goals). The session identifier returned by the provider is
@@ -51,6 +62,8 @@ repository authority.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 import urllib.error
@@ -158,6 +171,29 @@ class ZaiWorkerContext:
     review_findings: tuple[str, ...] = ()
 
 
+#: Adapter-issued session-evidence key material (FZ-CTRL007-001).
+#:
+#: This is NOT a credential: it never authenticates against any external
+#: system and grants no access — it is deterministic in-code key material
+#: that seals the *construction path* of worker-session evidence. The
+#: provenance guarantee does not rest on this value being secret (Python
+#: runtimes are open); it rests on the layered boundary: (1) the issued
+#: evidence type has no public issuance function — values are created only
+#: inside this module when normalizing a provider response; (2) the proof
+#: is a MAC over every binding field, so a structurally identical value
+#: constructed by hand fails verification; and (3) consuming boundaries
+#: (CTRL-007 review loop) verify locally with zero provider I/O. Being a
+#: code constant, verification survives restarts with no runtime state.
+_ISSUANCE_KEY: Final[bytes] = hashlib.sha256(
+    b"pectoraux/controller zai adapter-issued worker-session evidence seal v1"
+).digest()
+
+#: Unit separator for the canonical MAC message — cannot occur in the
+#: validated session fields (URL-safe ids, SHAs, and verbatim provider
+#: strings never contain control separators).
+_FIELD_SEPARATOR: Final[str] = "\x1f"
+
+
 @dataclass(frozen=True)
 class ZaiWorkerSession:
     """A normalized, non-authoritative worker-execution reference.
@@ -168,6 +204,11 @@ class ZaiWorkerSession:
     status (verbatim), and the last update timestamp (ISO string, preserved
     verbatim — never parsed into clock-dependent types). Equivalent
     provider reports normalize to equal values.
+
+    This is the ordinary public value form. Evidence of *issuance* — the
+    proof that the value came from the adapter normalizing a provider
+    response — is carried only by :class:`ZaiIssuedWorkerSession`, which
+    only the adapter constructs (FZ-CTRL007-001).
     """
 
     session_id: str
@@ -178,6 +219,71 @@ class ZaiWorkerSession:
     head_sha: str | None
     status: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class ZaiIssuedWorkerSession(ZaiWorkerSession):
+    """Adapter-issued worker-session evidence (FZ-CTRL007-001).
+
+    Constructed only inside this module, at the provider-response
+    normalization boundary (:func:`_normalize_session`): the ordinary
+    session fields plus a MAC proof over every one of them. There is no
+    public issuance function — a caller cannot manufacture this evidence
+    for a hand-chosen session; ``verify_issuance`` recomputes the proof
+    locally (pure computation, zero provider I/O, restart-safe) so any
+    consuming boundary can distinguish adapter-issued evidence from a
+    structurally identical value built through the public ``ZaiWorkerSession``
+    constructor or a forged/tampered proof. This is not a second session
+    model: it is the same frozen value type carrying its issuance proof.
+    """
+
+    _proof: str
+
+    def verify_issuance(self) -> bool:
+        """Recompute the issuance proof locally; ``True`` only when this
+        value was issued by the adapter for exactly these fields."""
+        return hmac.compare_digest(_issuance_proof(self), self._proof)
+
+
+def _issuance_proof(session: ZaiWorkerSession) -> str:
+    """The deterministic MAC over every ordinary session field.
+
+    Any field tampering — session id, repository, work item, base, PR
+    identity, status, or timestamp — invalidates the proof.
+    """
+    message = _FIELD_SEPARATOR.join(
+        (
+            session.session_id,
+            session.repository,
+            session.work_item,
+            session.base_sha,
+            "" if session.pr_number is None else str(session.pr_number),
+            session.head_sha or "",
+            session.status,
+            session.updated_at,
+        )
+    )
+    return hmac.new(_ISSUANCE_KEY, message.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _issue(session: ZaiWorkerSession) -> ZaiIssuedWorkerSession:
+    """Seal a normalized provider report as adapter-issued evidence.
+
+    The only issuance path: module-private, called from
+    :func:`_normalize_session` (provider-response normalization). Not
+    exported, not part of any public surface.
+    """
+    return ZaiIssuedWorkerSession(
+        session_id=session.session_id,
+        repository=session.repository,
+        work_item=session.work_item,
+        base_sha=session.base_sha,
+        pr_number=session.pr_number,
+        head_sha=session.head_sha,
+        status=session.status,
+        updated_at=session.updated_at,
+        _proof=_issuance_proof(session),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -363,12 +469,15 @@ def _require_optional_int(data: Mapping[str, object], key: str, context: str) ->
     return value
 
 
-def _normalize_session(data: object, context: str) -> ZaiWorkerSession:
-    """Normalize a provider worker-execution report into a typed value.
+def _normalize_session(data: object, context: str) -> ZaiIssuedWorkerSession:
+    """Normalize a provider worker-execution report into typed evidence.
 
     Deterministic and strict: missing or mistyped fields (including a
     malformed session identifier) fail closed; the status and timestamp
-    are preserved verbatim (never clock-derived).
+    are preserved verbatim (never clock-derived). This normalization is
+    the adapter-issued evidence boundary (FZ-CTRL007-001): the returned
+    value carries its issuance proof, so consuming boundaries can verify
+    provenance locally without any provider I/O.
     """
     mapping = _as_mapping(data, context)
     session_id = _require_str(mapping, "session_id", context)
@@ -376,15 +485,17 @@ def _normalize_session(data: object, context: str) -> ZaiWorkerSession:
         raise ZaiMalformedResponseError(
             f"{context}: session identifier {session_id!r} is malformed"
         )
-    return ZaiWorkerSession(
-        session_id=_require_str(mapping, "session_id", context),
-        repository=_require_str(mapping, "repository", context),
-        work_item=_require_str(mapping, "work_item", context),
-        base_sha=_require_str(mapping, "base_sha", context),
-        pr_number=_require_optional_int(mapping, "pr_number", context),
-        head_sha=_require_optional_str(mapping, "head_sha", context),
-        status=_require_str(mapping, "status", context),
-        updated_at=_require_str(mapping, "updated_at", context),
+    return _issue(
+        ZaiWorkerSession(
+            session_id=_require_str(mapping, "session_id", context),
+            repository=_require_str(mapping, "repository", context),
+            work_item=_require_str(mapping, "work_item", context),
+            base_sha=_require_str(mapping, "base_sha", context),
+            pr_number=_require_optional_int(mapping, "pr_number", context),
+            head_sha=_require_optional_str(mapping, "head_sha", context),
+            status=_require_str(mapping, "status", context),
+            updated_at=_require_str(mapping, "updated_at", context),
+        )
     )
 
 
@@ -444,7 +555,7 @@ class ZaiAdapter:
 
     # -- worker execution (AC1/AC3) ------------------------------------------
 
-    def start_worker(self, context: ZaiWorkerContext) -> ZaiWorkerSession:
+    def start_worker(self, context: ZaiWorkerContext) -> ZaiIssuedWorkerSession:
         """Start (or identify) the worker execution for the exact Work Order.
 
         The context is validated in full (AC2) before any provider I/O; a
@@ -452,6 +563,9 @@ class ZaiAdapter:
         iterations). The instruction payload is constructed from the
         repository-derived facts plus the frozen worker role; the
         provider-reported session must match the governed context exactly.
+        The returned value is **adapter-issued evidence** — the normalized
+        provider report sealed with its issuance proof (FZ-CTRL007-001) —
+        so downstream boundaries can verify provenance locally.
         """
         _require_context(context, repository=self._repository)
         if context.review_findings:
@@ -466,7 +580,7 @@ class ZaiAdapter:
         _require_session_binding(session, context, expected_session_id=None)
         return session
 
-    def resume_worker(self, context: ZaiWorkerContext, session_id: str) -> ZaiWorkerSession:
+    def resume_worker(self, context: ZaiWorkerContext, session_id: str) -> ZaiIssuedWorkerSession:
         """Resume the same governed worker execution for a change iteration.
 
         The session identifier is an explicit caller-supplied,
@@ -477,7 +591,8 @@ class ZaiAdapter:
         session must match the governed work item, repository, base, and PR
         identity and must be the session the caller named — a mismatched
         session (a silent fork) or contradictory execution identity refuses
-        the operation.
+        the operation. Like :meth:`start_worker`, the returned value is
+        adapter-issued evidence carrying its issuance proof.
         """
         _require_context(context, repository=self._repository)
         session = _require_session_id(session_id)

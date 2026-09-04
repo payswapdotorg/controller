@@ -124,6 +124,7 @@ from controller.zai import DEFAULT_API_ROOT as ZAI_DEFAULT_API_ROOT
 from controller.zai import (
     UrllibZaiTransport,
     ZaiAdapter,
+    ZaiIssuedWorkerSession,
     ZaiTransport,
     ZaiWorkerContext,
     ZaiWorkerSession,
@@ -217,6 +218,7 @@ __all__ = [
     "ZaiConfigurationError",
     "ZaiContextMismatchError",
     "ZaiContradictionError",
+    "ZaiIssuedWorkerSession",
     "ZaiMalformedResponseError",
     "ZaiMissingSessionError",
     "ZaiPolicyViolationError",
