@@ -1,6 +1,6 @@
 # CTRL-009 — Recovery / Idempotency
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Objective
 
@@ -97,8 +97,13 @@ Offline deterministic tests cover each existing lifecycle position, completed-vs
 
 ## Handoff
 
-Architect has completed CTRL-008 merge and reconciliation at PR #23 merge commit `e733e37a1ecf7a86c12e3baac0fd325c5806aaa4` and reconciliation PR #24 merge commit `51b683ee608abc300ddff3a7e32ca0323f8eab5e`. CTRL-009 is now defined and frozen as the sole next planned Work Item and is activated as `READY`. Z.ai may implement only this Work Order from the exact governance activation base recorded in machine state after this definition change. The worker must verify authority and base SHA, implement only CTRL-009, run the complete validation suite and scope/safety audit, create/update exactly one implementation PR, and return durable evidence. The worker may not merge, approve, redefine authority, or claim completion.
+Architect completed CTRL-009 implementation review on PR #26 after REQUEST_CHANGES findings FZ-CTRL009-001 and FZ-CTRL009-002 were resolved on the same PR. The final approved head was `56730cb93afda01ef53ca6797b0ccba2408f972c`; the worker returned a green validation transcript: 555/555 tests + 195 subtests, strict mypy 0 issues, ruff/format clean, `controller validate` and `domain` green, external-I/O guard green, and CTRL-009 audit 8/8 PASS. Architect approval was recorded as review `5118433490`. The worker did not merge, approve, redefine authority, or claim completion.
 
 ## Merge / reconciliation evidence
 
-Not yet implemented. CTRL-009 has just been defined/frozen/activated as the sole `READY` item after CTRL-008 reconciliation. Stage 1 remains active; activating CTRL-009 does not silently advance the automation stage.
+- Implementation PR: #26
+- Exact approved implementation head: `56730cb93afda01ef53ca6797b0ccba2408f972c`
+- Implementation merge commit: `3d5e573f121c710386881d8db3ee3476c82176e3`
+- Reconciliation checkpoint: this Work Order is marked `COMPLETE` and the authoritative machine state is reconciled from the observed merge in the reconciliation PR.
+- Automation stage remains `STAGE-1-STATE-MACHINE-AUTOMATION`.
+- CTRL-010 — End-to-end dogfood is the next roadmap item, but is not yet defined, frozen, or eligible.
