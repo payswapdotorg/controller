@@ -8,14 +8,13 @@
 
 - **current state:** `IMPLEMENTING`
 - **active Work Order:** CTRL-006 — CI / Evidence Gate (`spec/work-items/CTRL-006.md`, `READY`)
-- **PR:** none yet; Z.ai implementation authorized from exact main base `99c01258329aece84367bfabebfbf10b76f3b572`
-- **dispatch record:** CTRL-006 dispatch authorized in merged governance PR #16 comment `5543195224`; worker must open exactly one implementation PR from the exact base above
-- **last completed architect action:** CTRL-005 reviewed/approved/merged/reconciled; CTRL-006 defined, frozen, activated, and dispatched to Z.ai with the exact post-governance main base
+- **PR:** none yet; Z.ai implementation is authorized from the exact current `main` SHA recorded in dispatch comment `5543195224`/its correction below
+- **last completed architect action:** CTRL-005 reviewed/approved/merged/reconciled; CTRL-006 defined, frozen, activated, and dispatched to Z.ai
 - **last completed worker action:** CTRL-005 implementation delivered and resolved Architect findings FZ-CTRL005-001 and FZ-CTRL005-002; PR #14 merged and reconciled
 - **current implementation action:** Z.ai implements only the frozen CTRL-006 Work Order; machine state remains `READY` until the governed lifecycle advances
-- **last update (UTC):** 2026-09-04T16:10:00Z
+- **last update (UTC):** 2026-09-04T16:12:00Z
 - **next planned item:** CTRL-007 (per the roadmap; not defined, not eligible)
-- **next step:** Z.ai verifies base `99c01258329aece84367bfabebfbf10b76f3b572`, implements CTRL-006 only, validates, and opens one implementation PR; Architect review follows
+- **next step:** Z.ai verifies the exact post-handoff main SHA from the durable dispatch record, implements CTRL-006 only, validates, and opens one implementation PR; Architect review follows
 
 ## Maintenance protocol
 
