@@ -7,7 +7,18 @@ selection, restart determinism, and the worker-merge prohibition).
 Fully offline: a stateful fake GitHub transport serves canned JSON and
 swaps the governed PR to its merged form exactly when the merge PUT
 lands, the synthetic authority tree is local, and the loop is exercised
-with zero worker-provider surface of any kind."""
+with zero worker-provider surface of any kind.
+
+FZ-CTRL008-001 regression coverage: the merge-boundary base identity is
+the correlated PR's observed current base SHA — the exact current
+``main`` base the PR represents — never the carried dispatch-base
+provenance. The real PR #23 shape is pinned with the literal production
+SHAs (dispatch base ``f55f519…``, absorbed current base ``c67bc66…``,
+head ``35ecd42…``): an explicitly absorbed post-dispatch ``main``
+advancement is legitimate and merges on the current base, while a base
+that drifts between authorization and execution still refuses the
+mutation at the CTRL-003 execution-time re-proof (true drift, zero PUT).
+"""
 
 from __future__ import annotations
 
@@ -63,15 +74,27 @@ WORKER = "zai-worker"
 PR_NUMBER = 23
 MERGE_SHA = "c" * 40
 DRIFTED_SHA = "d" * 40
+DRIFTED_BASE = "e" * 40
 COMPLETED = ("CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007")
 REQUIRED_CHECKS = ("ci/validate", "ci/tests")
 AUTOMATION_STAGE = "STAGE-1-STATE-MACHINE-AUTOMATION"
+
+# The literal production SHAs of the real FZ-CTRL008-001 case (PR #23):
+# the work order was dispatched from f55f519 (the PR #22 governance
+# merge), then main advanced to c67bc66 (badee75 + the Architect
+# control-loop document) and the advancement was explicitly absorbed
+# into the governed branch — so the correlated PR's current base is
+# c67bc66, legitimately distinct from the dispatch provenance.
+REAL_DISPATCH_BASE = "f55f5190a82a0fb774285a03347e6df71163cbd5"
+REAL_CURRENT_BASE = "c67bc666e08a4ac3162bd18a296ba05c499069b7"
+REAL_PR_HEAD = "35ecd42d4cb68c3a330ae60ff24250ccfedc5280"
 
 PR_PATH = f"/repos/{REPO}/pulls/{PR_NUMBER}"
 OPEN_LIST_PATH = f"/repos/{REPO}/pulls?state=open&head={OWNER}:{BRANCH}"
 ALL_LIST_PATH = f"/repos/{REPO}/pulls?state=all&head={OWNER}:{BRANCH}"
 REVIEWS_PATH = f"/repos/{REPO}/pulls/{PR_NUMBER}/reviews"
 STATUS_PATH = f"/repos/{REPO}/commits/{HEAD_SHA}/status"
+REAL_STATUS_PATH = f"/repos/{REPO}/commits/{REAL_PR_HEAD}/status"
 MERGE_PATH = f"/repos/{REPO}/pulls/{PR_NUMBER}/merge"
 
 GREEN_STATUS = commit_status(
@@ -175,6 +198,30 @@ class DriftingHeadTransport(FakeTransport):
             self._pr_gets += 1
             if self._pr_gets > 1:
                 drifted = open_pr(head_sha=DRIFTED_SHA)
+                self._responses[PR_PATH] = drifted
+                self._responses[OPEN_LIST_PATH] = [drifted]
+                self._responses[ALL_LIST_PATH] = [drifted]
+        return super().get_json(path)
+
+
+class DriftingBaseTransport(FakeTransport):
+    """True base drift — not the absorbed post-dispatch advancement.
+
+    Serves the governed PR at its current base for the first GET (the
+    authorization-time observation) and a base that advanced *after*
+    authorization for every later GET (the execution-time re-proof):
+    the authorized base no longer matches the live PR, so the CTRL-003
+    re-proof must refuse the mutation with zero PUT calls."""
+
+    def __init__(self, responses: Mapping[str, object]) -> None:
+        self._pr_gets = 0
+        super().__init__(responses)
+
+    def get_json(self, path: str) -> object:
+        if path == PR_PATH:
+            self._pr_gets += 1
+            if self._pr_gets > 1:
+                drifted = open_pr(base_sha=DRIFTED_BASE)
                 self._responses[PR_PATH] = drifted
                 self._responses[OPEN_LIST_PATH] = [drifted]
                 self._responses[ALL_LIST_PATH] = [drifted]
@@ -356,7 +403,9 @@ class PositionDisciplineTests(MergeLoopFixtureMixin):
 
 
 class CorrelationTests(MergeLoopFixtureMixin):
-    """AC2: exactly one governed PR across its whole history, exact base."""
+    """AC2: exactly one governed PR across its whole history, on the
+    intended base ref, with the observed current base as the identity
+    the boundary operates on (FZ-CTRL008-001)."""
 
     def test_no_governed_pr_is_a_contradiction(self) -> None:
         transport = FakeTransport(_open_pr_responses(all_list=[], open_list=[]))
@@ -372,17 +421,71 @@ class CorrelationTests(MergeLoopFixtureMixin):
         with self.assertRaises(MergeContradictionError):
             self._evaluate(transport, root)
 
-    def test_base_drift_fails_closed(self) -> None:
-        transport = FakeTransport(_open_pr_responses(pr=open_pr(base_sha="e" * 40)))
+    def test_absorbed_base_advancement_merges_on_the_current_pr_base(self) -> None:
+        """FZ-CTRL008-001 regression — the real PR #23 shape with the
+        literal production SHAs: the carried dispatch-base provenance
+        (f55f519…) differs from the correlated PR's current base
+        (c67bc66…) because main advanced after dispatch and the
+        advancement was explicitly absorbed into the governed branch.
+        The boundary correlates, authorizes, and merges on the exact
+        current main base — never on the dispatch provenance — and
+        records both SHAs distinctly in the outcome."""
+        served = open_pr(base_sha=REAL_CURRENT_BASE, head_sha=REAL_PR_HEAD)
+        responses = _open_pr_responses(
+            pr=served,
+            reviews=[architect_approval(commit_id=REAL_PR_HEAD)],
+            merge_result=merge_success(PR_NUMBER),
+        )
+        responses[REAL_STATUS_PATH] = GREEN_STATUS
+        transport = MergeExecutionTransport(
+            responses,
+            swap_on_merge_put={
+                PR_PATH: merged_pr(base_sha=REAL_CURRENT_BASE, head_sha=REAL_PR_HEAD),
+                OPEN_LIST_PATH: [],
+                ALL_LIST_PATH: [merged_pr(base_sha=REAL_CURRENT_BASE, head_sha=REAL_PR_HEAD)],
+            },
+        )
+        root = self._repo("APPROVED")
+        outcome = self._evaluate(transport, root, base_sha=REAL_DISPATCH_BASE)
+
+        self.assertEqual(outcome.event, _MERGE_EVENT)
+        self.assertTrue(outcome.merge_attempted)
+        authorization = outcome.authorization
+        assert authorization is not None
+        self.assertEqual(authorization.base_ref, "main")
+        self.assertEqual(authorization.base_sha, REAL_CURRENT_BASE)
+        self.assertEqual(authorization.head_sha, REAL_PR_HEAD)
+        self.assertEqual(outcome.base_sha, REAL_CURRENT_BASE)
+        self.assertEqual(outcome.dispatch_base, REAL_DISPATCH_BASE)
+        self.assertTrue(outcome.pull_request.merged)
+        self.assertEqual(outcome.merge_commit_sha, MERGE_SHA)
+        self.assertEqual(self._merge_put_calls(transport), 1)
+
+    def test_foreign_base_ref_at_correlation_fails_closed(self) -> None:
+        transport = FakeTransport(_open_pr_responses(pr=open_pr(base_branch="develop")))
         root = self._repo("APPROVED")
         with self.assertRaises(MergeContradictionError):
             self._evaluate(transport, root)
+        self.assertEqual(self._merge_put_calls(transport), 0)
 
     def test_merged_pr_is_correlated_across_its_whole_history(self) -> None:
         transport = FakeTransport(_merged_pr_responses())
         root = self._repo("MERGING")
         outcome = self._evaluate(transport, root)
         self.assertEqual(outcome.event.command, CommandName.RECORD_MERGE)
+
+    def test_merged_pr_correlates_on_its_frozen_merge_time_base(self) -> None:
+        """FZ-CTRL008-001 post-merge shape: the merged PR's frozen
+        merge-time base (c67bc66…) differs from the carried dispatch
+        provenance (f55f519…) — the absorbed advancement — and the
+        boundary still correlates and records evidence on it."""
+        transport = FakeTransport(_merged_pr_responses(pr=merged_pr(base_sha=REAL_CURRENT_BASE)))
+        root = self._repo("MERGING")
+        outcome = self._evaluate(transport, root, base_sha=REAL_DISPATCH_BASE)
+        self.assertEqual(outcome.event, _RECORD_MERGE_EVENT)
+        self.assertEqual(outcome.base_sha, REAL_CURRENT_BASE)
+        self.assertEqual(outcome.dispatch_base, REAL_DISPATCH_BASE)
+        self.assertEqual(outcome.merge_commit_sha, MERGE_SHA)
 
 
 class ApprovedExecutionTests(MergeLoopFixtureMixin):
@@ -414,6 +517,8 @@ class ApprovedExecutionTests(MergeLoopFixtureMixin):
         self.assertEqual(authorization.head_sha, HEAD_SHA)
         self.assertEqual(authorization.merge_method, "merge")
         self.assertEqual(authorization, replace(authorization, merge_method="merge"))
+        self.assertEqual(outcome.base_sha, BASE_SHA)
+        self.assertEqual(outcome.dispatch_base, BASE_SHA)
         self.assertTrue(outcome.pull_request.merged)
         self.assertEqual(outcome.merge_commit_sha, MERGE_SHA)
         self.assertEqual(self._merge_put_calls(transport), 1)
@@ -496,6 +601,19 @@ class ApprovedExecutionTests(MergeLoopFixtureMixin):
 
     def test_execution_time_head_drift_refuses_the_mutation(self) -> None:
         transport = DriftingHeadTransport(
+            _open_pr_responses(status=GREEN_STATUS, merge_result=merge_success(PR_NUMBER))
+        )
+        root = self._repo("APPROVED")
+        with self.assertRaises(GithubStaleBaseError):
+            self._evaluate(transport, root)
+        self.assertEqual(self._merge_put_calls(transport), 0)
+
+    def test_execution_time_base_drift_refuses_the_mutation(self) -> None:
+        """FZ-CTRL008-001 true-drift retention: a base that advanced
+        *between authorization and execution* (not an absorbed
+        post-dispatch advancement) fails closed at the CTRL-003
+        execution-time re-proof with zero PUT mutations."""
+        transport = DriftingBaseTransport(
             _open_pr_responses(status=GREEN_STATUS, merge_result=merge_success(PR_NUMBER))
         )
         root = self._repo("APPROVED")
@@ -616,6 +734,23 @@ class ReconciliationTests(MergeLoopFixtureMixin):
         self.assertEqual(record.completed_after, (*COMPLETED, WORK_ITEM))
         self.assertIsNone(record.next_work_item)
         self.assertEqual(record.automation_stage, AUTOMATION_STAGE)
+
+    def test_reconciliation_records_the_merge_time_base_not_the_dispatch_base(self) -> None:
+        """FZ-CTRL008-001 post-merge regression: the deterministic record
+        carries the merged PR's frozen merge-time base (c67bc66…) — never
+        the carried dispatch provenance (f55f519…) — so the absorbed
+        post-dispatch advancement reconciles on the observed merge
+        boundary."""
+        transport = FakeTransport(_merged_pr_responses(pr=merged_pr(base_sha=REAL_CURRENT_BASE)))
+        root = self._repo("RECONCILING")
+        outcome = self._evaluate(transport, root, base_sha=REAL_DISPATCH_BASE)
+        record = outcome.record
+        assert record is not None
+        self.assertEqual(record.base_sha, REAL_CURRENT_BASE)
+        self.assertEqual(outcome.base_sha, REAL_CURRENT_BASE)
+        self.assertEqual(outcome.dispatch_base, REAL_DISPATCH_BASE)
+        self.assertEqual(record.merge_commit_sha, MERGE_SHA)
+        self.assertEqual(record.completed_after, (*COMPLETED, WORK_ITEM))
 
     def test_reconciliation_selects_the_unique_ready_successor(self) -> None:
         transport = FakeTransport(_merged_pr_responses())

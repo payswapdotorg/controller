@@ -14,8 +14,15 @@ active governed Work Order: the merge boundary. Doctrine:
   fails closed with :class:`controller.errors.MergeLoopPositionError`.
 * **Exact correlation (AC2).** The governed PR is the unique PR for the
   carried governed branch (across its whole history — open or merged),
-  targeting the intended ``main`` base at the exact carried dispatch-base
-  SHA. Zero, multiple, or drifted correlation fails closed with
+  targeting the intended ``main`` base ref. The merge-boundary base
+  identity is the correlated PR's *observed current* base SHA — the
+  exact current ``main`` base the PR represents (GitHub reports the
+  base-branch head for an open PR and freezes the merge-time base for
+  a merged one) — never the carried dispatch-base provenance
+  (FZ-CTRL008-001: an explicitly absorbed post-dispatch ``main``
+  advancement is legitimate; the dispatch SHA is recorded as
+  provenance, never treated as the PR's current base). Zero, multiple,
+  or foreign-base correlation fails closed with
   :class:`controller.errors.MergeContradictionError`.
 * **Complete frozen predicate (AC3).** The merge mutation is executed
   only through the CTRL-003 adapter, whose frozen predicate is evaluated
@@ -211,8 +218,16 @@ class MergeLoopOutcome:
 
     ``lifecycle`` is the authority-reconstructed state at the start of
     the evaluation; ``event`` is the single governed transition applied
-    (every owned position advances exactly one step); ``pull_request``
-    is the exactly correlated governed PR as observed this evaluation;
+    (every owned position advances exactly one step); ``branch`` is
+    the carried governed branch; ``base_sha`` is the observed current
+    governed PR base the boundary operated on (the exact ``main`` base
+    the correlated PR represents — the current base-branch head for an
+    open PR, the frozen merge-time base for a merged one), kept
+    distinct from ``dispatch_base`` — the carried dispatch-base
+    provenance recorded verbatim for the durable evidence trail and
+    never used as the PR's base identity (FZ-CTRL008-001);
+    ``pull_request`` is the exactly correlated governed PR as observed
+    this evaluation;
     ``merge_commit_sha`` is the observed merge commit (present whenever
     merge evidence was observed); ``merge_attempted`` records whether
     *this* evaluation executed the merge mutation; ``authorization`` is
@@ -227,6 +242,7 @@ class MergeLoopOutcome:
     event: DomainEvent
     branch: str
     base_sha: str
+    dispatch_base: str
     pull_request: GithubPullRequest
     merge_commit_sha: str | None
     merge_attempted: bool
@@ -274,11 +290,12 @@ class MergeReconciliationLoop:
                 f"'{item.identity.work_item}' is {state.value}, which belongs "
                 "to another governed stage"
             )
-        branch, base_sha = self._require_correlation_refs(references)
-        pr = self._correlate_pull_request(item, branch, base_sha)
+        branch, dispatch_base = self._require_correlation_refs(references)
+        pr = self._correlate_pull_request(item, branch)
+        base_sha = pr.base_sha
 
         if state is LifecycleState.APPROVED:
-            return self._at_approved(item, references, policy, pr, branch, base_sha)
+            return self._at_approved(item, references, policy, pr, branch, base_sha, dispatch_base)
         merge_sha = self._require_merge_evidence(item, pr)
         if state is LifecycleState.MERGING:
             event = item.handle(DomainCommand(item.identity.work_item, CommandName.RECORD_MERGE))
@@ -289,6 +306,7 @@ class MergeReconciliationLoop:
                 event=event,
                 branch=branch,
                 base_sha=base_sha,
+                dispatch_base=dispatch_base,
                 pull_request=pr,
                 merge_commit_sha=merge_sha,
                 merge_attempted=False,
@@ -304,6 +322,7 @@ class MergeReconciliationLoop:
                 event=event,
                 branch=branch,
                 base_sha=base_sha,
+                dispatch_base=dispatch_base,
                 pull_request=pr,
                 merge_commit_sha=merge_sha,
                 merge_attempted=False,
@@ -321,6 +340,7 @@ class MergeReconciliationLoop:
             event=event,
             branch=branch,
             base_sha=base_sha,
+            dispatch_base=dispatch_base,
             pull_request=pr,
             merge_commit_sha=merge_sha,
             merge_attempted=False,
@@ -338,6 +358,7 @@ class MergeReconciliationLoop:
         pr: GithubPullRequest,
         branch: str,
         base_sha: str,
+        dispatch_base: str,
     ) -> MergeLoopOutcome:
         """Evaluate the complete predicate and execute the one merge attempt.
 
@@ -352,6 +373,10 @@ class MergeReconciliationLoop:
         :meth:`merge_pull_request` re-establishes the complete proof at
         execution time before the single ``PUT`` — so drift between
         authorization and execution refuses the mutation (AC4).
+
+        The base identity the predicate binds is ``base_sha`` — the
+        correlated PR's observed current ``main`` base (FZ-CTRL008-001);
+        ``dispatch_base`` is provenance only, never a predicate input.
         """
         if pr.merged:
             merge_sha = self._require_merge_evidence(item, pr)
@@ -363,6 +388,7 @@ class MergeReconciliationLoop:
                 event=event,
                 branch=branch,
                 base_sha=base_sha,
+                dispatch_base=dispatch_base,
                 pull_request=pr,
                 merge_commit_sha=merge_sha,
                 merge_attempted=False,
@@ -396,6 +422,7 @@ class MergeReconciliationLoop:
             event=event,
             branch=branch,
             base_sha=base_sha,
+            dispatch_base=dispatch_base,
             pull_request=merged_pr,
             merge_commit_sha=merge_sha,
             merge_attempted=True,
@@ -406,10 +433,22 @@ class MergeReconciliationLoop:
     # -- internal: references and correlation (AC2) --------------------------
 
     def _require_correlation_refs(self, references: OrchestrationReferences) -> tuple[str, str]:
+        """The carried correlation key and the dispatch-base provenance.
+
+        The governed branch is the PR correlation key; the dispatch
+        base is *provenance* — the exact ``main`` SHA the work order
+        was dispatched from, recorded verbatim on every outcome for
+        the durable evidence trail. Neither is ever guessed, and the
+        dispatch SHA is never the PR's current base identity
+        (FZ-CTRL008-001: an explicitly absorbed post-dispatch ``main``
+        advancement is legitimate, so the provenance and the current
+        base are legitimately distinct SHAs).
+        """
         if references.branch is None or references.base_sha is None:
             raise MergeMissingReferenceError(
                 "correlating the governed pull request requires the carried "
-                "branch and dispatch-base references; they are never guessed"
+                "branch reference and the dispatch-base provenance; they "
+                "are never guessed"
             )
         return references.branch, references.base_sha
 
@@ -421,18 +460,21 @@ class MergeReconciliationLoop:
             )
         return references.architect_reviewer
 
-    def _correlate_pull_request(
-        self, item: GovernedWorkItem, branch: str, base_sha: str
-    ) -> GithubPullRequest:
+    def _correlate_pull_request(self, item: GovernedWorkItem, branch: str) -> GithubPullRequest:
         """Correlate the exact governed PR across its whole history.
 
         The merge boundary observes the PR before and after the merge
         mutation, so correlation lists the governed branch's PRs with
         state ``all`` (not open-only): the one-PR-per-work-item rule
         holds across the work order's whole history — a second PR for
-        the same governed branch is a governance violation, and the
-        unique PR must target the carried dispatch base exactly. Zero
-        matches, multiple matches, or base drift fail closed.
+        the same governed branch is a governance violation. The unique
+        PR must target the intended ``main`` base ref, and its base
+        SHA is the *observed current* base identity the boundary
+        operates on (FZ-CTRL008-001: the exact current ``main`` base
+        the correlated PR represents — an explicitly absorbed
+        post-dispatch ``main`` advancement is legitimate — never the
+        carried dispatch-base provenance). Zero matches, multiple
+        matches, or a foreign base ref fail closed.
         """
         matches = self._github.list_pull_requests(state=_ALL_STATES, head_branch=branch)
         if not matches:
@@ -448,10 +490,10 @@ class MergeReconciliationLoop:
                 f"are observed for the governed branch '{branch}'"
             )
         pr = matches[0]
-        if pr.base_sha != base_sha:
+        if pr.base_ref != _BASE_BRANCH:
             raise MergeContradictionError(
-                f"governed PR #{pr.number} base {pr.base_sha} does not match "
-                f"the carried dispatch base {base_sha}"
+                f"governed PR #{pr.number} targets base ref {pr.base_ref!r}, "
+                f"not the intended base ref '{_BASE_BRANCH}'"
             )
         return pr
 
@@ -510,7 +552,11 @@ class MergeReconciliationLoop:
         active work item (a duplicate completion is a contradiction, not
         a no-op, so a drifted authority stops for governance attention),
         the next eligible work item is re-derived from the work-order
-        files, and the automation stage is preserved verbatim.
+        files, and the automation stage is preserved verbatim. The
+        recorded base SHA is the merged PR's frozen merge-time base —
+        the observed merge boundary GitHub freezes on close — so
+        repeated evaluation against the same merge evidence derives
+        the same record (FZ-CTRL008-001).
         """
         work_item = item.identity.work_item
         if work_item in item.completed:
