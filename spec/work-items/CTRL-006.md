@@ -1,6 +1,6 @@
 # CTRL-006 — CI / Evidence Gate
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Objective
 
@@ -89,8 +89,8 @@ Offline deterministic tests cover terminal success, pending evidence, terminal f
 
 ## Handoff
 
-Architect has defined and frozen this Work Order as the sole READY item after CTRL-005 reconciliation. Z.ai may implement only this Work Order from the exact current main base. The worker must verify repository authority and base SHA, implement only the owned CTRL-006 surface, run the complete validation suite, create/update exactly one implementation PR, and return a durable evidence transcript with base/head SHAs and acceptance-criterion results. The worker may not merge, approve, redefine authority, or claim completion.
+Architect defined and froze CTRL-006 as the sole READY item. Z.ai implemented only this Work Order from the corrected exact implementation base `72a8459f4a153b8a7b58ee6ab7c40997bd71cd1b`, in PR #17. The worker resolved all Architect findings, returned a durable evidence transcript, and did not merge, approve, redefine authority, or claim completion.
 
 ## Merge / reconciliation evidence
 
-Not yet implemented. CTRL-006 is newly defined and activated as the sole READY item after CTRL-005 reconciliation.
+Complete and reconciled. PR #17 (`CTRL-006 — CI/evidence gate`) was reviewed and approved at head `ec6155a41aad557105d63db8ac1768d8cad2a002` against base `72a8459f4a153b8a7b58ee6ab7c40997bd71cd1b`, then merged at `fbc4e41c0fab05f14fa1d4cb8f989a71d7c05ab5`. The worker reported 356 passing tests, strict mypy clean, ruff clean, CLI validation clean, external-I/O guards green, and the CTRL-006 scope audit passing. The reconciliation records CTRL-006 as complete, adds it to machine-state `completed`, and leaves CTRL-007 planned but undefined/ineligible until separately defined and frozen. Stage 1 remains active.
