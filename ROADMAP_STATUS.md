@@ -6,13 +6,13 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `CHANGES_REQUESTED`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-007 — Architect Review Loop (`spec/work-items/CTRL-007.md`, `READY`)
 - **PR:** one implementation PR open from the exact dispatch base `a02cfdb4f253f63375e81d88581f7a27807ae672` (dispatch comment `5543581701`)
-- **last completed architect action:** FZ-CTRL007-004 (HIGH) issued on PR #20 (comment `5544589119`): the module-level `_normalize_session` callable is itself a reachable mint — a caller can import it and supply an arbitrary well-formed provider-shaped mapping, obtaining issued evidence without any provider response; the normalization/issuance operation must be reachable only from the actual `ZaiAdapter` provider-response path (`start_worker`/`resume_worker`)
-- **last completed worker action:** Z.ai acknowledged FZ-CTRL007-004; correction in progress on the same PR
-- **current implementation action:** resolving FZ-CTRL007-004 — removing the module-level normalization callable; the issuance closure will exist only inside the adapter operations, verification stays consumer-available
-- **last update (UTC):** 2026-09-05T01:20:00Z
+- **last completed architect action:** FZ-CTRL007-004 (HIGH) issued on PR #20 (comment `5544589119`): the module-level `_normalize_session` callable was itself a reachable mint — a caller could import it and supply an arbitrary well-formed provider-shaped mapping, obtaining issued evidence without any provider response; the normalization/issuance operation must be reachable only from the actual `ZaiAdapter` provider-response path (`start_worker`/`resume_worker`)
+- **last completed worker action:** Z.ai resolved FZ-CTRL007-004 on fix head `17f58c6` — the module-level normalizer binding is gone (`_normalize_session` no longer exists at module level, importable, or bound anywhere); the normalization/issuance closure now exists solely inside the two adapter operations, installed by `_install_provider_response_path` (a decorator whose closure holds the capability, the proof class, and the one normalization path — the transport's response is the only report source); verification stays consumer-available (`is_adapter_issued()` via `ZaiAdapter._verify_issuance`, pure and local); the directed regression proves no module-level or class-namespace callable mints evidence from caller-supplied report data; full validation green (419 tests, strict mypy, ruff, CLI validate/domain, external-I/O guard, CTRL-007 scope audit with AST construction-site confinement)
+- **current implementation action:** none; FZ-CTRL007-004 resolved on PR #20 (fix head `17f58c6`), awaiting re-review
+- **last update (UTC):** 2026-09-05T02:10:00Z
 - **next planned item:** CTRL-008 (per the roadmap; not defined, not eligible)
 - **next step:** Architect reviews the CTRL-007 implementation PR against the frozen Work Order; worker resolves any findings on the same PR
 
