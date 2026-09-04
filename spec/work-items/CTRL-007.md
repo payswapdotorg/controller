@@ -1,6 +1,6 @@
 # CTRL-007 — Architect Review Loop
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Objective
 
@@ -91,8 +91,8 @@ Offline deterministic tests cover success/approval observation without merge, ex
 
 ## Handoff
 
-Architect has defined and frozen CTRL-007 as the sole READY item after CTRL-006 reconciliation. Z.ai may implement only this Work Order from the exact current main base. The worker must verify repository authority and base SHA, implement only the owned CTRL-007 surface, run the complete validation suite, create/update exactly one implementation PR, and return a durable evidence transcript with base/head SHAs and acceptance-criterion results. The worker may not merge, approve, redefine authority, or claim completion.
+Architect defined and froze CTRL-007 as the sole READY item after CTRL-006 reconciliation. Z.ai implemented only this Work Order from the exact activation base `a02cfdb4f253f63375e81d88581f7a27807ae672` in PR #20. The implementation resolved Architect findings FZ-CTRL007-001 through FZ-CTRL007-006 on the same PR, returned a durable evidence transcript, and did not redefine authority or claim completion. The reviewed head `5a43adfc8f270f5be37ba206ff33a45ad579d961` was Architect-approved and merged.
 
 ## Merge / reconciliation evidence
 
-Not yet implemented. CTRL-007 is newly defined and activated as the sole READY item after CTRL-006 reconciliation.
+Complete and reconciled. PR #20 (`CTRL-007 — Architect review loop (durable review packets, exact decision correlation)`) targeted `main`, with dispatch/activation base `a02cfdb4f253f63375e81d88581f7a27807ae672`. Architect approval was recorded against exact head `5a43adfc8f270f5be37ba206ff33a45ad579d961` after resolution of FZ-CTRL007-001..006 and validation evidence of 433 passing tests, strict mypy clean, ruff/format clean, `controller validate` and `controller domain` green, no-external-I/O guard green, and `scripts/audit_ctrl_007.sh a02cfdb` PASS. The PR was merged at `a0392aa0e07772518638f506d755bd9d90d9dc4e` with expected-head protection. This reconciliation records CTRL-007 as complete, adds it to machine-state `completed`, and leaves CTRL-008 as the next planned item without defining or activating it. Stage 1 remains active; completion of CTRL-007 does not silently advance the automation stage.
