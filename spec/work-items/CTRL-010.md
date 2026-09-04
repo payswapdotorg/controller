@@ -1,6 +1,6 @@
 # CTRL-010 — End-to-End Dogfood
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Objective
 
@@ -104,6 +104,18 @@ The dogfood evidence covers at least one contradiction or unsafe partial-operati
 
 CTRL-009 is complete, merged, and reconciled. The roadmap defines CTRL-010 as its sole successor and describes it as the end-to-end dogfood milestone that, together with CTRL-009, provides the prerequisite evidence for the roadmap's Stage 6 Merge/reconciliation automation mapping. CTRL-010 is therefore defined and activated as the sole `READY` item for implementation. Z.ai may implement only this Work Order from the exact governance activation base recorded in machine state. The worker must not merge, approve, redefine authority, alter the roadmap, or advance the automation stage.
 
+## Acceptance / completion record
+
+CTRL-010 implementation was delivered in PR #30. The worker returned a green validation transcript on implementation head `8584be235ab26ebb9bc48dd2861bfeff69b7c9f2` and branch tip `02da00d19e9745f9f4a7cf11a1dea7305e9a66e3`: 591/591 tests + 202 subtests, strict mypy 0 issues, ruff check/format clean, `controller validate` and `domain` green, external-I/O guard 8/8 + 122 subtests, and `scripts/audit_ctrl_010.sh 3a53cff188dbc9ff1bdb0429df61f67ca8c71055 42ee91790c2a844b16b3790b4ccdec2b7630af3a` PASS (8/8). The committed `tests/dogfood_execution_record.json` replayed to equal value. Architect semantic approval was recorded durably as top-level comment `5547679506` because formal approval is unavailable when Architect and PR author share the GitHub identity. PR #30 was merged at `621847cba9dad92a0d45c13853b24ad66402284e`.
+
+The accepted dogfood record demonstrates the complete 18-step composed lifecycle, one same-worker/same-PR `REQUEST_CHANGES` iteration, exact identity correlation across both implementation heads, one authorized merge mutation, deliberate lost-state-write interruption, CTRL-009 `EXTERNAL_COMPLETION_OBSERVED` recovery, zero second merge attempt and zero worker replay after restart, deterministic reconciliation, and fail-closed contradiction/partial-operation probes. The dogfood surface composes existing boundaries and introduces no new lifecycle state, predicate, persistence, queue, scheduler, transport, or semantic Architect authority. The automation stage remains `STAGE-1-STATE-MACHINE-AUTOMATION`.
+
 ## Merge / reconciliation evidence
 
-Not yet implemented. CTRL-010 has just been defined/frozen/activated after CTRL-009 reconciliation. Stage 1 remains active until an explicit stage transition is supported by accepted repository evidence.
+- Implementation PR: #30
+- Exact approved implementation head: `02da00d19e9745f9f4a7cf11a1dea7305e9a66e3`
+- Implementation merge commit: `621847cba9dad92a0d45c13853b24ad66402284e`
+- Reconciliation: this Work Order and authoritative machine state were updated from the observed merge in the reconciliation PR.
+- Stage 6 prerequisite evidence: CTRL-009 + CTRL-010 have now been accepted, merged, reconciled, and exercised together by the deterministic dogfood execution record.
+- Current recorded automation stage: `STAGE-1-STATE-MACHINE-AUTOMATION`; no silent stage transition is performed by CTRL-010.
+- No successor Work Item is defined by the current roadmap.
