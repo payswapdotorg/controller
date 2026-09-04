@@ -6,15 +6,15 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `IMPLEMENTING`
+- **current state:** `WAITING_FOR_ARCHITECT`
 - **active Work Order:** CTRL-008 — Merge + Reconciliation (`spec/work-items/CTRL-008.md`, `READY`)
-- **PR:** implementation PR not yet opened; dispatch authorized from exact main base `f55f5190a82a0fb774285a03347e6df71163cbd5` (governance PR #22 dispatch comment `5545536948`)
+- **PR:** the single CTRL-008 implementation PR (branch `ctrl-008-merge-reconciliation`, opened from the exact dispatch base `f55f5190a82a0fb774285a03347e6df71163cbd5` plus the absorbed post-dispatch governance drift `c67bc666e08a4ac3162bd18a296ba05c499069b7`), returned to `WAITING_FOR_ARCHITECT` with a green validation transcript
 - **last completed architect action:** CTRL-007 reconciled; CTRL-008 defined/frozen/activated as the sole READY item; durable worker dispatch issued against exact base `f55f5190a82a0fb774285a03347e6df71163cbd5`
-- **last completed worker action:** CTRL-007 implementation merged at `a0392aa0e07772518638f506d755bd9d90d9dc4e`
-- **current implementation action:** Z.ai is authorized to implement only `spec/work-items/CTRL-008.md` from the exact dispatch base; one implementation PR only
-- **last update (UTC):** 2026-09-04T19:36:00Z
+- **last completed worker action:** CTRL-008 implementation delivered — `controller/merge.py` (the governed merge + post-merge reconciliation boundary), the `GithubPullRequest.merge_commit_sha` observed-evidence extension, the `MergeLoopError` family, and `tests/test_merge.py` (43 new tests; suite 433 → 476); mechanical real-repository test-pin update to the CTRL-008 authority (the worker-PR precedent); no spec/ authority touched
+- **current implementation action:** awaiting Architect semantic review of the CTRL-008 implementation PR (AC1–AC8 evidence in the PR transcript)
+- **last update (UTC):** 2026-09-05T00:00:00Z
 - **next planned item:** CTRL-009 — Recovery / idempotency (per the roadmap; not defined, not eligible)
-- **next step:** Z.ai opens/updates exactly one CTRL-008 implementation PR and returns to `WAITING_FOR_ARCHITECT` with a green validation transcript
+- **next step:** Architect reviews the CTRL-008 implementation PR; on REQUEST_CHANGES the worker iterates on the same PR, on APPROVE + merge predicates the merge proceeds and post-merge reconciliation records CTRL-008/COMPLETE
 
 ## Maintenance protocol
 

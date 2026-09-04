@@ -239,6 +239,13 @@ class GithubPullRequest:
     ``dirty``, ``unknown``, ...) and may legitimately be ``None`` while
     GitHub computes it; the merge gate treats anything other than ``clean``
     as blocked (fail closed).
+
+    ``merge_commit_sha`` is the merge commit GitHub reports for a merged
+    PR (``None`` for an unmerged one). It is observed evidence — the
+    exact merge SHA the CTRL-008 reconciliation records — extracted
+    verbatim from the same raw pull-request observation as the other
+    fields and never synthesized. Normalization stays deterministic:
+    equivalent raw observations produce equal normalized values.
     """
 
     number: int
@@ -251,6 +258,7 @@ class GithubPullRequest:
     draft: bool
     merged: bool
     mergeable_state: str | None
+    merge_commit_sha: str | None = None
 
 
 #: The only merge method the frozen merge predicate ever authorizes.
@@ -479,6 +487,7 @@ def _normalize_pull_request(data: object) -> GithubPullRequest:
         draft=_require_bool(mapping, "draft", context),
         merged=_merged_flag(mapping, context),
         mergeable_state=_require_optional_str(mapping, "mergeable_state", context),
+        merge_commit_sha=_require_optional_str(mapping, "merge_commit_sha", context),
     )
 
 

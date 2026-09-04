@@ -12,8 +12,12 @@ CTRL-005 orchestration boundary, CTRL-006 CI/evidence gate, and CTRL-007
 Architect review loop: one-step governed orchestration over the accepted
 adapters, deterministic classification of required CI evidence with typed
 retry handoffs, and durable machine-readable review packets with
-same-worker/same-PR change-iteration handoffs. No worker merging, no
-database, no scheduler — those stay outside the frozen authority.
+same-worker/same-PR change-iteration handoffs. CTRL-008 merge +
+reconciliation boundary: the frozen merge-predicate evaluation and
+single authorized merge attempt through the CTRL-003 adapter, observed
+merge evidence, and the deterministic idempotent post-merge
+reconciliation record. No worker merging, no database, no scheduler —
+those stay outside the frozen authority.
 """
 
 from __future__ import annotations
@@ -67,6 +71,11 @@ from controller.errors import (
     GithubTransportError,
     IneligibleDispatchError,
     InvalidTransitionError,
+    MergeContradictionError,
+    MergeLoopError,
+    MergeLoopPositionError,
+    MergeMissingReferenceError,
+    MergePolicyError,
     ReviewContradictionError,
     ReviewLoopError,
     ReviewLoopPositionError,
@@ -93,6 +102,12 @@ from controller.github import (
     GithubTransport,
     MergeAuthorization,
     UrllibGithubTransport,
+)
+from controller.merge import (
+    MergeLoopOutcome,
+    MergePolicy,
+    MergeReconciliationLoop,
+    ReconciliationRecord,
 )
 from controller.orchestrator import (
     OrchestrationOutcome,
@@ -185,6 +200,14 @@ __all__ = [
     "LIFECYCLE_SEQUENCE",
     "LifecycleState",
     "MergeAuthorization",
+    "MergeContradictionError",
+    "MergeLoopError",
+    "MergeLoopOutcome",
+    "MergeLoopPositionError",
+    "MergeMissingReferenceError",
+    "MergePolicy",
+    "MergePolicyError",
+    "MergeReconciliationLoop",
     "OrchestrationContradictionError",
     "OrchestrationError",
     "OrchestrationMissingReferenceError",
@@ -192,6 +215,7 @@ __all__ = [
     "OrchestrationReferences",
     "Orchestrator",
     "ProgramState",
+    "ReconciliationRecord",
     "ReviewContradictionError",
     "ReviewDecision",
     "ReviewFinding",

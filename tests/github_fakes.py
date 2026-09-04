@@ -131,6 +131,7 @@ def pull_request(
     draft: bool = False,
     merged: bool = False,
     mergeable_state: str | None = "clean",
+    merge_commit_sha: str | None = None,
 ) -> dict[str, object]:
     return {
         "number": number,
@@ -141,6 +142,7 @@ def pull_request(
         "draft": draft,
         "merged": merged,
         "mergeable_state": mergeable_state,
+        "merge_commit_sha": merge_commit_sha,
     }
 
 
