@@ -682,7 +682,7 @@ class HandoffTests(LoopFixtureMixin):
         )
         with self.assertRaises(ReviewContradictionError) as raised:
             loop.evaluate(repo, _refs(worker_session=forged))
-        self.assertIn("FZ-CTRL007-002", str(raised.exception))
+        self.assertIn("FZ-CTRL007-002/003", str(raised.exception))
         self.assertIn("not sealed", str(raised.exception))
         self.assertTrue(all(call[0] == "GET" for call in self._transport(loop).calls))
 
@@ -712,7 +712,7 @@ class HandoffTests(LoopFixtureMixin):
         )
         with self.assertRaises(ReviewContradictionError) as raised:
             loop.evaluate(repo, _refs(worker_session=transplanted))
-        self.assertIn("FZ-CTRL007-002", str(raised.exception))
+        self.assertIn("FZ-CTRL007-002/003", str(raised.exception))
 
     def test_tampered_issued_evidence_cannot_produce_handoff(self) -> None:
         """Issued evidence whose fields were altered after issuance
@@ -727,7 +727,7 @@ class HandoffTests(LoopFixtureMixin):
         )
         with self.assertRaises(ReviewContradictionError) as raised:
             loop.evaluate(repo, _refs(worker_session=tampered))
-        self.assertIn("FZ-CTRL007-002", str(raised.exception))
+        self.assertIn("FZ-CTRL007-002/003", str(raised.exception))
 
     def test_issued_evidence_verifies_and_produces_the_handoff(self) -> None:
         """The positive boundary (Architect-required): evidence actually

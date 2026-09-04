@@ -506,23 +506,47 @@ class IssuedEvidenceTests(unittest.TestCase):
         self.assertIsInstance(session, ZaiIssuedWorkerSession)
         self.assertTrue(session.is_adapter_issued())
 
-    def test_issuance_is_deterministic_and_no_source_level_secret_exists(self) -> None:
-        """Restart/in-process safety: equivalent reports seal to equal
-        evidence, verification is a pure local check, and the module
-        exposes no key, MAC function, or issuance callable that a caller
-        could use to reproduce a proof from repository source
-        (FZ-CTRL007-002)."""
+    def test_issuance_is_deterministic_and_no_mint_is_reachable(self) -> None:
+        """FZ-CTRL007-003: equivalent reports seal to equal evidence
+        (determinism, value-based proof equality), verification is a
+        pure local check, and — the core of the finding — repository
+        callers cannot reach ANY issuance/mint operation: no module
+        attribute creates evidence from ordinary fields or a session
+        value, and no source-level key/MAC material exists."""
         first = _normalize_session(worker_session(), "a")
         second = _normalize_session(worker_session(), "b")
         self.assertTrue(first.is_adapter_issued())
         self.assertTrue(second.is_adapter_issued())
         self.assertEqual(first, second)
         self.assertEqual(hash(first), hash(second))
-        public_names = {name for name in vars(controller_zai_module) if not name.startswith("__")}
-        for forbidden in ("_ISSUANCE_KEY", "_issuance_proof", "_FIELD_SEPARATOR"):
-            self.assertNotIn(forbidden, public_names)
+        module_names = set(vars(controller_zai_module))
+        for unreachable in (
+            "_seal_evidence",
+            "_issue",
+            "_SessionProof",
+            "_ISSUANCE_KEY",
+            "_issuance_proof",
+            "_FIELD_SEPARATOR",
+            "seal",
+            "issue",
+        ):
+            self.assertNotIn(unreachable, module_names, unreachable)
         self.assertNotIn("hmac", vars(controller_zai_module))
         self.assertNotIn("hashlib", vars(controller_zai_module))
+
+    def test_the_designated_normalization_path_is_not_a_mint_for_raw_fields(self) -> None:
+        """FZ-CTRL007-003: the one issuance path (the provider-response
+        normalizer) demands a full well-formed provider report — a raw
+        ordinary-field tuple (or any non-mapping input) is refused before
+        any evidence is created, so the path cannot be abused as a
+        fields-to-evidence mint."""
+        with self.assertRaises(ZaiMalformedResponseError):
+            _normalize_session(
+                (SESSION_ID, REPO, WORK_ITEM, BASE_SHA, None, None, "active", "t"),
+                "forged raw-field mint",
+            )
+        with self.assertRaises(ZaiMalformedResponseError):
+            _normalize_session(None, "forged null mint")
 
     def test_forged_proof_fails_local_verification(self) -> None:
         """A caller-constructed value of the issued type with every

@@ -654,15 +654,17 @@ class ArchitectReviewLoop:
         sealed when it normalized the provider response
         (:class:`ZaiIssuedWorkerSession`), and its construction-path
         proof must verify — a pure local check over the carried value
-        with no source-reproducible key material involved. A structurally exact value
-        built through the public ``ZaiWorkerSession`` constructor is not
-        evidence of any provider-observed execution; a caller-constructed
-        value of the issued type — including one carrying a genuine
-        proof object transplanted onto different fields — fails
-        verification, because the proof binds the exact fields it was
-        sealed for. The loop never re-proves provenance by invoking
-        Z.ai: live provider re-proof/resume is the consuming worker
-        boundary's responsibility.
+        with no source-reproducible key material involved and no
+        reachable mint operation anywhere (FZ-CTRL007-003). A
+        structurally exact value built through the public
+        ``ZaiWorkerSession`` constructor is not evidence of any
+        provider-observed execution; a caller-constructed value of the
+        issued type — including one carrying a genuine proof object
+        transplanted onto different fields — fails verification,
+        because the proof binds the exact fields it was sealed for.
+        The loop never re-proves provenance by invoking Z.ai: live
+        provider re-proof/resume is the consuming worker boundary's
+        responsibility.
         """
         if not isinstance(session, ZaiIssuedWorkerSession):
             raise ReviewContradictionError(
@@ -679,7 +681,7 @@ class ArchitectReviewLoop:
                 "adapter's provider-response normalization path for exactly "
                 "these fields: a caller-constructed value (or a proof "
                 "transplanted onto different fields) does not establish "
-                "adapter issuance (FZ-CTRL007-002)"
+                "adapter issuance (FZ-CTRL007-002/003)"
             )
         return session
 

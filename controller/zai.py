@@ -41,22 +41,26 @@ Layering and doctrine (mirroring the CTRL-003 GitHub adapter):
   session identity, context mismatch, contradiction, policy violation — is
   a typed :class:`controller.errors.ZaiAdapterError` subclass. No silent
   fallback, guessed identity, or fabricated success.
-* **Adapter-issued evidence (FZ-CTRL007-001/002).** ``start_worker`` /
+* **Adapter-issued evidence (FZ-CTRL007-001/002/003).** ``start_worker`` /
   ``resume_worker`` return :class:`ZaiIssuedWorkerSession` — the ordinary
-  frozen ``ZaiWorkerSession`` value sealed at the response-normalization
-  boundary with opaque construction-path evidence minted by a
-  process-local issuance boundary (a runtime capability captured in a
-  closure: not repository source material, not importable, not stored on
-  issued values). There is no public issuance function and no
-  source-level secret: only this module normalizing a provider response
-  can seal evidence, the proof binds exactly the ordinary fields (a
-  transplanted proof fails), and any boundary can verify locally
-  (``is_adapter_issued()``, pure computation, zero provider I/O). A
-  structurally identical hand-constructed session value — or a
-  caller-constructed value of the issued type — is not evidence and
-  fails such verification. This is not a second session model, registry,
-  cache, database, or persistence: it is the same frozen value type
-  carrying proof of the path that constructed it.
+  frozen ``ZaiWorkerSession`` value sealed by the provider-response
+  normalization path (``_normalize_session``, built by a process-local
+  closure) with opaque construction-path evidence: a runtime capability
+  captured in that closure — not repository source material, not a
+  module attribute, not importable, not stored on issued values. There
+  is no public issuance function, no source-level secret, and **no
+  reachable mint operation at all** (FZ-CTRL007-003): no module
+  attribute turns ordinary fields or a session value into evidence —
+  the mint exists solely inside the designated normalization path,
+  which demands a full well-formed provider report. The proof binds
+  exactly the ordinary fields (a transplanted proof fails), and any
+  boundary can verify locally (``is_adapter_issued()``, pure
+  computation, zero provider I/O — verification is available to
+  consumers; minting is not). A structurally identical hand-constructed
+  session value — or a caller-constructed value of the issued type — is
+  not evidence and fails such verification. This is not a second
+  session model, registry, cache, database, or persistence: it is the
+  same frozen value type carrying proof of the path that constructed it.
 
 No orchestration loop, scheduling, retry engine, or persistence exists here
 (CTRL-005+ non-goals). The session identifier returned by the provider is
@@ -174,104 +178,6 @@ class ZaiWorkerContext:
     review_findings: tuple[str, ...] = ()
 
 
-#: The ordinary binding fields of a worker session, in canonical order —
-#: the exact tuple the issuance seal binds (FZ-CTRL007-001/002).
-_ORDINARY_SESSION_FIELDS: Final[tuple[str, ...]] = (
-    "session_id",
-    "repository",
-    "work_item",
-    "base_sha",
-    "pr_number",
-    "head_sha",
-    "status",
-    "updated_at",
-)
-
-
-def _ordinary_field_values(session: ZaiWorkerSession) -> tuple[object, ...]:
-    """The canonical ordinary-field tuple of a session value."""
-    return (
-        session.session_id,
-        session.repository,
-        session.work_item,
-        session.base_sha,
-        session.pr_number,
-        session.head_sha,
-        session.status,
-        session.updated_at,
-    )
-
-
-def _build_issuance_boundary() -> tuple[
-    Callable[[tuple[object, ...]], object],
-    Callable[[object, tuple[object, ...]], bool],
-]:
-    """Create the process-local session-evidence issuance boundary
-    (FZ-CTRL007-001/002).
-
-    Returns ``(seal, verify)``. ``seal(fields)`` mints the opaque proof
-    object carried by :class:`ZaiIssuedWorkerSession`; ``verify(proof,
-    fields)`` accepts exactly the proofs this boundary sealed for exactly
-    those fields.
-
-    Why this is genuine construction-path evidence and not a
-    source-reproducible scheme: the capability is a fresh ``object()``
-    created at import time inside this closure — it exists only at
-    runtime, is not repository source material, is not a module
-    attribute, is not importable, and is never stored on issued
-    instances. The proof class likewise exists only inside this closure.
-    No amount of repository-source knowledge lets a caller compute or
-    name either one, so the only way to obtain a verifying proof for a
-    chosen session is this module's ``seal`` — reachable solely from
-    :func:`_normalize_session`, the CTRL-004 provider-response
-    normalization path. The proof also binds the exact ordinary fields,
-    so a genuine proof transplanted onto different fields fails
-    verification. This is not a registry, cache, database, or persistence:
-    the closure holds one capability object and one class, creates
-    nothing per issuance, and accumulates no state; issued evidence is
-    in-process by construction (nothing persists sessions — persistence
-    is forbidden — and a restart re-issues through the adapter, the only
-    issuance path). Verification is a pure local computation with zero
-    provider I/O.
-    """
-    capability = object()
-
-    class _SessionProof:
-        """Opaque construction-path evidence binding the exact fields."""
-
-        __slots__ = ("_fields",)
-
-        def __init__(self, cap: object, fields: tuple[object, ...]) -> None:
-            if cap is not capability:
-                raise ZaiPolicyViolationError(
-                    "worker-session evidence can only be sealed by the "
-                    "CTRL-004 adapter's provider-response normalization path; "
-                    "the issuance capability is never shared"
-                )
-            self._fields = fields
-
-        def __eq__(self, other: object) -> bool:
-            return isinstance(other, _SessionProof) and other._fields == self._fields
-
-        def __hash__(self) -> int:
-            return hash((_SessionProof, self._fields))
-
-    def seal(fields: tuple[object, ...]) -> object:
-        return _SessionProof(capability, fields)
-
-    def verify(proof: object, fields: tuple[object, ...]) -> bool:
-        return isinstance(proof, _SessionProof) and proof._fields == fields
-
-    return seal, verify
-
-
-#: The process-local issuance boundary: seal is reachable only from
-#: ``_normalize_session`` (the adapter's provider-response normalization
-#: path); verify is exposed to consuming boundaries through
-#: ``ZaiIssuedWorkerSession.is_adapter_issued``.
-_seal_evidence, _verify_evidence = _build_issuance_boundary()
-
-
 @dataclass(frozen=True)
 class ZaiWorkerSession:
     """A normalized, non-authoritative worker-execution reference.
@@ -286,7 +192,7 @@ class ZaiWorkerSession:
     This is the ordinary public value form. Evidence of *issuance* — the
     proof that the value came from the adapter normalizing a provider
     response — is carried only by :class:`ZaiIssuedWorkerSession`, which
-    only the adapter constructs (FZ-CTRL007-001/002).
+    only the adapter's normalization path creates (FZ-CTRL007-001/002/003).
     """
 
     session_id: str
@@ -299,24 +205,42 @@ class ZaiWorkerSession:
     updated_at: str
 
 
+def _ordinary_field_values(session: ZaiWorkerSession) -> tuple[object, ...]:
+    """The canonical ordinary-field tuple of a session value — the exact
+    tuple the issuance seal binds (FZ-CTRL007-001/002/003)."""
+    return (
+        session.session_id,
+        session.repository,
+        session.work_item,
+        session.base_sha,
+        session.pr_number,
+        session.head_sha,
+        session.status,
+        session.updated_at,
+    )
+
+
 @dataclass(frozen=True)
 class ZaiIssuedWorkerSession(ZaiWorkerSession):
-    """Adapter-issued worker-session evidence (FZ-CTRL007-001/002).
+    """Adapter-issued worker-session evidence (FZ-CTRL007-001/002/003).
 
-    Constructed only inside this module, at the provider-response
-    normalization boundary (:func:`_normalize_session`): the ordinary
-    session fields plus an opaque proof object minted by the process-local
-    issuance boundary, which binds exactly those fields. The public
-    constructor cannot produce a verifying value: ``_proof`` must be the
-    very proof object the boundary sealed for exactly these ordinary
-    fields — an object that exists only at runtime inside the module's
-    issuance closure, is not reproducible from repository source, is not
-    importable, and is not stored anywhere a caller can name it. A
-    hand-constructed value of this type (or a structurally identical
-    ``ZaiWorkerSession``) therefore fails :meth:`is_adapter_issued`, as
-    does a genuine proof transplanted onto different fields. This is not
-    a second session model: it is the same frozen value type carrying
-    its construction-path evidence.
+    Created only by the adapter's provider-response normalization path
+    (:func:`_normalize_session`): the ordinary session fields plus an
+    opaque proof object minted by the process-local issuance boundary,
+    which binds exactly those fields. The public constructor cannot
+    produce a verifying value: ``_proof`` must be the very proof object
+    the boundary sealed for exactly these ordinary fields — an object
+    that exists only at runtime inside the normalization closure, is
+    not reproducible from repository source, is not importable, and is
+    not stored anywhere a caller can name it. There is also **no
+    reachable mint operation**: no module attribute turns ordinary
+    fields (or a session value) into evidence (FZ-CTRL007-003) — the
+    seal exists solely inside the closure of the designated
+    normalization path. A hand-constructed value of this type (or a
+    structurally identical ``ZaiWorkerSession``) therefore fails
+    :meth:`is_adapter_issued`, as does a genuine proof transplanted
+    onto different fields. This is not a second session model: it is
+    the same frozen value type carrying its construction-path evidence.
     """
 
     _proof: object
@@ -324,29 +248,122 @@ class ZaiIssuedWorkerSession(ZaiWorkerSession):
     def is_adapter_issued(self) -> bool:
         """True only when this exact value was sealed by the CTRL-004
         adapter's provider-response normalization path — a pure local
-        check (zero provider I/O) over the carried proof and fields."""
-        return _verify_evidence(self._proof, _ordinary_field_values(self))
+        check (zero provider I/O) over the carried proof and fields.
+        Verification is deliberately available to consumers; the mint
+        is not (FZ-CTRL007-003)."""
+        return _proof_matches(self._proof, _ordinary_field_values(self))
 
 
-def _issue(session: ZaiWorkerSession) -> ZaiIssuedWorkerSession:
-    """Seal a normalized provider report as adapter-issued evidence.
+def _make_normalizer_with_issuance() -> tuple[
+    Callable[[object, str], ZaiIssuedWorkerSession],
+    Callable[[object, tuple[object, ...]], bool],
+]:
+    """Build the adapter's provider-response normalizer with its sealed
+    issuance boundary (FZ-CTRL007-001/002/003).
 
-    The only issuance path: module-private, called from
-    :func:`_normalize_session` (provider-response normalization). Not
-    exported, not part of any public surface; the proof it mints binds
-    exactly these ordinary fields.
+    Returns ``(normalize, verify)``:
+
+    * ``normalize(data, context)`` IS the provider-response
+      normalization path — the one and only place worker-session
+      evidence is created. It strictly validates a provider report
+      and constructs :class:`ZaiIssuedWorkerSession` with the proof
+      minted right here, bound to exactly the ordinary fields.
+    * ``verify(proof, fields)`` is the pure local check exposed to
+      consuming boundaries through
+      :meth:`ZaiIssuedWorkerSession.is_adapter_issued` — a caller may
+      verify carried evidence but can never mint new evidence
+      (FZ-CTRL007-003 action 2).
+
+    The mint — the runtime capability (a fresh ``object()`` created at
+    import inside this closure) and the proof class — exists only
+    inside this closure and is returned to no one. It is not
+    repository source material, not a module attribute, not
+    importable, and not stored on issued values; merely reaching the
+    module grants no path to it. No module-level callable accepts
+    ordinary session fields and produces evidence — the previous
+    ``_seal_evidence``/``_issue`` module attributes are gone, and the
+    only remaining path demands a full well-formed provider report.
+    The proof also binds the exact ordinary fields, so a genuine proof
+    transplanted onto different fields fails verification.
+
+    This is not a registry, cache, database, or persistence: the
+    closure holds one capability object and one class, creates
+    nothing per issuance beyond the value itself, and accumulates no
+    state. Issued evidence is in-process by construction (nothing
+    persists sessions — persistence is forbidden — and a restart
+    re-issues through the adapter, the only issuance path).
     """
-    return ZaiIssuedWorkerSession(
-        session_id=session.session_id,
-        repository=session.repository,
-        work_item=session.work_item,
-        base_sha=session.base_sha,
-        pr_number=session.pr_number,
-        head_sha=session.head_sha,
-        status=session.status,
-        updated_at=session.updated_at,
-        _proof=_seal_evidence(_ordinary_field_values(session)),
-    )
+    capability = object()
+
+    class _SessionProof:
+        """Opaque construction-path evidence binding the exact fields."""
+
+        __slots__ = ("_fields",)
+
+        def __init__(self, cap: object, fields: tuple[object, ...]) -> None:
+            if cap is not capability:
+                raise ZaiPolicyViolationError(
+                    "worker-session evidence can only be sealed inside the "
+                    "CTRL-004 adapter's provider-response normalization path; "
+                    "the issuance capability is never shared"
+                )
+            self._fields = fields
+
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, _SessionProof) and other._fields == self._fields
+
+        def __hash__(self) -> int:
+            return hash((_SessionProof, self._fields))
+
+    def normalize(data: object, context: str) -> ZaiIssuedWorkerSession:
+        """Normalize one provider worker-execution report into typed
+        adapter-issued evidence (strict, deterministic, fail-closed)."""
+        mapping = _as_mapping(data, context)
+        session_id = _require_str(mapping, "session_id", context)
+        if not _SESSION_ID_PATTERN.fullmatch(session_id):
+            raise ZaiMalformedResponseError(
+                f"{context}: session identifier {session_id!r} is malformed"
+            )
+        repository = _require_str(mapping, "repository", context)
+        work_item = _require_str(mapping, "work_item", context)
+        base_sha = _require_str(mapping, "base_sha", context)
+        pr_number = _require_optional_int(mapping, "pr_number", context)
+        head_sha = _require_optional_str(mapping, "head_sha", context)
+        status = _require_str(mapping, "status", context)
+        updated_at = _require_str(mapping, "updated_at", context)
+        fields: tuple[object, ...] = (
+            session_id,
+            repository,
+            work_item,
+            base_sha,
+            pr_number,
+            head_sha,
+            status,
+            updated_at,
+        )
+        return ZaiIssuedWorkerSession(
+            session_id=session_id,
+            repository=repository,
+            work_item=work_item,
+            base_sha=base_sha,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            status=status,
+            updated_at=updated_at,
+            _proof=_SessionProof(capability, fields),
+        )
+
+    def verify(proof: object, fields: tuple[object, ...]) -> bool:
+        return isinstance(proof, _SessionProof) and proof._fields == fields
+
+    return normalize, verify
+
+
+#: The adapter's provider-response normalization path — the ONLY issuance
+#: path (FZ-CTRL007-003): the mint exists solely inside its closure; no
+#: module attribute can create evidence. Verification is exposed to
+#: consumers through ``ZaiIssuedWorkerSession.is_adapter_issued``.
+_normalize_session, _proof_matches = _make_normalizer_with_issuance()
 
 
 # ---------------------------------------------------------------------------
@@ -530,37 +547,6 @@ def _require_optional_int(data: Mapping[str, object], key: str, context: str) ->
     if isinstance(value, bool) or not isinstance(value, int):
         raise ZaiMalformedResponseError(f"{context}: '{key}' must be an integer or null")
     return value
-
-
-def _normalize_session(data: object, context: str) -> ZaiIssuedWorkerSession:
-    """Normalize a provider worker-execution report into typed evidence.
-
-    Deterministic and strict: missing or mistyped fields (including a
-    malformed session identifier) fail closed; the status and timestamp
-    are preserved verbatim (never clock-derived). This normalization is
-    the adapter-issued evidence boundary (FZ-CTRL007-001/002): the
-    returned value carries its construction-path proof, so consuming
-    boundaries can verify provenance locally without any provider I/O
-    and without any source-level secret.
-    """
-    mapping = _as_mapping(data, context)
-    session_id = _require_str(mapping, "session_id", context)
-    if not _SESSION_ID_PATTERN.fullmatch(session_id):
-        raise ZaiMalformedResponseError(
-            f"{context}: session identifier {session_id!r} is malformed"
-        )
-    return _issue(
-        ZaiWorkerSession(
-            session_id=_require_str(mapping, "session_id", context),
-            repository=_require_str(mapping, "repository", context),
-            work_item=_require_str(mapping, "work_item", context),
-            base_sha=_require_str(mapping, "base_sha", context),
-            pr_number=_require_optional_int(mapping, "pr_number", context),
-            head_sha=_require_optional_str(mapping, "head_sha", context),
-            status=_require_str(mapping, "status", context),
-            updated_at=_require_str(mapping, "updated_at", context),
-        )
-    )
 
 
 def _require_session_binding(
