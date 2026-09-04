@@ -85,6 +85,14 @@ from controller.transitions import (
     dispatch,
     target_state,
 )
+from controller.zai import DEFAULT_API_ROOT as ZAI_DEFAULT_API_ROOT
+from controller.zai import (
+    UrllibZaiTransport,
+    ZaiAdapter,
+    ZaiTransport,
+    ZaiWorkerContext,
+    ZaiWorkerSession,
+)
 
 __version__ = "0.1.0"
 
@@ -136,8 +144,25 @@ __all__ = [
     "TERMINAL_EXCEPTION_STATES",
     "TRANSITIONS",
     "UrllibGithubTransport",
+    "UrllibZaiTransport",
     "WORK_ITEMS_DIR",
     "WorkItemIdentity",
+    "ZAI_DEFAULT_API_ROOT",
+    "ZaiAdapter",
+    "ZaiAdapterError",
+    "ZaiAuthError",
+    "ZaiConfigurationError",
+    "ZaiContextMismatchError",
+    "ZaiContradictionError",
+    "ZaiMalformedResponseError",
+    "ZaiMissingSessionError",
+    "ZaiPolicyViolationError",
+    "ZaiRateLimitError",
+    "ZaiRejectedRequestError",
+    "ZaiTransportError",
+    "ZaiTransport",
+    "ZaiWorkerContext",
+    "ZaiWorkerSession",
     "allowed_commands",
     "dispatch",
     "load_program_state",
