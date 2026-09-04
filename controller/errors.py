@@ -346,3 +346,69 @@ class EvidenceMissingReferenceError(EvidenceGateError):
     correlation requires one and it is absent, the evaluation fails
     closed rather than guessing the correlation.
     """
+
+
+# ---------------------------------------------------------------------------
+# Review loop errors (CTRL-007) — typed fail-closed review evidence boundary
+# ---------------------------------------------------------------------------
+
+
+class ReviewLoopError(ControllerError):
+    """Base class for every Architect-review-loop failure (CTRL-007).
+
+    The loop transports the Architect's observed decisions and durable
+    machine-readable review packets; it never authors a decision,
+    executes a resume, or merges. Every failure — a lifecycle position
+    outside the loop's scope, an authority/remote/evidence
+    contradiction, a missing carried reference, or a missing,
+    ambiguous, or malformed machine-readable packet — fails closed
+    with a typed error. No guessed decisions, no dropped findings.
+    """
+
+
+class ReviewLoopPositionError(ReviewLoopError):
+    """The loop was evaluated at a lifecycle position it does not own.
+
+    The review loop applies exactly at the Architect decision positions
+    (REVIEW_PENDING and CHANGES_REQUESTED) of the frozen lifecycle.
+    Evaluating it at any other position is a governance misuse — the
+    position belongs to another stage — and fails closed before any
+    remote observation.
+    """
+
+
+class ReviewContradictionError(ReviewLoopError):
+    """Repository authority and observed review evidence contradict.
+
+    For example: machine state records a review position while no
+    governed pull request is observed; the CHANGES_REQUESTED position
+    no longer matches the latest architect review; a packet block
+    declares a foreign work item or PR; or the carried worker session
+    is bound to a foreign repository, work item, base, or drifted PR
+    identity. Repository authority outranks remote observation; the
+    evaluation stops for governance attention.
+    """
+
+
+class ReviewMissingReferenceError(ReviewLoopError):
+    """A carried reference required by the review loop is absent.
+
+    The loop keeps no runtime state (AC7): the governed branch,
+    dispatch base, architect reviewer identity, and (for the resume
+    handoff) the typed worker session are caller-carried inputs
+    cross-validated against authority. When the loop requires one and
+    it is absent, the evaluation fails closed rather than guessing.
+    """
+
+
+class ReviewPacketError(ReviewLoopError):
+    """The machine-readable review packet is missing, ambiguous, or
+    malformed.
+
+    The Architect's REQUEST_CHANGES packet must match the frozen
+    grammar instantiated from ``spec/governance/review-protocol.md``
+    (exact keys, order, indentation, and vocabularies), carry at least
+    one finding, and match the observed evidence exactly. A packet
+    that does not exist, matches twice, or deviates from the grammar
+    fails closed — findings are never guessed, defaulted, or repaired.
+    """
