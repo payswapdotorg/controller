@@ -6,23 +6,13 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
-- **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `COMPLETE`)
-- **PR:** #9 — https://github.com/pectoraux/controller/pull/9 (merged; CTRL-004 definition/freeze)
-- **implementation merge evidence:** PR #7 merged at
-  `7cc340375dcd9768d986b1245303d7006f54fbf1` (base
-  `8171bf46b8f29b4e894791a7437251a64226678c`, including FZ-CTRL003-001/002/003
-  and FZ-CTRL003-004/004A fixes); post-merge reconciliation PR #8 merged at
-  `10896631596999ebef0f4e8de1d315c69b04fe0e`
-- **last completed architect action:** CTRL-004 Z.ai adapter Work Order
-  defined and frozen in PR #9; machine state remains CTRL-003 COMPLETE
-- **last completed worker action:** FZ-CTRL003-004A resolved and delivered;
-  PR #7 approved/merged; reconciliation PR #8 prepared and accepted
-- **last update (UTC):** 2026-09-04T14:35:00Z
-- **next planned item:** CTRL-004 — Z.ai adapter (`spec/work-items/CTRL-004.md`, frozen `READY` contract)
-- **next step:** Architect activation change must set machine state to
-  `CTRL-004` / `READY` and repin the real-repository authority/CLI/domain/
-  restart tests before any Z.ai implementation dispatch
+- **current state:** `DISPATCHED`
+- **active Work Order:** CTRL-004 — Z.ai adapter (`spec/work-items/CTRL-004.md`, `READY`)
+- **activation:** merged at `7a6ffafc9b4b5405c278ce90a1b2647052e668e1`
+- **worker handoff:** durable dispatch recorded on PR #10 comment `5541668064`
+- **last completed architect action:** CTRL-004 activated as the sole READY item
+- **last update (UTC):** 2026-09-04T14:50:00Z
+- **next step:** Z.ai verifies current `main`, repairs the remaining real-repository domain pin, implements the frozen CTRL-004 Work Order, validates, and returns one implementation PR to `WAITING_FOR_ARCHITECT`
 
 ## Maintenance protocol
 
