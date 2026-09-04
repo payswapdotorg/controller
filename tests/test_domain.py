@@ -492,3 +492,57 @@ class ForgedEventTests(unittest.TestCase):
         self.assertIn("APPROVE", message)
         self.assertIn("READY", message)
         self.assertIn("frozen transition table", message)
+
+    def test_every_table_event_passes_semantic_validation(self) -> None:
+        """Positive sweep: every (state, command, successor) in the frozen
+        table deserializes and validates without error."""
+        from controller.transitions import TRANSITIONS
+
+        for (from_state, command), to_state in TRANSITIONS.items():
+            event = DomainEvent.deserialize(
+                {
+                    "workItem": "CTRL-002",
+                    "command": command.value,
+                    "fromState": from_state.value,
+                    "toState": to_state.value,
+                }
+            )
+            self.assertIs(event.to_state, to_state)
+
+
+class DomainCLITests(unittest.TestCase):
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "controller", *args],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            timeout=60,
+            check=False,
+        )
+
+    def test_domain_real_repository_succeeds(self) -> None:
+        result = self._run("domain", "--repo", str(REPO_ROOT))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("domain model: OK", result.stdout)
+        self.assertIn("active work item: CTRL-005", result.stdout)
+        self.assertIn("lifecycle state: READY", result.stdout)
+        self.assertIn("dispatch eligibility: ELIGIBLE", result.stdout)
+
+    def test_domain_contradictory_repository_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(
+                Path(tmp), status="READY", work_item="CTRL-002", work_item_status="DISPATCHED"
+            )
+            result = self._run("domain", "--repo", str(root))
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("FAIL-CLOSED", result.stderr)
+
+    def test_domain_output_is_deterministic(self) -> None:
+        first = self._run("domain", "--repo", str(REPO_ROOT))
+        second = self._run("domain", "--repo", str(REPO_ROOT))
+        self.assertEqual(first.stdout, second.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
