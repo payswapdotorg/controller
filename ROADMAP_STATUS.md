@@ -6,25 +6,25 @@
 > disagrees with repository authority, repository authority wins and this
 > file is wrong. It never claims an action that has not actually occurred.
 
-- **current state:** `WAITING_FOR_ARCHITECT`
+- **current state:** `CHANGES_REQUESTED`
 - **active Work Order:** CTRL-003 — GitHub adapter (`spec/work-items/CTRL-003.md`, `READY`)
 - **PR:** #7 — https://github.com/pectoraux/controller/pull/7 (implementation)
-- **head SHA awaiting review:** `7ed812b1f3e6d0f5630692eabfbaa700d2b20d18`
+- **head SHA under review:** `0963abf0dc3153f92ef0d489b6c42b3335ec3e1b`
   (CTRL-003 implementation + FZ-CTRL003-001/002/003/004 fixes; the branch tip
   may additionally advance with status-dashboard-only commits, which do not
   alter the implementation)
-- **last completed worker action:** FZ-CTRL003-004 resolved —
-  `MergeAuthorization` is now an opaque non-forgeable capability issued only
-  by `authorize_merge` (module-private `_IssuanceProof` bound to the issued
-  field values; construction and `merge_pull_request` both fail closed with
-  `GithubAuthorizationForgedError` before any remote mutation; structural
-  AST tests prove the single merge path is gated); full validation green
-  (209/209 tests, strict mypy, ruff, CLI, guard, forbidden-surface audit
-  PASS)
-- **ARCHITECT ACTION: REVIEW REQUIRED**
-- **last update (UTC):** 2026-09-04T13:02:50Z
-- **next step:** the human operator should say `go` to invoke the Architect
-  review cycle for PR #7 (review iteration 3)
+- **outstanding Architect finding:** FZ-CTRL003-004A (HIGH, review iteration 3) —
+  the module-private `_IssuanceProof` remains importable, so a caller can
+  construct a valid-looking proof and pass it into the public
+  `MergeAuthorization` constructor; required resolution (Architect-accepted
+  path 2): `merge_pull_request` must independently re-establish the complete
+  merge-policy proof before the remote mutation
+- **last completed worker action:** review iteration 3 detected by the resident
+  monitor loop; entering the fix cycle for FZ-CTRL003-004A
+- **last update (UTC):** 2026-09-04T13:33:00Z
+- **next step:** implement FZ-CTRL003-004A on this same PR, rerun the full
+  validation suite, push, update the PR transcript, return to
+  `WAITING_FOR_ARCHITECT`
 
 ## Maintenance protocol
 
