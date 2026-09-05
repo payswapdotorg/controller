@@ -428,6 +428,7 @@ export function fakeZaiPage({
   selectedModel = "GLM-5.3-Flash",
   modelOpen = false,
   agent = { present: false, active: false },
+  sidebar = "expanded",
   stop = { visible: false },
   generates = true,
   popupOnSend = false,
@@ -445,19 +446,36 @@ export function fakeZaiPage({
     selectedModel,
     modelOpen,
     agent,
+    sidebar,
     stop,
     generates,
     popupOnSend,
     popupText,
   };
+
+  /**
+   * The LIVE-OBSERVED sidebar mode toggle (2026-09-06, real
+   * https://chat.z.ai surface): exactly two <button> pills — Chat
+   * first, Agent second — both ALWAYS carrying data-active
+   * ("true"|"false"), no id, no aria-label. The expanded sidebar
+   * renders the pill labels; the collapsed sidebar renders
+   * icon-only pills (empty text). Clicking the Agent pill switches
+   * the provider app into Agent mode.
+   */
+  function modePills() {
+    if (!state.agent.present || !state.authenticated) {
+      return [];
+    }
+    const label = (text) => (state.sidebar === "collapsed" ? "" : text);
+    return [
+      { text: label("Chat"), dataActive: !state.agent.active, isChatPill: true, disabled: false },
+      { text: label("Agent"), dataActive: state.agent.active, isAgentPill: true, disabled: false },
+    ];
+  }
+
   const defaultButtons = () =>
     state.authenticated
-      ? [
-          { text: "New Chat", ariaLabel: "New Chat", disabled: false, active: false },
-          ...(state.agent.present
-            ? [{ text: "Agent", ariaLabel: "Agent", disabled: false, active: state.agent.active }]
-            : []),
-        ]
+      ? [...modePills(), { text: "New Chat", ariaLabel: "New Chat", disabled: false, active: false }]
       : [
           { text: "Sign in", ariaLabel: null, disabled: false, active: false },
           { text: "Sign in", ariaLabel: null, disabled: false, active: false },
@@ -546,7 +564,7 @@ export function fakeZaiPage({
         if (probe.selector === 'button[aria-label="model-item"]') {
           return { ok: true, fact: { texts: state.modelOpen ? state.modelOptions : [] } };
         }
-        return { ok: true, fact: { texts: list.map(String) } };
+        return { ok: true, fact: { texts: list.map((el) => textOf(el)) } };
       }
       case "visible":
         return { ok: true, fact: { visible: count(probe.selector) > 0, count: count(probe.selector) } };
@@ -598,12 +616,14 @@ export function fakeZaiPage({
     if (selector === '[role="alert"]') {
       return state.alert ? [{ text: state.alert.text }] : [];
     }
-    if (selector === 'button[aria-label="Agent"]') {
-      return state.agent.present && state.authenticated ? [agentButton()] : [];
+    if (selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type") {
+      return modePills().filter((pill) => pill.isAgentPill);
     }
-    if (selector.includes('aria-pressed="true"') || selector.includes('data-state="active"') ||
-        selector.includes('aria-selected="true"') || selector.includes('aria-current="true"')) {
-      return state.agent.present && state.agent.active ? [agentButton()] : [];
+    if (selector === '#sidebar button[data-active="true"]:not([id]):nth-of-type(2):last-of-type') {
+      return modePills().filter((pill) => pill.isAgentPill && pill.dataActive === true);
+    }
+    if (selector === "#sidebar button[data-active]:not([id])") {
+      return modePills();
     }
     if (selector.includes('aria-label="Stop"') || selector.includes('title="Stop"')) {
       return state.stop.visible ? [{ text: "Stop", isStop: true, disabled: false }] : [];
@@ -619,10 +639,6 @@ export function fakeZaiPage({
       return state.conversation.length > 0 ? [{ text: state.conversation.join("\n") }] : [];
     }
     return [];
-  }
-
-  function agentButton() {
-    return { text: "Agent", ariaLabel: "Agent", disabled: false, active: state.agent.active };
   }
 
   function resolveSelector(selector) {
@@ -664,7 +680,9 @@ export function fakeZaiPage({
       state.stop.visible = false;
       return { ok: true, clicked: true };
     }
-    if (element.ariaLabel === "Agent" || element.text === "Agent") {
+    if (element.isAgentPill) {
+      // The real pill click switches the provider app into Agent
+      // mode: the Agent pill becomes the active mode pill.
       state.agent.active = true;
       return { ok: true, clicked: true };
     }

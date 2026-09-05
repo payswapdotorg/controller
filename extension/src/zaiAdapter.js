@@ -8,7 +8,9 @@
  *   new worker session (exact governed sequence, no reordering):
  *     1. find/open/focus an authenticated chat.z.ai session;
  *     2. verify the authenticated state;
- *     3. select the `Agent` control;
+ *     3. select the `Agent` control (the sidebar mode-toggle Agent
+ *        pill — the live-observed structure is documented at
+ *        ZAI_LOCATORS.agentControl);
  *     4. select model `GLM-5.3` (provider model identifier `5.3`);
  *     5. enter the EXACT Controller-generated governed prompt verbatim;
  *     6. send;
@@ -85,15 +87,29 @@ export const ZAI_SESSION_OBSERVATIONS = Object.freeze([
  * call-to-action button texts were all observed on the live provider
  * surface (unauthenticated landing state).
  *
- * AUTHENTICATED-SURFACE-DECLARED: the Agent control and its active
- * marker, the Stop control, the conversation log and user-message
- * rows exist only behind human authentication, which is out of band
- * for this adapter. Their locators are declared here as CANDIDATE
- * lists, are verified by post-action observation at first
- * authenticated use, and fail closed (typed refusal, never a guessed
- * action) whenever they do not resolve exactly. A wrong declared
- * locator can therefore only produce a typed refusal — never an
- * incorrect provider action.
+ * AUTHENTICATED-SURFACE — the sidebar mode toggle (LIVE-OBSERVED
+ * 2026-09-06 on the real https://chat.z.ai origin, both in the live
+ * DOM and in the provider's own front-end code): the toggle is
+ * exactly two <button> pills — Chat first, Agent second — inside the
+ * #sidebar shell, rendered in BOTH the expanded sidebar (pill labels
+ * "Chat"/"Agent"; the provider's own i18n renders Agent_Mode as
+ * "Agent") and the collapsed sidebar (icon-only pills whose text is
+ * empty). Every pill ALWAYS carries a data-active attribute ("true"
+ * or the string "false"); the pills carry no id, no aria-label, and
+ * no role. Clicking the Agent pill switches the provider app into
+ * Agent mode (a new Agent-mode session). The structural candidate
+ * resolves the second-and-last button of the two-pill pair; the text
+ * scan covers the expanded labeled pills; the active marker is
+ * data-active="true" on that same pill.
+ *
+ * AUTHENTICATED-SURFACE-DECLARED: the Stop control, the conversation
+ * log and user-message rows exist only behind human authentication,
+ * which is out of band for this adapter. Their locators are declared
+ * here as CANDIDATE lists, are verified by post-action observation at
+ * first authenticated use, and fail closed (typed refusal, never a
+ * guessed action) whenever they do not resolve exactly. A wrong
+ * declared locator can therefore only produce a typed refusal —
+ * never an incorrect provider action.
  */
 const ZAI_LOCATORS = Object.freeze({
   // LIVE-OBSERVED on the real provider surface.
@@ -105,16 +121,19 @@ const ZAI_LOCATORS = Object.freeze({
   alert: '[role="alert"]',
   allButtons: "button",
   authButtonTexts: Object.freeze(["Sign in", "Log in", "Sign up"]),
-  // AUTHENTICATED-SURFACE-DECLARED candidate lists (verified at first
-  // authenticated use; resolution failure fails closed).
-  agentControl: Object.freeze(['button[aria-label="Agent"]']),
+  // AUTHENTICATED-SURFACE — the sidebar mode toggle (LIVE-OBSERVED
+  // 2026-09-06; see the provenance comment above the table). The
+  // structural candidate is the second-and-last button of the
+  // two-button mode-pill pair inside #sidebar (chat-group tab buttons
+  // are excluded by :not([id]) — they carry chat-group-tab-* ids).
+  agentControl: Object.freeze([
+    "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type",
+  ]),
   agentActive: Object.freeze([
-    'button[aria-label="Agent"][aria-pressed="true"]',
-    'button[aria-label="Agent"][data-state="active"]',
-    'button[aria-label="Agent"][aria-selected="true"]',
-    'button[aria-label="Agent"][aria-current="true"]',
+    '#sidebar button[data-active="true"]:not([id]):nth-of-type(2):last-of-type',
   ]),
   agentText: "Agent",
+  agentTextScan: "#sidebar button[data-active]:not([id])",
   stopControl: Object.freeze(['button[aria-label="Stop"]', 'button[title="Stop"]']),
   stopText: "Stop",
   conversation: Object.freeze(['[role="log"]', '[class*="conversation"]', '[class*="message-list"]', "main"]),
@@ -505,12 +524,20 @@ export function createZaiAdapter({
   }
 
   /**
-   * Step: select the Agent control. Resolution: the aria-labeled
-   * control, else the unique visible button whose exact text is
-   * "Agent". Verification: an active-state marker on the control, or
-   * (when the marker is unresolvable) the control remaining resolved
-   * on a still-composer-bearing page; anything less fails closed. No
-   * dialog is expected while preparing — any dialog at this point
+   * Step: select the Agent control — the sidebar mode-toggle Agent
+   * pill (LIVE-OBSERVED structure: two <button> pills, Chat first,
+   * Agent second, inside #sidebar; every pill always carries
+   * data-active "true"|"false"). Resolution: the structural
+   * second-of-the-pair pill, else (fallback) the unique sidebar mode
+   * pill whose exact text is "Agent" (the expanded labeled sidebar —
+   * the collapsed icon-only pills resolve structurally). Idempotence:
+   * when the Agent pill already carries data-active="true" the Agent
+   * mode is already selected and NO click is issued (clicking the
+   * pill opens a fresh Agent-mode session on the provider side).
+   * Verification: the Agent pill carries data-active="true" after
+   * the action — a click is never evidence of the mode switch; a
+   * marker that never appears fails closed (no weak acceptance).
+   * No dialog is expected while preparing — any dialog at this point
    * fails closed UNKNOWN_DIALOG.
    */
   async function selectAgent(tabId) {
@@ -524,13 +551,28 @@ export function createZaiAdapter({
       selector,
       mode: "count",
     }));
-    const facts = await readFacts(tabId, agentProbes);
+    const agentTextScanProbe = {
+      name: "agentTextScan",
+      selector: ZAI_LOCATORS.agentTextScan,
+      mode: "texts",
+    };
+    const facts = await readFacts(tabId, [
+      ...agentProbes,
+      ...agentActiveProbes,
+      agentTextScanProbe,
+    ]);
     if (!facts.ok) {
       return facts;
     }
     const dialog = classifyDialog(facts.facts, "preparing");
     if (dialog.kind !== "none") {
       return failure("UNKNOWN_DIALOG", `no dialog is expected during preparation: ${dialog.reason}`);
+    }
+    // Idempotence: the Agent pill is already the active mode pill —
+    // clicking it would navigate the provider app to a fresh
+    // Agent-mode session for nothing; the selection already holds.
+    if (agentActiveProbes.some((probe) => facts.facts[probe.name]?.count === 1)) {
+      return { ok: true, alreadyActive: true };
     }
     const agentCounts = agentProbes.map((probe) => facts.facts[probe.name]?.count ?? 0);
     const resolvedAgent = agentCounts.findIndex((count) => count === 1);
@@ -540,10 +582,10 @@ export function createZaiAdapter({
         return clicked;
       }
     } else {
-      // Text-scan fallback: the unique visible button with the exact
-      // accessible text "Agent" (clickIndex shares the texts probe's
-      // visible-match ordering).
-      const texts = facts.facts.authButtons?.texts ?? [];
+      // Text-scan fallback: the unique visible sidebar mode pill
+      // whose exact text is "Agent" (clickIndex shares this texts
+      // probe's visible-match ordering on the SAME selector).
+      const texts = facts.facts.agentTextScan?.texts ?? [];
       const hits = texts
         .map((text, index) => ({ text, index }))
         .filter((entry) => entry.text === ZAI_LOCATORS.agentText);
@@ -553,12 +595,13 @@ export function createZaiAdapter({
           `the Agent control did not resolve to exactly one element (candidate counts: ${agentCounts.join("/")}, exact-text matches: ${hits.length})`
         );
       }
-      const clicked = await clickIndex(tabId, ZAI_LOCATORS.allButtons, hits[0].index);
+      const clicked = await clickIndex(tabId, ZAI_LOCATORS.agentTextScan, hits[0].index);
       if (!clicked.ok) {
         return clicked;
       }
     }
-    // Verification: the active marker appears within the settle budget.
+    // Verification: the Agent pill becomes the active mode pill
+    // (data-active="true") within the settle budget.
     const verified = await settle(tabId, agentActiveProbes, (f) =>
       agentActiveProbes.some((probe) => (f[probe.name]?.count ?? 0) === 1)
     );
@@ -567,16 +610,15 @@ export function createZaiAdapter({
     }
     const activeMarker = agentActiveProbes.some((probe) => (verified.facts[probe.name]?.count ?? 0) === 1);
     if (!activeMarker) {
-      // The marker did not resolve: accept ONLY when the Agent control
-      // itself stays resolved and the composer remains the input
-      // surface — a control that vanished means the click was not a
-      // selection; anything ambiguous fails closed.
-      const stillResolved = agentProbes.some((probe) => (verified.facts[probe.name]?.count ?? 0) === 1);
-      const composer = verified.facts.composerVisible?.visible === true;
-      const authBack = authMarkerCount(verified.facts) > 0;
-      if (!stillResolved || !composer || authBack) {
-        return failure("AMBIGUOUS_STATE", "the Agent selection could not be verified by post-action observation");
-      }
+      // The marker is LIVE-OBSERVED ground truth, not a declared
+      // guess: a click is never evidence of the mode switch. A pill
+      // that did not become the active mode pill means the selection
+      // did not take — fail closed, never inferring success from a
+      // click (no weak "control still present" acceptance).
+      return failure(
+        "AMBIGUOUS_STATE",
+        "the Agent selection could not be verified by post-action observation (the Agent pill did not become the active mode pill)"
+      );
     }
     return { ok: true };
   }

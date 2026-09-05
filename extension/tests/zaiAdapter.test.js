@@ -220,6 +220,99 @@ test("a missing Agent control fails closed without typing or sending", async () 
   assert.deepEqual(ops, []);
 });
 
+// --------------------------------------------------------------------
+// Agent selection — the LIVE-OBSERVED sidebar mode-toggle pill
+// (focused regression coverage for the observed real-surface states:
+// the pre-correction declared locators matched NOTHING on the real
+// authenticated surface, and Start failed closed AMBIGUOUS_STATE).
+// --------------------------------------------------------------------
+
+test("the collapsed icon-only sidebar resolves the Agent pill structurally (no text anywhere)", async () => {
+  // LIVE-OBSERVED collapsed state (the real landing/authenticated
+  // collapsed sidebar): the mode pills carry icons only (empty text)
+  // — the structural candidate, never a text scan, must resolve the
+  // Agent pill.
+  const { adapter, pages } = build({ sidebar: "collapsed" });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 1);
+  const pillClick = pages[0].history().find(
+    (c) => c.op === "click" && c.selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type"
+  );
+  assert.ok(pillClick, "the structural Agent-pill selector was clicked");
+  assert.equal(pages[0].state.agent.active, true);
+});
+
+test("the expanded labeled sidebar resolves the Agent pill and verifies the active-mode marker", async () => {
+  // LIVE-OBSERVED expanded state (the operator's observed surface):
+  // the pills carry the labels "Chat"/"Agent" (the provider's own
+  // i18n renders Agent_Mode as "Agent") — the structural candidate
+  // resolves, the click flips the pill, and data-active="true" is
+  // the acceptance evidence.
+  const { adapter, pages } = build({ sidebar: "expanded" });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(pages[0].state.agent.active, true);
+  const pillClick = pages[0].history().find(
+    (c) => c.op === "click" && c.selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type"
+  );
+  assert.ok(pillClick, "the Agent pill was clicked");
+});
+
+test("Agent mode already active: no pill click is issued (idempotent preparation)", async () => {
+  // Clicking an already-active Agent pill would navigate the
+  // provider app to a fresh Agent-mode session for nothing; the
+  // marker that resolved BEFORE any click establishes the selection.
+  const { adapter, pages } = build({ agent: { present: true, active: true } });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const pillClicks = pages[0].history().filter(
+    (c) => c.op === "click" && c.selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type"
+  );
+  assert.equal(pillClicks.length, 0); // no pill click — idempotent
+  assert.equal(pages[0].state.agent.active, true);
+});
+
+test("the observed real-surface failure, reproduced: an aria-labeled Agent button without the sidebar pills fails closed", async () => {
+  // The pre-correction declared locator assumed a
+  // button[aria-label="Agent"] surface. That element does not exist
+  // on the real surface (LIVE-OBSERVED). If ONLY such a surface were
+  // present, the adapter must refuse — the typed AMBIGUOUS_STATE the
+  // operator observed — and never click an aria-labeled guess.
+  const { adapter, pages } = build({
+    agent: { present: false, active: false },
+    buttons: () => [{ text: "Agent", ariaLabel: "Agent", disabled: false, active: false }],
+  });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.match(result.error.message, /did not resolve to exactly one element/);
+  const ops = pages[0].history().filter((c) => c.op !== "probe").map((c) => c.op);
+  assert.deepEqual(ops, []); // nothing was typed or sent
+});
+
+test("a mode-pill click that never activates the Agent pill fails closed (the marker is the evidence)", async () => {
+  // The click lands but the provider never switches the mode (a
+  // provider change, a blocked handler): the data-active marker is
+  // LIVE-OBSERVED ground truth — no marker, no success, and no weak
+  // "control still present" acceptance (a click is never evidence).
+  const stuck = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "probe") {
+        state.agent.active = false; // every observation still reports Chat active
+      }
+    },
+  });
+  const result = await stuck.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.match(result.error.message, /did not become the active mode pill/);
+  const ops = stuck.pages[0].history().filter((c) => c.op !== "probe").map((c) => c.op);
+  // The bounded retry budget: one pill click per attempt (3), and
+  // nothing was ever typed or sent.
+  assert.deepEqual(ops, ["click", "click", "click"]);
+});
+
 test("a missing GLM-5.3 model option fails closed without sending", async () => {
   const { adapter, pages } = build();
   // Remove the exact GLM-5.3 option: only Flash and 5.2 remain.
@@ -285,13 +378,21 @@ test("the known popup triggers one Enter, a full preparation restart, and succee
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 2);
   assert.equal(result.submitted.popupDismissals, 1);
-  // The full preparation sequence ran twice: two agent selections, two
-  // model selections, two prompt entries, two sends, one Enter.
+  // The full preparation sequence restarted: the Agent mode was
+  // already established by the first attempt, so the restart
+  // re-observes the active pill idempotently (no second pill click —
+  // re-clicking would navigate the provider to a fresh Agent-mode
+  // session); model selection, prompt entry, and send ran twice,
+  // plus one Enter.
   const history = pages[0].history();
   const clicks = history.filter((c) => c.op === "click").length;
   const types = history.filter((c) => c.op === "type").length;
   const enters = history.filter((c) => c.op === "pressEnter").length;
-  assert.equal(clicks, 6); // (agent + model trigger + send), twice
+  const pillClicks = history.filter(
+    (c) => c.op === "click" && c.selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type"
+  ).length;
+  assert.equal(pillClicks, 1); // the Agent pill clicked exactly once
+  assert.equal(clicks, 5); // (agent pill + model trigger + send), then (model trigger + send)
   assert.equal(types, 2); // the exact prompt re-entered after restart
   assert.equal(enters, 1); // exactly one Enter per popup observation
 });

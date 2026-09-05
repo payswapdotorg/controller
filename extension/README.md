@@ -301,7 +301,10 @@ composition is CTRL-016 scope).
 
 1. find/open/focus the authenticated `chat.z.ai` tab;
 2. verify the authenticated state (fail-closed otherwise);
-3. select the `Agent` control (verified by post-action observation);
+3. select the `Agent` control — the sidebar mode-toggle Agent pill
+   (LIVE-OBSERVED structure; resolved structurally, clicked once,
+   and verified ONLY by the pill becoming the active mode pill —
+   `data-active="true"`; an already-active pill issues no click);
 4. select model `GLM-5.3` (provider model identifier `5.3`);
 5. enter the exact governed prompt **verbatim** (byte-identical
    read-back before any send — a rewritten prompt is never
@@ -358,6 +361,10 @@ landing state — verified live by the worker probe):
 | Model options | `button[aria-label="model-item"]` | `GLM-5.3-Flash` (enabled), `GLM-5.3` (auth-required), `GLM-5.2` (auth-required) |
 | Auth markers | buttons with exact text `Sign in` / `Log in` / `Sign up` | present unauthenticated |
 | Modal dialogs | `[role="dialog"], dialog` | the modal overlay containers |
+| Sidebar shell | `#sidebar` | the app sidebar root (both sidebar states) |
+| Mode toggle (both sidebar states) | `#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type` | EXACTLY ONE match — the Agent pill, second of the two-button pill pair (LIVE-OBSERVED 2026-09-06: resolves to exactly one element on the real surface) |
+| Mode-pill active marker | `#sidebar button[data-active="true"]:not([id]):nth-of-type(2):last-of-type` | zero matches while Chat is active; flips to exactly one when Agent mode activates |
+| Mode-pill pair | two `<button>` pills, Chat first, Agent second | both ALWAYS carry `data-active` (`"true"`/`"false"`); expanded sidebar renders the labels `Chat`/`Agent` (the provider's own i18n renders `Agent_Mode` as `Agent`); the collapsed sidebar renders icon-only pills (empty text); the pills have no id, no aria-label, no role; clicking the Agent pill switches the app into Agent mode |
 
 AUTHENTICATED-SURFACE-DECLARED (verified by the
 first-authenticated-use step above; fail closed when absent or
@@ -366,11 +373,23 @@ refusal, never an incorrect action):
 
 | Surface | Candidate locators |
 |---|---|
-| Agent control | `button[aria-label="Agent"]`, exact text `Agent` |
-| Agent active marker | `aria-pressed` / `data-state` / `aria-selected` / `aria-current` on the control |
 | Stop control | `button[aria-label="Stop"]`, `button[title="Stop"]`, exact text `Stop` |
 | Conversation log | `[role="log"]`, `[class*="conversation"]`, `[class*="message-list"]`, `main` |
 | User messages | `[class*="user"][class*="message"]`, `[data-role="user"]`, `[class*="user-message"]` |
+
+Agent-selection semantics (LIVE-OBSERVED 2026-09-06, after the
+2026-09-05 operator live run exposed the pre-correction declared
+locators as non-matching on the real authenticated surface): the
+adapter resolves the sidebar mode-toggle Agent pill structurally
+(the second-and-last button of the two-button `data-active` pill
+pair inside `#sidebar` — works for both the expanded labeled
+sidebar and the collapsed icon-only sidebar), falls back to the
+unique sidebar mode pill whose exact text is `Agent` (the expanded
+labeled state), and verifies the selection ONLY by the pill
+becoming the active mode pill (`data-active="true"`) — a click is
+never evidence of the mode switch, and an Agent pill that is
+already active issues no click (clicking it would open a fresh
+provider Agent-mode session for nothing).
 
 ### Known limitations
 
@@ -386,11 +405,14 @@ refusal, never an incorrect action):
   session is never re-reported as active and never silently
   re-established; the full governed sequence re-runs only after the
   in-memory registry is lost on service-worker restart.
-- The authenticated-surface locators (Agent, Stop, conversation,
-  user messages) were declared, not live-observed (human
-  authentication is out of band for the worker). They are verified
-  by the documented `ObserveZaiSession` check at first authenticated
-  use, and every one of them fails closed rather than guessing.
+- The authenticated-surface locators (Stop, conversation, user
+  messages) were declared, not live-observed (human authentication
+  is out of band for the worker). They are verified by the
+  documented `ObserveZaiSession` check at first authenticated use,
+  and every one of them fails closed rather than guessing. (The
+  sidebar mode toggle — the Agent selection path — IS live-observed
+  as of 2026-09-06, from the real origin in both sidebar states plus
+  the provider's own front-end code; see the provenance table.)
 - The adapter submits into the CURRENT conversation of the focused
   chat.z.ai tab; it does not create new chats (not part of the
   governed sequence).
