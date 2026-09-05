@@ -36,6 +36,12 @@ function build({
   dialog = null,
   alert = null,
   extraTabs = [],
+  selectedValue = null,
+  modelOptions = null,
+  modelTrigger = true,
+  modelTriggerAria = true,
+  modelIdStuck = false,
+  modelTextStuck = false,
 } = {}) {
   const pages = [];
   const tabs = [];
@@ -51,6 +57,12 @@ function build({
       beforeRespond,
       dialog,
       alert,
+      selectedValue,
+      modelOptions: modelOptions ?? undefined,
+      modelTrigger,
+      modelTriggerAria,
+      modelIdStuck,
+      modelTextStuck,
     });
     pages.push(page);
     tabs.push({ id: 7 + i, url: "https://chat.z.ai/", title: "Z.ai", page });
@@ -177,11 +189,27 @@ test("the happy path runs the exact governed sequence and confirms submission", 
   assert.ok(pages[0].state.conversation.includes(PROMPT));
   assert.equal(pages[0].state.composerValue, "");
   assert.equal(pages[0].state.agent.active, true);
-  assert.equal(pages[0].state.selectedModel, "GLM-5.3");
-  // The exact command sequence: agent -> model trigger -> model option
-  // -> type (verbatim) -> send.
+  // The selected model is the frozen GLM-5.3 — the operator's
+  // authenticated surface starts on GLM-5.2 (selectedValue "glm-5.2",
+  // trigger id #model-selector-glm-5_2-button, trigger text
+  // "GLM-5.2"), and the live-observed trigger id derivation makes the
+  // selection's ground truth #model-selector-glm-5_3-button.
+  assert.equal(pages[0].state.selectedValue, "glm-5.3");
+  // The exact command sequence: agent pill -> model trigger (the
+  // generic aria candidate) -> the exact data-value option -> type
+  // (verbatim) -> send.
   const ops = pages[0].history().filter((c) => c.op !== "probe").map((c) => c.op);
-  assert.deepEqual(ops, ["click", "click", "clickIndex", "type", "click"]);
+  assert.deepEqual(ops, ["click", "click", "click", "type", "click"]);
+  const clickSelectors = pages[0]
+    .history()
+    .filter((c) => c.op === "click")
+    .map((c) => c.selector);
+  assert.deepEqual(clickSelectors, [
+    "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type",
+    'button[aria-label="Select a model"]',
+    'button[aria-label="model-item"][data-value="glm-5.3"]',
+    "#send-message-button",
+  ]);
 });
 
 test("the prompt is carried byte-identical into the composer (never rewritten)", async () => {
@@ -316,7 +344,10 @@ test("a mode-pill click that never activates the Agent pill fails closed (the ma
 test("a missing GLM-5.3 model option fails closed without sending", async () => {
   const { adapter, pages } = build();
   // Remove the exact GLM-5.3 option: only Flash and 5.2 remain.
-  pages[0].state.modelOptions = ["GLM-5.3-Flash  NEW  Lightweight", "GLM-5.2  Previous"];
+  pages[0].state.modelOptions = [
+    { text: "GLM-5.3-Flash  NEW  Lightweight", value: "x-preview-l", disabled: false },
+    { text: "GLM-5.2   Previous flagship", value: "glm-5.2", disabled: false },
+  ];
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
@@ -324,15 +355,161 @@ test("a missing GLM-5.3 model option fails closed without sending", async () => 
 });
 
 test("two exact GLM-5.3 options are an ambiguous model selection (GLM-5.3-Flash must not match)", async () => {
-  const { adapter } = build();
+  const built = build();
   // Override the model options: two exact-token matches plus the
   // Flash variant (which must NEVER satisfy the exact-token match).
-  const built = build();
-  built.pages[0].state.modelOptions = ["GLM-5.3 A", "GLM-5.3 B", "GLM-5.3-Flash C"];
+  built.pages[0].state.modelOptions = [
+    { text: "GLM-5.3 A", value: "a", disabled: false },
+    { text: "GLM-5.3 B", value: "b", disabled: false },
+    { text: "GLM-5.3-Flash C", value: "glm-5.3-flash", disabled: false },
+  ];
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
-  void adapter;
+});
+
+// --------------------------------------------------------------------
+// Model selection — the LIVE-OBSERVED authenticated surface (focused
+// regression coverage for the continuation-5 work order, PR #6
+// comment 5554526659: the operator's saved HTML shows the trigger
+// #model-selector-glm-5_2-button with aria "Select a model" while the
+// screen stays on GLM-5.2 — the pre-correction hardcoded
+// model-selector-x-preview-l-button locator never matched that
+// surface). The fake models the live structure exactly: the trigger
+// id embeds the SELECTED model's data-value ("." -> "_"), the option
+// rows carry data-value, and the trigger text displays the selected
+// model's label.
+// --------------------------------------------------------------------
+
+test("the id-family candidate resolves the model trigger when the aria-label is absent", async () => {
+  // A provider surface variant without the trigger aria-label: the
+  // second live-observed candidate (the id-prefix/suffix family)
+  // must resolve the trigger — never a hardcoded model-specific id.
+  const { adapter, pages } = build({ modelTriggerAria: false });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const triggerClick = pages[0].history().find(
+    (c) => c.op === "click" && c.selector === 'button[id^="model-selector-"][id$="-button"]'
+  );
+  assert.ok(triggerClick, "the id-family candidate clicked the trigger");
+  assert.equal(pages[0].state.selectedValue, "glm-5.3");
+});
+
+test("the model already GLM-5.3: no trigger click is issued (idempotent preparation)", async () => {
+  // Both selection ground truths already hold (the trigger displays
+  // GLM-5.3 and carries #model-selector-glm-5_3-button): re-clicking
+  // the trigger would toggle the option menu open for nothing.
+  const { adapter, pages } = build({ selectedValue: "glm-5.3" });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const triggerClicks = pages[0].history().filter(
+    (c) => c.op === "click" && (c.selector === 'button[aria-label="Select a model"]' || c.selector === 'button[id^="model-selector-"][id$="-button"]')
+  ).length;
+  assert.equal(triggerClicks, 0); // no trigger click — idempotent
+  assert.equal(pages[0].state.selectedValue, "glm-5.3");
+});
+
+test("the observed real-surface failure, reproduced: the hardcoded x-preview-l trigger assumption fails closed on the authenticated surface", async () => {
+  // The operator's authenticated surface trigger is
+  // #model-selector-glm-5_2-button (aria "Select a model"), NOT the
+  // unauthenticated #model-selector-x-preview-l-button. A surface
+  // with NO trigger at all must fail closed with the typed trigger
+  // resolution refusal — never a guessed model action.
+  const { adapter, pages } = build({ modelTrigger: false });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.match(result.error.message, /model selector trigger did not resolve to exactly one element/);
+  const ops = pages[0].history().filter((c) => c.op !== "probe").map((c) => c.op);
+  assert.deepEqual(ops, ["click"]); // only the Agent pill click; nothing typed or sent
+});
+
+test("a selection whose trigger id never flips fails closed (the id-family ground truth)", async () => {
+  // The exact option click lands, the trigger text updates to
+  // GLM-5.3, but the provider never re-renders the trigger id (it
+  // stays glm-5_2): BOTH ground truths are required — the id-family
+  // signal is live-observed (the operator's HTML), and a missing one
+  // is a typed refusal, never a weak acceptance.
+  const stuck = build({ modelIdStuck: true });
+  const result = await stuck.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.match(result.error.message, /selected-model trigger id did not resolve/);
+  assert.ok(stuck.pages[0].history().every((c) => c.op !== "type" && c.op !== "pressEnter"));
+});
+
+test("a selection whose trigger text never updates fails closed (the display ground truth)", async () => {
+  // The option click lands, the trigger id flips to glm-5_3, but the
+  // model header still displays GLM-5.2: the trigger display is the
+  // live-observed model header — a stale display is a typed refusal.
+  const stuck = build({ modelTextStuck: true });
+  const result = await stuck.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.match(result.error.message, /does not display the GLM-5.3 label/);
+  assert.ok(stuck.pages[0].history().every((c) => c.op !== "type" && c.op !== "pressEnter"));
+});
+
+test("two rows carrying the glm-5.3 data-value are an ambiguous model selection", async () => {
+  // The data-value ground truth must resolve to EXACTLY ONE row; a
+  // duplicated provider value is ambiguous and fails closed before
+  // any option click.
+  const built = build();
+  built.pages[0].state.modelOptions = [
+    { text: "GLM-5.3 A", value: "glm-5.3", disabled: false },
+    { text: "GLM-5.3 B", value: "glm-5.3", disabled: false },
+    { text: "GLM-5.2   Previous", value: "glm-5.2", disabled: false },
+  ];
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.match(result.error.message, /data-value rows/);
+  const optionClicks = built.pages[0].history().filter(
+    (c) => c.op === "click" && c.selector === 'button[aria-label="model-item"][data-value="glm-5.3"]'
+  ).length;
+  assert.equal(optionClicks, 0); // ambiguous resolution never clicks
+});
+
+test("a disabled GLM-5.3 option row (the live unauthenticated surface) refuses the click and fails closed", async () => {
+  // LIVE-OBSERVED unauthenticated menu state: the GLM-5.3 row carries
+  // disabled="" — the closed page vocabulary refuses disabled
+  // elements, the bounded retry re-attempts, and the final refusal
+  // names the disabled row (never a guessed click, never a
+  // success).
+  const built = build({
+    modelOptions: [
+      { text: "GLM-5.3-Flash  NEW  Lightweight flagship", value: "x-preview-l", disabled: false },
+      { text: "GLM-5.3   Flagship model", value: "glm-5.3", disabled: true },
+      { text: "GLM-5.2   Previous flagship", value: "glm-5.2", disabled: false },
+    ],
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "PAGE_REFUSED");
+  assert.match(result.error.message, /disabled/);
+  assert.ok(built.pages[0].history().every((c) => c.op !== "type" && c.op !== "pressEnter"));
+  assert.equal(built.pages[0].state.selectedValue, "glm-5.2"); // never selected
+});
+
+test("a dialog appearing between Agent selection and model selection fails closed UNKNOWN_DIALOG", async () => {
+  // The popup Enter path is submission-only: any dialog that appears
+  // during preparation (here: right after the Agent pill click) must
+  // fail closed BEFORE the model menu is ever opened.
+  const built = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && String(message.selector).includes("nth-of-type(2)")) {
+        state.dialog = { text: "An unexpected modal" }; // appears after the Agent pill click
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "UNKNOWN_DIALOG");
+  const triggerClicks = built.pages[0].history().filter(
+    (c) => c.op === "click" && (c.selector === 'button[aria-label="Select a model"]' || c.selector === 'button[id^="model-selector-"][id$="-button"]')
+  ).length;
+  assert.equal(triggerClicks, 0); // the model menu was never opened
+  assert.ok(built.pages[0].history().every((c) => c.op !== "type" && c.op !== "pressEnter"));
 });
 
 test("a send that never confirms submission retries within the budget, then fails closed", async () => {
@@ -364,7 +541,7 @@ test("a send that never confirms submission retries within the budget, then fail
 // The known submission-blocking popup recovery.
 // --------------------------------------------------------------------
 
-test("the known popup triggers one Enter, a full preparation restart, and succeeds on the retry", async () => {
+test("the known popup triggers one Enter, then a RESEND of the exact prompt (no preparation restart)", async () => {
   const { adapter, pages } = build({
     popupOnSend: true,
     popupText: "Confirm your submission",
@@ -378,12 +555,12 @@ test("the known popup triggers one Enter, a full preparation restart, and succee
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 2);
   assert.equal(result.submitted.popupDismissals, 1);
-  // The full preparation sequence restarted: the Agent mode was
-  // already established by the first attempt, so the restart
-  // re-observes the active pill idempotently (no second pill click —
-  // re-clicking would navigate the provider to a fresh Agent-mode
-  // session); model selection, prompt entry, and send ran twice,
-  // plus one Enter.
+  // The operator's recovery loop (PR #6 comment 5554526659): Enter
+  // once, then RESEND the exact prompt — the preparation stays
+  // established (the popup blocked the submission, so the prompt
+  // still sits in the composer byte-identical and is sent AS-IS,
+  // with no re-type disturbing the provider surface). The Agent
+  // pill and the model trigger are each clicked EXACTLY ONCE.
   const history = pages[0].history();
   const clicks = history.filter((c) => c.op === "click").length;
   const types = history.filter((c) => c.op === "type").length;
@@ -391,9 +568,19 @@ test("the known popup triggers one Enter, a full preparation restart, and succee
   const pillClicks = history.filter(
     (c) => c.op === "click" && c.selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type"
   ).length;
+  const triggerClicks = history.filter(
+    (c) => c.op === "click" && c.selector === 'button[aria-label="Select a model"]'
+  ).length;
+  const optionClicks = history.filter(
+    (c) => c.op === "click" && c.selector === 'button[aria-label="model-item"][data-value="glm-5.3"]'
+  ).length;
+  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
   assert.equal(pillClicks, 1); // the Agent pill clicked exactly once
-  assert.equal(clicks, 5); // (agent pill + model trigger + send), then (model trigger + send)
-  assert.equal(types, 2); // the exact prompt re-entered after restart
+  assert.equal(triggerClicks, 1); // the model trigger clicked exactly once
+  assert.equal(optionClicks, 1); // the exact option clicked exactly once
+  assert.equal(sends, 2); // the initial send + the resend
+  assert.equal(clicks, 5); // pill + trigger + option + send + resend
+  assert.equal(types, 1); // the exact prompt typed ONCE — resent, never re-typed
   assert.equal(enters, 1); // exactly one Enter per popup observation
 });
 
@@ -423,6 +610,91 @@ test("an error-shaped popup during submission fails closed PROVIDER_ERROR (no En
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "PROVIDER_ERROR");
   assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
+});
+
+test("a popup whose Enter reveals the submission already landed NEVER resends the governed prompt", async () => {
+  // The popup blocked a send that had in fact already been accepted:
+  // after the Enter dismissal the provider state shows the exact
+  // prompt in the conversation with the composer cleared — that IS
+  // the acceptance evidence, and a resend would duplicate the
+  // governed prompt. Exactly one send, one type, one Enter.
+  const { adapter, pages } = build({
+    popupOnSend: true,
+    popupText: "Confirm your submission",
+    beforeRespond: (message, state) => {
+      if (message.op === "pressEnter") {
+        state.popupOnSend = false;
+        state.conversation.push(state.composerValue); // the submission had already landed
+        state.composerValue = "";
+      }
+    },
+  });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 2);
+  assert.equal(result.submitted.popupDismissals, 1);
+  const history = pages[0].history();
+  assert.equal(history.filter((c) => c.op === "type").length, 1);
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1);
+  assert.equal(history.filter((c) => c.op === "pressEnter").length, 1);
+  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
+});
+
+test("a popup that clears the composer re-types the exact prompt before the resend (byte-identical read-back first)", async () => {
+  // The popup consumed the prompt (the composer no longer holds it
+  // and it never reached the conversation): the resend path re-types
+  // the exact prompt, re-verifies the byte-identical read-back, and
+  // only then sends — never a blind resend of an empty composer.
+  const { adapter, pages } = build({
+    popupOnSend: true,
+    popupText: "Confirm your submission",
+    beforeRespond: (message, state) => {
+      if (message.op === "pressEnter") {
+        state.popupOnSend = false;
+        state.composerValue = ""; // the popup swallowed the prompt
+      }
+    },
+  });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 2);
+  assert.equal(result.submitted.popupDismissals, 1);
+  const history = pages[0].history();
+  assert.equal(history.filter((c) => c.op === "type").length, 2); // re-typed after the popup
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 2);
+  assert.ok(pages[0].state.conversation.includes(PROMPT));
+  // The re-typed prompt is byte-identical (the type op carries the exact text).
+  const typeTexts = history.filter((c) => c.op === "type").map((c) => c.text);
+  assert.deepEqual(typeTexts, [PROMPT, PROMPT]);
+});
+
+test("a send that clears the composer without provider-state confirmation is NEVER success (no popup does not mean accepted)", async () => {
+  // The frozen acceptance rule (PR #6 comment 5554526659): "no popup
+  // = success" is FORBIDDEN. Here no dialog ever appears, every send
+  // click succeeds, the composer clears — but the provider state
+  // never shows the exact prompt in the conversation. Acceptance
+  // requires the provider-state confirmation (conversation evidence +
+  // cleared composer); the adapter must retry within the budget and
+  // finally fail closed without ever claiming submission.
+  const swallowed = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "probe") {
+        // The adversarial provider state: the conversation NEVER
+        // contains the exact prompt (the hook filters it out of every
+        // observation; the send click itself always succeeds).
+        state.conversation = state.conversation.filter((t) => t !== PROMPT);
+      }
+    },
+  });
+  const result = await swallowed.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "PAGE_MALFORMED");
+  assert.ok(/not confirmed by observation/.test(result.error.message));
+  assert.ok(!swallowed.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
+  const sends = swallowed.pages[0].history().filter(
+    (c) => c.op === "click" && c.selector === "#send-message-button"
+  ).length;
+  assert.equal(sends, 3); // the bounded budget of send attempts
 });
 
 test("a dialog during preparation (before any send) fails closed UNKNOWN_DIALOG", async () => {
@@ -469,8 +741,11 @@ test("two simultaneous dialogs during submission fail closed without pressing an
     agentActive3: { count: 0 },
   });
   const modelFacts = () => ({
-    modelOptionTexts: { texts: ["GLM-5.3-Flash NEW", "GLM-5.3 Flagship", "GLM-5.2 Previous"] },
-    triggerText: { text: "GLM-5.3" },
+    modelTriggerCount0: { count: 1 },
+    modelTriggerCount1: { count: 1 },
+    modelTriggerText0: { text: "GLM-5.3" },
+    modelTriggerText1: { text: "GLM-5.3" },
+    modelTriggerSelectedId: { count: 1 },
   });
   const bridge = {
     send: async (_tabId, command) => {

@@ -11,15 +11,23 @@
  *     3. select the `Agent` control (the sidebar mode-toggle Agent
  *        pill — the live-observed structure is documented at
  *        ZAI_LOCATORS.agentControl);
- *     4. select model `GLM-5.3` (provider model identifier `5.3`);
+ *     4. select model `GLM-5.3` (provider model identifier `5.3` —
+ *        surface-encoded by the provider as the option-row
+ *        data-value `glm-5.3`, LIVE-OBSERVED; the trigger is located
+ *        through its live-observed generic candidates, never a
+ *        hardcoded model-specific id);
  *     5. enter the EXACT Controller-generated governed prompt verbatim;
  *     6. send;
  *     7. verify ACTUAL submission from the resulting provider state.
  *
  *   known submission-blocking popup: press `Enter` once per retry
- *   attempt, then restart the preparation sequence from Agent
- *   selection. Unknown/differently-shaped dialogs fail closed — the
- *   adapter never blindly presses keys.
+ *   attempt, then RESEND the exact prompt (the operator's recovery
+ *   loop — the preparation stays established; never a full
+ *   preparation restart, and never a resend of an already-confirmed
+ *   submission). Unknown/differently-shaped dialogs fail closed —
+ *   the adapter never blindly presses keys, and the absence of a
+ *   popup is NEVER acceptance evidence (acceptance is always the
+ *   verified provider-state confirmation of step 7).
  *
  *   hung worker: `Stop` -> verified stopped -> the FIXED message
  *   `continue` -> verified acceptance (the exact message confirmed
@@ -115,8 +123,36 @@ const ZAI_LOCATORS = Object.freeze({
   // LIVE-OBSERVED on the real provider surface.
   composer: "#chat-input",
   send: "#send-message-button",
-  modelTrigger: "#model-selector-x-preview-l-button",
+  // The model selector (LIVE-OBSERVED 2026-09-06 on the real
+  // https://chat.z.ai origin — the closed state AND the opened
+  // option list — and corroborated by the operator's saved
+  // authenticated Agent-surface HTML, PR #6 comment 5554526659): the
+  // trigger is ONE button carrying aria-label="Select a model"
+  // whose id embeds the SELECTED model's provider value with
+  // "." -> "_" (live: data-value "x-preview-l" ->
+  // #model-selector-x-preview-l-button, trigger text
+  // "GLM-5.3-Flash"; operator: GLM-5.2 selected ->
+  // #model-selector-glm-5_2-button). The id is therefore NOT a
+  // stable locator: the trigger resolves through the aria-label,
+  // else the id-prefix/suffix family — never a hardcoded
+  // model-specific id (the pre-correction
+  // #model-selector-x-preview-l-button assumption never matched the
+  // authenticated Agent surface). The option rows are
+  // button[aria-label="model-item"] carrying data-value (the
+  // provider's machine model ids, live: "x-preview-l", "glm-5.3",
+  // "glm-5.2" — the Work Order's provider model identifier 5.3 is
+  // surface-encoded as data-value "glm-5.3"); the exact GLM-5.3 row
+  // is resolved by BOTH its exact leading text token and its
+  // data-value, and the post-selection verification requires BOTH
+  // the trigger displaying the model label and the trigger carrying
+  // the selected-model id.
+  modelTrigger: Object.freeze([
+    'button[aria-label="Select a model"]',
+    'button[id^="model-selector-"][id$="-button"]',
+  ]),
   modelOption: 'button[aria-label="model-item"]',
+  modelOptionExact: 'button[aria-label="model-item"][data-value="glm-5.3"]',
+  modelTriggerSelected: "#model-selector-glm-5_3-button",
   dialog: '[role="dialog"], dialog',
   alert: '[role="alert"]',
   allButtons: "button",
@@ -624,22 +660,85 @@ export function createZaiAdapter({
   }
 
   /**
-   * Step: select model GLM-5.3 (provider id 5.3). Mechanism fully
-   * LIVE-OBSERVED: the trigger button opens the option list; the
-   * option whose leading text token is EXACTLY the model label is
-   * clicked; verification: the trigger then carries the model label
-   * as its leading text token.
+   * Step: select model GLM-5.3 (provider id 5.3). The live model
+   * selector is located through the LIVE-OBSERVED generic candidates
+   * (the aria-labeled trigger, else the model-selector id family) —
+   * never a hardcoded model-specific id: the trigger id embeds the
+   * SELECTED model and changes with the selection (the
+   * pre-correction #model-selector-x-preview-l-button assumption
+   * never matched the authenticated Agent surface). The exact option
+   * is resolved by TWO live-observed ground truths: the unique option
+   * row whose leading text token is EXACTLY the model label, and the
+   * unique row carrying the option's data-value. Verification: after
+   * the click, the trigger DISPLAYS the model label as its leading
+   * text token (the model header, live-observed on both surfaces) AND
+   * the trigger id has become the selected-model id. A click is never
+   * evidence; a ground truth that never appears fails closed (no weak
+   * acceptance). Idempotence: when both ground truths already hold,
+   * NO trigger click is issued (re-clicking would toggle the option
+   * menu open for nothing). A disabled option row (the live
+   * unauthenticated surface keeps GLM-5.3 disabled) refuses the click
+   * and fails closed. No dialog is expected while preparing — any
+   * dialog at this point fails closed UNKNOWN_DIALOG.
    */
   async function selectModel(tabId) {
-    const opened = await click(tabId, ZAI_LOCATORS.modelTrigger);
+    const triggerCountProbes = ZAI_LOCATORS.modelTrigger.map((selector, i) => ({
+      name: `modelTriggerCount${i}`,
+      selector,
+      mode: "count",
+    }));
+    const triggerTextProbes = ZAI_LOCATORS.modelTrigger.map((selector, i) => ({
+      name: `modelTriggerText${i}`,
+      selector,
+      mode: "text",
+    }));
+    const selectedIdProbe = {
+      name: "modelTriggerSelectedId",
+      selector: ZAI_LOCATORS.modelTriggerSelected,
+      mode: "count",
+    };
+    const optionProbes = [
+      { name: "modelOptionTexts", selector: ZAI_LOCATORS.modelOption, mode: "texts" },
+      { name: "modelOptionExactCount", selector: ZAI_LOCATORS.modelOptionExact, mode: "count" },
+    ];
+    /** Both live-observed ground truths of an established selection. */
+    const selectionVerified = (f) =>
+      ZAI_LOCATORS.modelTrigger.some(
+        (_, i) => leadingToken(String(f[`modelTriggerText${i}`]?.text ?? "")) === ZAI_MODEL.label
+      ) && f.modelTriggerSelectedId?.count === 1;
+
+    const facts = await readFacts(tabId, [...triggerCountProbes, ...triggerTextProbes, selectedIdProbe]);
+    if (!facts.ok) {
+      return facts;
+    }
+    const dialog = classifyDialog(facts.facts, "preparing");
+    if (dialog.kind !== "none") {
+      return failure("UNKNOWN_DIALOG", `no dialog is expected during preparation: ${dialog.reason}`);
+    }
+    // Idempotence: both ground truths already hold — the model is
+    // already the frozen model; no trigger click (re-clicking would
+    // toggle the option menu open for nothing).
+    if (selectionVerified(facts.facts)) {
+      return { ok: true, alreadySelected: true };
+    }
+    // Resolve the trigger: the first live-observed candidate matching
+    // exactly one visible element.
+    const counts = triggerCountProbes.map((probe) => facts.facts[probe.name]?.count ?? 0);
+    const resolved = counts.findIndex((count) => count === 1);
+    if (resolved === -1) {
+      return failure(
+        "AMBIGUOUS_STATE",
+        `the model selector trigger did not resolve to exactly one element through the live-observed candidates (candidate counts: ${counts.join("/")})`
+      );
+    }
+    const opened = await click(tabId, ZAI_LOCATORS.modelTrigger[resolved]);
     if (!opened.ok) {
       return opened;
     }
-    const listed = await settle(
-      tabId,
-      [{ name: "modelOptionTexts", selector: ZAI_LOCATORS.modelOption, mode: "texts" }],
-      (f) => Array.isArray(f.modelOptionTexts?.texts) && f.modelOptionTexts.texts.length > 0
-    );
+    const listed = await settle(tabId, optionProbes, (f) => {
+      const texts = f.modelOptionTexts?.texts;
+      return Array.isArray(texts) && texts.length > 0;
+    });
     if (!listed.ok) {
       return listed;
     }
@@ -647,31 +746,39 @@ export function createZaiAdapter({
     if (!Array.isArray(options) || options.length === 0) {
       return failure("AMBIGUOUS_STATE", "the model option list did not open (no model options became visible)");
     }
-    const target = options
+    // The exact option: BOTH live-observed ground truths — the unique
+    // exact-leading-token text match AND the unique data-value row.
+    const textHits = options
       .map((text, index) => ({ text, index }))
       .filter((entry) => leadingToken(entry.text) === ZAI_MODEL.label);
-    if (target.length !== 1) {
+    const valueCount = listed.facts.modelOptionExactCount?.count ?? 0;
+    if (textHits.length !== 1 || valueCount !== 1) {
       return failure(
         "AMBIGUOUS_STATE",
-        `the ${ZAI_MODEL.label} option did not resolve to exactly one model option (${target.length} exact matches among ${options.length})`
+        `the ${ZAI_MODEL.label} option did not resolve to exactly one model option (${textHits.length} exact text matches among ${options.length} options; ${valueCount} data-value rows)`
       );
     }
-    const chosen = await clickIndex(tabId, ZAI_LOCATORS.modelOption, target[0].index);
+    const chosen = await click(tabId, ZAI_LOCATORS.modelOptionExact);
     if (!chosen.ok) {
       return chosen;
     }
-    const confirmed = await settle(
-      tabId,
-      [{ name: "triggerText", selector: ZAI_LOCATORS.modelTrigger, mode: "text" }],
-      (f) => leadingToken(String(f.triggerText?.text ?? "")) === ZAI_MODEL.label
-    );
+    // Verification: BOTH ground truths — the trigger displays the
+    // model label AND carries the selected-model id.
+    const confirmed = await settle(tabId, [...triggerTextProbes, selectedIdProbe], selectionVerified);
     if (!confirmed.ok) {
       return confirmed;
     }
-    if (leadingToken(String(confirmed.facts.triggerText?.text ?? "")) !== ZAI_MODEL.label) {
+    if (!selectionVerified(confirmed.facts)) {
+      const displays = triggerTextProbes.some(
+        (_, i) => leadingToken(String(confirmed.facts[`modelTriggerText${i}`]?.text ?? "")) === ZAI_MODEL.label
+      );
       return failure(
         "AMBIGUOUS_STATE",
-        `the selected model could not be verified on the model control (expected leading token ${ZAI_MODEL.label})`
+        `the selected model could not be verified on the model control (the trigger ${
+          displays ? "displays" : "does not display"
+        } the ${ZAI_MODEL.label} label as its leading text token; the selected-model trigger id ${
+          confirmed.facts.modelTriggerSelectedId?.count === 1 ? "resolved" : "did not resolve"
+        })`
       );
     }
     return { ok: true };
@@ -698,6 +805,48 @@ export function createZaiAdapter({
       );
     }
     return { ok: true };
+  }
+
+  /**
+   * Step: ensure the exact governed prompt is present in the
+   * composer, byte-identical, before (re)sending — the operator's
+   * recovery loop: after the known-popup Enter (or an unconfirmed
+   * send), the exact prompt is RESENT; the preparation is never
+   * restarted for a resend. Three observed states:
+   *   - the composer already holds the exact prompt (an unconfirmed
+   *     send, or the popup blocked the submission): it is sent as-is
+   *     — the provider surface is not disturbed with a re-type;
+   *   - the composer is empty AND the conversation already contains
+   *     the exact prompt: the submission is ALREADY CONFIRMED — no
+   *     resend (the governed prompt is never submitted twice;
+   *     acceptance is provider-state confirmation, never a blind
+   *     resend);
+   *   - otherwise: the prompt is (re)typed and the byte-identical
+   *     read-back is verified BEFORE any send (a rewritten or
+   *     truncated prompt is never submitted).
+   * A dialog visible at this point fails closed — never type through
+   * a modal.
+   */
+  async function ensurePrompt(tabId, prompt) {
+    const facts = await readFacts(tabId);
+    if (!facts.ok) {
+      return facts;
+    }
+    const dialog = classifyDialog(facts.facts, "preparing");
+    if (dialog.kind !== "none") {
+      return failure(
+        "UNKNOWN_DIALOG",
+        `a dialog is visible while preparing the prompt submission: ${dialog.reason}`
+      );
+    }
+    const composerValue = typeof facts.facts.composerValue?.value === "string" ? facts.facts.composerValue.value : "";
+    if (composerValue === prompt) {
+      return { ok: true, present: true };
+    }
+    if (composerValue.length === 0 && conversationContains(facts.facts, prompt)) {
+      return { ok: true, confirmed: true, facts: facts.facts };
+    }
+    return enterPrompt(tabId, prompt);
   }
 
   /**
@@ -798,29 +947,70 @@ export function createZaiAdapter({
       );
     }
 
-    // 3-7. bounded preparation/send/verification attempts.
+    // 3-7. bounded preparation/send/verification attempts. The first
+    // attempt runs the full preparation (Agent -> model -> prompt);
+    // a resend (after the known-popup Enter, or an unconfirmed send)
+    // re-uses the established preparation and RESENDS the exact
+    // prompt — the operator's recovery loop: Enter once, then
+    // resend; never a full preparation restart, and never a resend
+    // of an already-confirmed submission.
     let attempts = 0;
     let popupDismissals = 0;
     let lastRefusal = null;
+    let prepared = false;
+
+    /** Record the CONFIRMED submission (the shared acceptance path). */
+    const recordSubmission = (facts) => {
+      const generation = stopVisible(facts) ? "working" : "waiting";
+      const record = {
+        worker,
+        workItem,
+        tabId,
+        prompt,
+        attempts,
+        popupDismissals,
+        submittedAt: now(),
+        wasWorking: generation === "working",
+        recoveries: 0,
+      };
+      sessions.set(worker, record);
+      return {
+        ok: true,
+        session: { worker, workItem, tabId },
+        submitted: { attempts, popupDismissals, generation },
+      };
+    };
+
     while (attempts < maxSubmissionAttempts) {
       attempts += 1;
-      // 3. Agent selection.
-      const agent = await selectAgent(tabId);
-      if (!agent.ok) {
-        lastRefusal = agent;
-        continue;
+      if (!prepared) {
+        // 3. Agent selection (idempotent on the established mode).
+        const agent = await selectAgent(tabId);
+        if (!agent.ok) {
+          lastRefusal = agent;
+          continue;
+        }
+        // 4. Model selection (idempotent on the established model).
+        const model = await selectModel(tabId);
+        if (!model.ok) {
+          lastRefusal = model;
+          continue;
+        }
+        prepared = true;
       }
-      // 4. Model selection.
-      const model = await selectModel(tabId);
-      if (!model.ok) {
-        lastRefusal = model;
-        continue;
-      }
-      // 5. Exact prompt entry.
-      const entered = await enterPrompt(tabId, prompt);
+      // 5. Exact prompt entry / resend: the byte-identical read-back
+      //    is verified before any send; an already-confirmed
+      //    submission is never resent.
+      const entered = await ensurePrompt(tabId, prompt);
       if (!entered.ok) {
         lastRefusal = entered;
         continue;
+      }
+      if (entered.confirmed) {
+        // The submission was already confirmed by provider-state
+        // evidence (e.g. the dismissed popup had let it land): never
+        // resend the governed prompt.
+        return recordSubmission(entered.facts);
       }
       // 6. Send.
       const sent = await send(tabId);
@@ -862,8 +1052,9 @@ export function createZaiAdapter({
             `the known submission-blocking popup persisted beyond the bounded attempt budget (${maxSubmissionAttempts} attempts, ${popupDismissals} dismissals)`
           );
         }
-        // The ONE bounded Enter press for this attempt, then a full
-        // restart of the preparation sequence.
+        // The ONE bounded Enter press for this attempt; the next
+        // attempt RESENDS the exact prompt (the preparation stays
+        // established — no restart).
         popupDismissals += 1;
         const pressed = await pressEnter(tabId);
         if (!pressed.ok) {
@@ -879,32 +1070,15 @@ export function createZaiAdapter({
           lastRefusal = failure("UNKNOWN_DIALOG", "the known popup did not dismiss after the Enter press");
           continue;
         }
-        continue; // restart from Agent selection
+        continue; // resend the exact prompt
       }
       const composerValue = typeof facts.composerValue?.value === "string" ? facts.composerValue.value : "";
       if (composerValue.length === 0 && conversationContains(facts, prompt)) {
         // Submission CONFIRMED by post-action observation.
-        const generation = stopVisible(facts) ? "working" : "waiting";
-        const record = {
-          worker,
-          workItem,
-          tabId,
-          prompt,
-          attempts,
-          popupDismissals,
-          submittedAt: now(),
-          wasWorking: generation === "working",
-          recoveries: 0,
-        };
-        sessions.set(worker, record);
-        return {
-          ok: true,
-          session: { worker, workItem, tabId },
-          submitted: { attempts, popupDismissals, generation },
-        };
+        return recordSubmission(facts);
       }
       // Unconfirmed: the send did not take (the composer still holds
-      // the prompt). The bounded retry restarts the preparation.
+      // the prompt). The bounded retry resends the exact prompt.
       lastRefusal = failure(
         "PAGE_MALFORMED",
         "the prompt remained unsubmitted after the send (submission was not confirmed by observation)"

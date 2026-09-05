@@ -39,9 +39,17 @@ them.
   discovers/opens/focuses an **already-authenticated** chat.z.ai
   session (human authentication is out of band), runs the exact
   new-session sequence — `Agent` selection, `GLM-5.3` / model `5.3`
-  selection, verbatim governed-prompt entry, send, and OBSERVED
+  selection (the live model selector is located through its
+  live-observed generic candidates — the `Select a model`
+  aria-label, else the `model-selector-*` id family — never a
+  hardcoded model-specific id; the exact option is resolved by both
+  its exact `GLM-5.3` text token and its `data-value`), verbatim
+  governed-prompt entry, send, and OBSERVED
   submission confirmation — performs only the bounded known-popup
-  `Enter` recovery with a full preparation restart, and recovers a
+  `Enter` recovery and then RESENDS the exact prompt (the
+  operator's recovery loop: Enter once, then resend; the
+  preparation is never restarted, and an already-confirmed
+  submission is never resent), and recovers a
   hung worker only through `Stop` -> verified stopped -> the fixed
   message `continue` -> verified acceptance. Every step is verified by
   post-action observation; unknown dialogs, authentication
@@ -305,7 +313,19 @@ composition is CTRL-016 scope).
    (LIVE-OBSERVED structure; resolved structurally, clicked once,
    and verified ONLY by the pill becoming the active mode pill —
    `data-active="true"`; an already-active pill issues no click);
-4. select model `GLM-5.3` (provider model identifier `5.3`);
+4. select model `GLM-5.3` (provider model identifier `5.3`,
+   surface-encoded by the provider as the option-row `data-value`
+   `glm-5.3`): the live model selector trigger is located through
+   its live-observed generic candidates (the `aria-label="Select a
+   model"` trigger, else the `model-selector-*` id family — the
+   trigger id embeds the SELECTED model and changes with the
+   selection, so it is never hardcoded), the exact `GLM-5.3`
+   option is resolved by BOTH its exact leading text token and its
+   `data-value`, and the selection is verified ONLY by the trigger
+   displaying the `GLM-5.3` label AND carrying the selected-model
+   id (`#model-selector-glm-5_3-button`) — a click is never
+   evidence, and an already-`GLM-5.3` surface issues no trigger
+   click;
 5. enter the exact governed prompt **verbatim** (byte-identical
    read-back before any send — a rewritten prompt is never
    submitted);
@@ -319,13 +339,25 @@ composition is CTRL-016 scope).
 - **Known submission-blocking popup** (a modal dialog observed while
   verifying a submission, matching the known shape and carrying no
   auth/error text): the adapter presses `Enter` once for the current
-  attempt, verifies dismissal, and restarts the FULL preparation
-  from Agent selection. Default budget: 3 attempts. Auth-shaped or
-  error-shaped dialogs, dialogs at any other time, multiple
-  simultaneous dialogs, or an exhausted budget fail closed
-  (`AUTHENTICATION_INTERRUPTED` / `PROVIDER_ERROR` /
-  `UNKNOWN_DIALOG` / `RETRY_EXHAUSTED`) — the adapter never blindly
-  presses keys and never pretends submission succeeded.
+  attempt, verifies dismissal, and then RESENDS the exact prompt —
+  the operator's recovery loop: Enter once, then resend. The
+  preparation (Agent + model) stays established — it is never
+  restarted for a resend; when the composer still holds the exact
+  prompt (the popup blocked the submission) it is sent as-is, and
+  when the popup consumed it the prompt is re-typed with the
+  byte-identical read-back re-verified before the resend. When the
+  dismissed popup reveals the submission already landed (the
+  conversation holds the exact prompt, the composer is cleared)
+  NO resend happens — the governed prompt is never submitted twice.
+  Default budget: 3 attempts. Auth-shaped or error-shaped dialogs,
+  dialogs at any other time, multiple simultaneous dialogs, or an
+  exhausted budget fail closed (`AUTHENTICATION_INTERRUPTED` /
+  `PROVIDER_ERROR` / `UNKNOWN_DIALOG` / `RETRY_EXHAUSTED`) — the
+  adapter never blindly presses keys and never pretends submission
+  succeeded. The absence of a popup is NEVER acceptance evidence:
+  acceptance is always the verified provider-state confirmation
+  (the conversation holds the exact prompt and the composer is
+  cleared).
 - **Hung worker** (`RecoverZaiHungWorker { worker, workItem, tabId }`):
   verify generation is in progress, activate the provider `Stop`
   control, VERIFY generation stopped, submit the FIXED message
@@ -355,10 +387,11 @@ landing state — verified live by the worker probe):
 
 | Surface | Locator | Observed |
 |---|---|---|
-| Composer | `#chat-input` (textarea, placeholder "How can I help you today?") | visible on the landing page |
-| Send control | `#send-message-button` | disabled until the composer has text |
-| Model selector trigger | `#model-selector-x-preview-l-button` | text `GLM-5.3-Flash`, aria "Select a model" |
-| Model options | `button[aria-label="model-item"]` | `GLM-5.3-Flash` (enabled), `GLM-5.3` (auth-required), `GLM-5.2` (auth-required) |
+| Composer | `#chat-input` (textarea, placeholder "How can I help you today?" unauthenticated / "Send a Message" on the authenticated Agent surface) | visible on the landing page; the id is the stable locator (the placeholder varies by surface/mode) |
+| Send control | `#send-message-button` (`type="submit"`, `aria-label="Send Message"` on the authenticated surface) | disabled until the composer has text; activated only after the verified prompt read-back |
+| Model selector trigger | `button[aria-label="Select a model"]`, else `button[id^="model-selector-"][id$="-button"]` | LIVE-OBSERVED 2026-09-06 (closed state AND opened menu): exactly one trigger; its id embeds the SELECTED model's `data-value` with `.`->`_` (live unauthenticated: `#model-selector-x-preview-l-button`, text `GLM-5.3-Flash`; operator's authenticated Agent surface: `#model-selector-glm-5_2-button`, GLM-5.2 displayed) — the id is NOT a stable locator and is never hardcoded |
+| Model options | `button[aria-label="model-item"]` carrying `data-value` | LIVE-OBSERVED 2026-09-06 (menu open): rows `x-preview-l` / `glm-5.3` / `glm-5.2`; the exact GLM-5.3 row = `button[aria-label="model-item"][data-value="glm-5.3"]` (leading text token exactly `GLM-5.3`); GLM-5.3 and GLM-5.2 are disabled unauthenticated, enabled authenticated |
+| Selected-model trigger id | `#model-selector-glm-5_3-button` | the trigger id the live surface carries once GLM-5.3 is selected (the id-family ground truth for post-selection verification, with the trigger displaying the `GLM-5.3` label) |
 | Auth markers | buttons with exact text `Sign in` / `Log in` / `Sign up` | present unauthenticated |
 | Modal dialogs | `[role="dialog"], dialog` | the modal overlay containers |
 | Sidebar shell | `#sidebar` | the app sidebar root (both sidebar states) |

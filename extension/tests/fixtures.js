@@ -424,9 +424,28 @@ export function fakeZaiPage({
   dialog = null,
   alert = null,
   conversation = [],
-  modelOptions = ["GLM-5.3-Flash  NEW  Lightweight flagship", "GLM-5.3   Flagship model", "GLM-5.2   Previous flagship"],
-  selectedModel = "GLM-5.3-Flash",
+  // The model selector surface, modeling the LIVE-OBSERVED structure
+  // (2026-09-06, real https://chat.z.ai, closed state AND the opened
+  // option list): option rows carry aria-label="model-item" +
+  // data-value; the trigger carries aria-label="Select a model" and
+  // an id that embeds the SELECTED model's data-value with
+  // "." -> "_"; the trigger text displays the selected model's
+  // label. Default rows mirror the live menu; the default selected
+  // value mirrors the operator's authenticated observation (GLM-5.2)
+  // vs the live unauthenticated landing (x-preview-l).
+  modelOptions = [
+    { text: "GLM-5.3-Flash  NEW  Lightweight flagship model, premium quality, instant response.", value: "x-preview-l", disabled: false },
+    { text: "GLM-5.3   Flagship model, excels at coding and long-horizon tasks", value: "glm-5.3", disabled: false },
+    { text: "GLM-5.2   Previous flagship model", value: "glm-5.2", disabled: false },
+  ],
+  selectedValue = null,
   modelOpen = false,
+  modelTrigger = true,
+  modelTriggerAria = true,
+  // Verification-failure simulations: a provider whose trigger id
+  // (resp. trigger text) never tracks the selection.
+  modelIdStuck = false,
+  modelTextStuck = false,
   agent = { present: false, active: false },
   sidebar = "expanded",
   stop = { visible: false },
@@ -435,6 +454,8 @@ export function fakeZaiPage({
   popupText = "Confirm submission",
   beforeRespond = null,
 } = {}) {
+  const effectiveSelectedValue = selectedValue ?? (authenticated ? "glm-5.2" : "x-preview-l");
+  const initialSelectedValue = effectiveSelectedValue;
   const history = [];
   const state = {
     authenticated,
@@ -443,8 +464,12 @@ export function fakeZaiPage({
     alert,
     conversation,
     modelOptions,
-    selectedModel,
+    selectedValue: effectiveSelectedValue,
     modelOpen,
+    modelTrigger,
+    modelTriggerAria,
+    modelIdStuck,
+    modelTextStuck,
     agent,
     sidebar,
     stop,
@@ -500,6 +525,39 @@ export function fakeZaiPage({
         state.stop.visible = true;
       }
     }
+  }
+
+  /** The trigger id the live provider derives from a data-value. */
+  function triggerIdFor(value) {
+    return `model-selector-${value.replace(/\./g, "_")}-button`;
+  }
+
+  /** The trigger display label for a data-value (the row's leading token). */
+  function triggerTextFor(value) {
+    const row = state.modelOptions.find((option) => option.value === value);
+    return row ? row.text.split(/\s+/)[0] : value;
+  }
+
+  function triggerElement() {
+    const valueForId = state.modelIdStuck ? initialSelectedValue : state.selectedValue;
+    const valueForText = state.modelTextStuck ? initialSelectedValue : state.selectedValue;
+    return {
+      text: triggerTextFor(valueForText),
+      isTrigger: true,
+      disabled: false,
+      id: triggerIdFor(valueForId),
+    };
+  }
+
+  function modelOptionRows(selectorValue) {
+    const open = state.modelOpen ? state.modelOptions : [];
+    const rows = selectorValue ? open.filter((option) => option.value === selectorValue) : open;
+    return rows.map((option) => ({
+      text: option.text,
+      modelOption: true,
+      value: option.value,
+      disabled: option.disabled === true,
+    }));
   }
 
   function handle(message) {
@@ -561,9 +619,6 @@ export function fakeZaiPage({
         if (probe.selector === "button") {
           return { ok: true, fact: { texts: visibleButtons().map((b) => b.text) } };
         }
-        if (probe.selector === 'button[aria-label="model-item"]') {
-          return { ok: true, fact: { texts: state.modelOpen ? state.modelOptions : [] } };
-        }
         return { ok: true, fact: { texts: list.map((el) => textOf(el)) } };
       }
       case "visible":
@@ -598,11 +653,29 @@ export function fakeZaiPage({
     if (selector === "button") {
       return visibleButtons();
     }
-    if (selector === 'button[aria-label="model-item"]') {
-      return state.modelOpen ? state.modelOptions.map((text) => ({ text, modelOption: true })) : [];
+    // The model selector surface (LIVE-OBSERVED structure):
+    if (selector === 'button[aria-label="Select a model"]') {
+      return state.modelTrigger && state.modelTriggerAria ? [triggerElement()] : [];
     }
-    if (selector.includes("model-selector")) {
-      return [{ text: state.selectedModel, isTrigger: true }];
+    if (selector === 'button[id^="model-selector-"][id$="-button"]') {
+      return state.modelTrigger ? [triggerElement()] : [];
+    }
+    const selectedIdCandidate = selector.match(/^#model-selector-([a-z0-9._-]+)-button$/);
+    if (selectedIdCandidate) {
+      // The selected-state id candidate resolves ONLY while the
+      // trigger id (derived from the SELECTED data-value) matches it.
+      const valueForId = state.modelIdStuck ? initialSelectedValue : state.selectedValue;
+      if (state.modelTrigger && triggerIdFor(valueForId) === selector.slice(1)) {
+        return [triggerElement()];
+      }
+      return [];
+    }
+    if (selector === 'button[aria-label="model-item"]') {
+      return modelOptionRows(null);
+    }
+    const optionValueMatch = selector.match(/^button\[aria-label="model-item"\]\[data-value="([^"]+)"\]$/);
+    if (optionValueMatch) {
+      return modelOptionRows(optionValueMatch[1]);
     }
     if (selector === "#chat-input") {
       return state.authenticated || true ? [{ value: state.composerValue, isComposer: true }] : [];
@@ -660,19 +733,22 @@ export function fakeZaiPage({
   }
 
   function applyAction(element, how) {
+    // Mirrors page/zaiPage.js clickElement: a disabled element is
+    // NEVER clicked (the live unauthenticated surface keeps the
+    // GLM-5.3 option row disabled — the click must refuse).
+    if (element.disabled) {
+      return { ok: false, error: { code: "PAGE_REFUSED", message: "the matched element is disabled — action refused" } };
+    }
     if (element.isSend) {
-      if (element.disabled) {
-        return { ok: false, error: { code: "PAGE_REFUSED", message: "the send control is disabled" } };
-      }
       submit();
       return { ok: true, clicked: true };
     }
     if (element.isTrigger) {
-      state.modelOpen = true;
+      state.modelOpen = !state.modelOpen; // the option menu toggles
       return { ok: true, clicked: true };
     }
     if (element.modelOption) {
-      state.selectedModel = element.text.split(/\s+/)[0];
+      state.selectedValue = element.value;
       state.modelOpen = false;
       return { ok: true, clicked: true };
     }
