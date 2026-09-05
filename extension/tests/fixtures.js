@@ -464,13 +464,19 @@ export function fakeZaiPage({
   // real origin: the composer FORM containing #chat-input renders
   // EXACTLY THREE buttons — upload (More), the Agent/compose toggle
   // carrying data-active with no id/aria-label, and the send
-  // control). Present by default; `composeStuck` models a control
-  // whose click never yields an enabled composer (the input state
-  // is not re-established); `duplicateComposer` models an
-  // ambiguous composer surface (two visible #chat-input elements —
-  // the value/enabled probes degrade to null facts); a disabled
-  // composer refuses the type op verbatim (mirroring the real page
-  // script's setValue acceptance check).
+  // control). Present by default; `false` models an ABSENT control
+  // (the structural locator resolves ZERO candidates — the
+  // continuation-7 absence regression); `"ambiguous"` models a
+  // composer form rendering TWO data-active buttons (the locator
+  // resolves MANY — the continuation-7 ambiguity regression: the
+  // re-establishment must fail closed BEFORE any click);
+  // `composeStuck` models a control whose click never yields an
+  // enabled composer (the input state is not re-established);
+  // `duplicateComposer` models an ambiguous composer surface (two
+  // visible #chat-input elements — the value/enabled probes degrade
+  // to null facts); a disabled composer refuses the type op
+  // verbatim (mirroring the real page script's setValue acceptance
+  // check).
   composeControl = true,
   composeStuck = false,
   duplicateComposer = false,
@@ -724,6 +730,16 @@ export function fakeZaiPage({
     // contains #chat-input — the operator-described circular
     // control).
     if (selector === "form:has(#chat-input) button[data-active]") {
+      // The continuation-7 ambiguity simulation: a provider form
+      // rendering TWO data-active buttons — the structural locator
+      // resolves MANY, and the re-establishment must fail closed
+      // AMBIGUOUS_STATE before ever clicking (never a blind click).
+      if (state.composeControl === "ambiguous") {
+        return [
+          { isComposeControl: true, dataActive: "false", disabled: false },
+          { isComposeControl: true, dataActive: "false", disabled: false },
+        ];
+      }
       return state.composeControl ? [{ isComposeControl: true, dataActive: "false", disabled: false }] : [];
     }
     if (selector === "#send-message-button") {

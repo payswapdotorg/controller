@@ -985,6 +985,82 @@ test("a compose control whose click never re-establishes an enabled composer fai
   assert.equal(built.pages[0].state.composerValue, "");
 });
 
+test("an ABSENT compose control fails closed: the discarded-input-state recovery cannot re-establish the composer, and Start never claims submission (the exact live signature: waiting, empty composer, no message evidence)", async () => {
+  // Continuation 7, PR #6 comment 5554962511, requirement 6: the
+  // composer-discarded live failure mode with the circular
+  // Agent/compose control MISSING from the composer form. The exact
+  // live signature is reproduced: every send discards the input
+  // state (the submission never lands — no message evidence), the
+  // Stop control never shows (generation reads "waiting" — a CONTEXT
+  // field, never a proof), and the composer is decisively EMPTY. The
+  // recovery resolves ZERO candidates and fails closed
+  // AMBIGUOUS_STATE: never a blind click (there is nothing to click
+  // — absence is a refusal, not an action), never a guessed
+  // re-establishment, and the bounded budget bounds the verified
+  // resends (each preceded by the byte-identical read-back and the
+  // pre-send gate — never a blind resend).
+  const built = build({
+    composeControl: false,
+    beforeRespond: (message, state) => {
+      if (message.op === "probe") {
+        // The submission never lands on ANY attempt: the message
+        // evidence never carries the prompt, and nothing ever
+        // generates (the "waiting" shape of the live capture).
+        state.conversation = state.conversation.filter((t) => t !== PROMPT);
+        state.stop.visible = false;
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/did not resolve to exactly one element/.test(result.error.message));
+  assert.ok(!built.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
+  const history = built.pages[0].history();
+  // The compose control was NEVER clicked (zero candidates resolved —
+  // the absence fails closed before any action).
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === COMPOSE_CONTROL).length, 0);
+  // The bounded budget: every attempt typed the exact prompt, passed
+  // the pre-send gate, sent exactly once, and failed to re-establish
+  // the input state — 3 attempts, 3 verified sends, zero successes.
+  assert.equal(history.filter((c) => c.op === "type").length, 3);
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 3);
+  const typeTexts = history.filter((c) => c.op === "type").map((c) => c.text);
+  assert.deepEqual(typeTexts, [PROMPT, PROMPT, PROMPT]); // byte-identical every time
+});
+
+test("an AMBIGUOUS compose control (two data-active buttons in the composer form) fails closed without EVER being clicked", async () => {
+  // Continuation 7, PR #6 comment 5554962511, requirement 6: a
+  // provider surface whose composer form renders TWO data-active
+  // buttons — the structural locator resolves MANY, and the
+  // re-establishment must fail closed AMBIGUOUS_STATE BEFORE any
+  // click: never a blind click (ambiguity is a refusal, not an
+  // action), never a guessed re-establishment. The discarded-input
+  // state is the same live signature (waiting, empty composer, no
+  // message evidence), and Start never claims submission within the
+  // bounded budget.
+  const built = build({
+    composeControl: "ambiguous",
+    beforeRespond: (message, state) => {
+      if (message.op === "probe") {
+        state.conversation = state.conversation.filter((t) => t !== PROMPT);
+        state.stop.visible = false;
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/did not resolve to exactly one element/.test(result.error.message));
+  assert.ok(!built.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
+  const history = built.pages[0].history();
+  // The compose control was NEVER clicked — the two-candidate
+  // resolution is a refusal that precedes every action.
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === COMPOSE_CONTROL).length, 0);
+  assert.equal(history.filter((c) => c.op === "type").length, 3);
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 3);
+});
+
 test("an ambiguous composer surface (two visible #chat-input elements) fails closed before ANY action — nothing prepared, typed, or sent", async () => {
   // The pre-correction `?? \"\"` coercion treated an unreadable
   // composer as empty (cleared). The corrected adapter requires
