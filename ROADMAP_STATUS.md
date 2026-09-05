@@ -8,7 +8,7 @@
 
 - **current state:** `CTRL_011_WAITING_FOR_ARCHITECT`
 - **active Work Order:** `CTRL-011 — Production Controller Runtime`
-- **PR:** implementation PR opening on branch `ctrl-011-production-controller-runtime` (implementation head `9e6e358`)
+- **PR:** #36 (implementation, open) — branch `ctrl-011-production-controller-runtime`, implementation head `9e6e358`
 - **last completed architect action:** CTRL-011 explicitly activated as the next Work Item under the accepted Stage-7 governance boundary
 - **last completed worker action:** CTRL-010 dogfood completed and merged; deterministic execution record proves the composed governed loop, restart recovery, one-merge invariant, reconciliation, and fail-closed behavior
 - **current implementation action:** CTRL-011 implementation complete and fully validated (implementation head `9e6e358`); WAITING_FOR_ARCHITECT — review iteration 1
