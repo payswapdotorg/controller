@@ -5,9 +5,9 @@
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-012",
-  "status": "READY",
+  "status": "COMPLETE",
   "automationStage": "STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP",
-  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009", "CTRL-010", "CTRL-011"],
+  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009", "CTRL-010", "CTRL-011", "CTRL-012"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": false,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-012 is READY and authorized. Dispatch it from the exact current main SHA. Build the Browser Control Surface Foundation only. The browser MVP uses GitHub as the controlled-repository execution surface and supported browser provider adapters for chat.z.ai and later chatgpt.com. No later Work Item is active. A fresh session must read the state, roadmap, architecture, build process, CTRL-012 Work Order, and fresh-session handoff before acting."
+  "nextAction": "CTRL-012 is complete and reconciled from observed implementation merge 951584850609a5804b27348f0e540a80306be7d8 from exact approved head 0edc3a2c933384a5f52ec3de33cf4794eabac0f7. The Browser Control Surface Foundation is reviewed and merged. The roadmap remains in Stage 7; CTRL-013 is planned but not yet activated. Future execution requires explicit activation from repository authority."
 }

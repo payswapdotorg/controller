@@ -1,100 +1,52 @@
 # CTRL-012 — Browser Control Surface Foundation
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Authorization
 
-CTRL-012 is the sole currently executable Work Item. It follows the reviewed, merged and reconciled CTRL-011 Production Controller Runtime. The authoritative roadmap and machine state are the source of truth for activation and sequencing.
+CTRL-012 was the sole executable Work Item after CTRL-011 completion. It was dispatched from exact `main` base `398c0e8c06c2bae4cb4a864990b36cb0fd47b88f` and implemented in PR #38. Architect approval was recorded against exact reviewed head `0edc3a2c933384a5f52ec3de33cf4794eabac0f7`; the PR was merged once, producing merge commit `951584850609a5804b27348f0e540a80306be7d8`.
 
 Automation stage: `STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP`.
 
-Target product direction: Pectoraux Browser Controller MVP. The MVP uses GitHub as the controlled-repository execution surface and a browser extension as the operator/execution surface for provider websites. No local product checkout, VS Code extension, desktop daemon, or hosted web application is in scope for CTRL-012.
+## Completion record
 
-## Objective
+CTRL-012's Browser Control Surface Foundation was reviewed and accepted. The implementation established the Chromium Manifest V3 extension shell, typed closed message boundary, non-authoritative Worker/Architect registration, canonical repository selection, GET-only repository authority projection pinned to one observed commit SHA, generic provider-tab discovery, popup operator UI, tests and fresh-session documentation.
 
-Create the browser-extension foundation that can host the Controller as an operator/client surface and prepare the explicit provider-adapter boundary used by later Work Items. The extension must be able to register Workers and Architects, connect/select a controlled GitHub repository through repository-backed configuration, query authoritative Controller state, and present the active Work Item/lifecycle state.
+The implementation deliberately did **not** implement provider-specific Z.ai or ChatGPT DOM automation. Those capabilities remain owned by later roadmap Work Items CTRL-014 and CTRL-015. The implementation also did not add local product checkout, VS Code integration, desktop-agent execution, authoritative extension persistence, or new lifecycle/merge/review/evidence predicates.
 
-CTRL-012 must establish the browser/provider abstraction without implementing Z.ai- or ChatGPT-specific UI selectors or recovery logic. Those are owned by CTRL-014 and CTRL-015.
+## Evidence
 
-## Scope
+- Implementation PR: #38.
+- Dispatched base: `398c0e8c06c2bae4cb4a864990b36cb0fd47b88f`.
+- Reviewed head: `0edc3a2c933384a5f52ec3de33cf4794eabac0f7`.
+- Architect approval review: `5120711328`.
+- Merge commit: `951584850609a5804b27348f0e540a80306be7d8`.
+- Worker-reported extension suite: `node --test 'extension/tests/**/*.test.js'` — 80/80 pass.
+- Worker-reported Python suite: 651 passed + 209 subtests.
+- Worker-reported mypy strict: 0 issues in 38 source files.
+- Worker-reported ruff check/format: clean.
+- Worker-reported no-external-I/O guard: 8/8 + 129 subtests.
+- Worker-reported `scripts/audit_ctrl_012.sh 398c0e8c06c2bae4cb4a864990b36cb0fd47b88f`: PASS, 8/8.
+- Worker-reported Chromium real-load probe: MV3 service worker registered, popup rendered, live typed-message chain exercised against a public repository, provider-tab primitives verified, and a rate-limited probe demonstrated the typed fail-closed unavailable state.
 
-- browser extension package/shell for a supported Chromium-based browser;
-- extension manifest, build/load instructions, and minimal operator UI;
-- Controller-to-extension message/API boundary with typed request/response forms;
-- non-authoritative local registration for Workers and Architects (name, provider kind, supported URL, display metadata);
-- browser tab discovery primitives sufficient for later provider adapters;
-- selected GitHub repository configuration and repository identity display;
-- invocation of existing Controller authority/status surfaces without duplicating governance predicates;
-- display of active Work Item, lifecycle position, automation stage, and governance/error holds;
-- tests for extension message validation, provider registration validation, malformed input rejection, and authority/state presentation;
-- documentation that a fresh developer can load the extension unpacked and connect it to the existing Controller runtime.
+The live GitHub branch contained exactly the CTRL-012 implementation surface plus the established mechanical real-repository test-pin advancement; no `controller/` or `spec/` implementation semantics changed. The PR was approved on the live head and merged exactly once.
 
-## Required behavior
+## Reconciliation
 
-### Worker registration
+Observed implementation merge evidence:
 
-The extension must support adding a Worker with at least:
+```text
+PR: #38
+base: main @ 398c0e8c06c2bae4cb4a864990b36cb0fd47b88f
+approved head: 0edc3a2c933384a5f52ec3de33cf4794eabac0f7
+merge: 951584850609a5804b27348f0e540a80306be7d8
+```
 
-- human-readable name;
-- provider kind;
-- provider URL.
+Reconciliation updates this Work Order and machine state to `COMPLETE`, records CTRL-012 in the completed ledger, preserves Stage 7, and activates no successor. CTRL-013 is only planned and requires a separate explicit governance activation after reconciliation.
 
-For the MVP, the first Worker is `Z.ai` at `https://chat.z.ai`.
+No runtime implementation semantics are changed by this reconciliation checkpoint.
 
-The extension may open the provider URL for human authentication. Authentication happens directly in the provider UI; the extension must never request or store provider passwords.
-
-### Architect registration
-
-The extension must support adding an Architect with the same minimum fields. The MVP Architect is `ChatGPT` at `https://chatgpt.com`.
-
-The extension may open the provider URL for human authentication. It must not treat opening the URL as proof of an Architect decision or as a programmatic provider session.
-
-### GitHub repository
-
-The extension must represent a controlled repository by its canonical `owner/name` identity and local display metadata. Repository authority continues to come from the controlled repository itself. Extension configuration is never authoritative over roadmap, work-order, machine-state, lifecycle, or merge policy.
-
-### State display
-
-For a selected repository, the extension must be able to present the repository-derived active Work Item and lifecycle state. A missing, malformed, stale or contradictory authority result is an explicit fail-closed UI state, not an inferred fallback.
-
-## Forbidden
-
-- provider-specific Z.ai selectors, model-selection automation, prompt submission automation, popup recovery, or hang recovery — these belong to CTRL-014;
-- ChatGPT UI automation or Architect decision extraction — CTRL-015;
-- GitHub page-click automation when supported GitHub APIs can be used;
-- local product-repository checkout or local filesystem authority;
-- storing provider passwords, raw session cookies, API tokens, or credentials in extension-managed product state;
-- changing lifecycle/merge/review/evidence predicates;
-- automatic merge, approval, completion, or roadmap advancement;
-- making extension-local state authoritative;
-- bypassing provider authentication, CAPTCHAs, anti-bot controls, rate limits, or other protective mechanisms;
-- undocumented private provider APIs.
-
-## Acceptance criteria
-
-1. A supported Chromium-based browser can load the extension unpacked from the repository using documented steps.
-2. The extension provides a minimal operator surface showing configured Worker(s), Architect(s), selected repository, active Work Item and lifecycle state.
-3. Worker and Architect registrations validate strictly and persist only as non-authoritative extension configuration.
-4. Provider URLs can be opened for human authentication without requesting provider credentials through the extension.
-5. Repository identity is represented as canonical `owner/name`; invalid or ambiguous repository identity fails closed.
-6. Repository state is obtained through the existing Controller authority/runtime boundary; the extension does not reimplement lifecycle or merge policy.
-7. Malformed/unknown extension messages fail closed and cannot mutate authoritative repository state.
-8. Unit/automated tests cover the extension's typed message/configuration boundary and fail-closed cases.
-9. Documentation is sufficient for a fresh session to build, load, inspect and understand the extension without this conversation.
-
-## Required evidence
-
-- exact test command and passing output;
-- extension manifest/build/load evidence;
-- scope audit showing no provider-specific implementation beyond generic browser primitives;
-- concise implementation transcript in the PR;
-- PR body identifies the exact Work Item `CTRL-012`, base SHA, changed surface and evidence.
-
-## Handoff
-
-Implementation starts from the exact `main` SHA observed when this Work Item is dispatched. The worker must create exactly one governed PR for CTRL-012 and must not merge or approve it. Later Work Items remain inactive until CTRL-012 is complete/reconciled and explicitly activated.
-
-The fresh-session source of truth is:
+## Fresh-session source of truth
 
 1. `spec/state/controller-program-state.json`
 2. `spec/roadmap/roadmap.md`
@@ -102,5 +54,6 @@ The fresh-session source of truth is:
 4. `spec/operations/controller-build-process.md`
 5. this Work Order
 6. `spec/operations/fresh-session-handoff.md`
+7. `AGENTS.md`
 
-No conversation transcript is required to understand or implement this Work Item.
+No conversation transcript is required to understand CTRL-012 or its completion evidence.
