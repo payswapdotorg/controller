@@ -329,13 +329,45 @@ composition is CTRL-016 scope).
 5. enter the exact governed prompt **verbatim** (byte-identical
    read-back before any send — a rewritten prompt is never
    submitted);
+5b. **pre-send gate** (continuation 6): a FRESH decisive composer
+   read immediately before the send — the exact prompt must STILL be
+   present, verbatim. An unreadable, empty, or rewritten composer is
+   NEVER sent: the provider can discard the input state between the
+   read-back and the send, and a send click on an empty composer
+   (the operator-observed failure) is refused before it happens;
 6. send;
-7. verify ACTUAL submission from the resulting provider state: the
-   conversation holds the exact prompt and the composer is cleared.
-   A send click alone is never evidence of success.
+7. verify ACTUAL submission from the resulting provider state —
+   MESSAGE-EXCLUSIVE evidence only: an exact user-message row or
+   containment in the `[role="log"]` message region, with a
+   DECISIVELY empty composer (an absent or ambiguous composer read
+   is never "cleared"). Broad region matches (`main`,
+   class-scan surfaces) are NEVER acceptance evidence — a
+   sidebar/history surface whose text contains the prompt proved
+   nothing in the live false positive this continuation corrects. A
+   send click alone is never evidence of success.
 
 ### Bounded recovery
 
+- **The discarded input state** (the continuation-6 second observed
+  failure mode): after a send attempt the composer can read
+  decisively empty while the submission is NOT confirmed by message
+  evidence (the operator's captured post-run DOM: an empty
+  `#chat-input` and a disabled `#send-message-button` — the prompt
+  never entered). The adapter then re-establishes the input state
+  through the provider's Agent/compose UI control — the
+  operator-described circular control, structurally resolved as the
+  unique `data-active` button of the composer form containing
+  `#chat-input` (LIVE-OBSERVED: that form renders exactly three
+  buttons — upload, the compose toggle, and send). The control must
+  resolve to exactly one element (never a blind click); the click is
+  verified only by the composer becoming a visible enabled input.
+  The next bounded attempt re-types the exact prompt
+  byte-for-byte, re-reads it byte-for-byte, and only then resends —
+  a second bounded submission-recovery path alongside the popup
+  path, never a blind resend, and never a duplicate of an
+  already-confirmed submission (when the message evidence already
+  holds the exact prompt with a decisively-empty composer, nothing
+  is re-typed or resent).
 - **Known submission-blocking popup** (a modal dialog observed while
   verifying a submission, matching the known shape and carrying no
   auth/error text): the adapter presses `Enter` once for the current
@@ -356,14 +388,15 @@ composition is CTRL-016 scope).
   adapter never blindly presses keys and never pretends submission
   succeeded. The absence of a popup is NEVER acceptance evidence:
   acceptance is always the verified provider-state confirmation
-  (the conversation holds the exact prompt and the composer is
-  cleared).
+  (message-exclusive evidence holds the exact prompt and the
+  composer is decisively cleared).
 - **Hung worker** (`RecoverZaiHungWorker { worker, workItem, tabId }`):
   verify generation is in progress, activate the provider `Stop`
   control, VERIFY generation stopped, submit the FIXED message
   `continue` (no alternate wording exists), and verify acceptance:
   the exact fixed message must be CONFIRMED PRESENT in the
-  conversation/user-message evidence with the composer cleared.
+  message-exclusive evidence (an exact user-message row or the
+  `[role="log"]` region) with a DECISIVELY cleared composer.
   A resumed generation state (the Stop control returning, the
   composer clearing) is observed context only — it is NEVER
   acceptance evidence, because it does not identify the recovery

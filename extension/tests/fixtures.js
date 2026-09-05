@@ -424,6 +424,14 @@ export function fakeZaiPage({
   dialog = null,
   alert = null,
   conversation = [],
+  // The WEAK non-message surfaces (the continuation-6 eliminated
+  // acceptance candidates, PR #6 review 5123047551): broad
+  // class-scan regions that are NOT message-exclusive — e.g. a
+  // sidebar conversation list rendering an earlier conversation
+  // titled with the exact prompt. The adapter no longer probes
+  // them (they are not evidence); they exist to model the live
+  // false-positive source for the regression tests.
+  sidebarHistory = [],
   // The model selector surface, modeling the LIVE-OBSERVED structure
   // (2026-09-06, real https://chat.z.ai, closed state AND the opened
   // option list): option rows carry aria-label="model-item" +
@@ -452,6 +460,20 @@ export function fakeZaiPage({
   generates = true,
   popupOnSend = false,
   popupText = "Confirm submission",
+  // The composer Agent/compose control (LIVE-OBSERVED 2026-09-06,
+  // real origin: the composer FORM containing #chat-input renders
+  // EXACTLY THREE buttons — upload (More), the Agent/compose toggle
+  // carrying data-active with no id/aria-label, and the send
+  // control). Present by default; `composeStuck` models a control
+  // whose click never yields an enabled composer (the input state
+  // is not re-established); `duplicateComposer` models an
+  // ambiguous composer surface (two visible #chat-input elements —
+  // the value/enabled probes degrade to null facts); a disabled
+  // composer refuses the type op verbatim (mirroring the real page
+  // script's setValue acceptance check).
+  composeControl = true,
+  composeStuck = false,
+  duplicateComposer = false,
   beforeRespond = null,
 } = {}) {
   const effectiveSelectedValue = selectedValue ?? (authenticated ? "glm-5.2" : "x-preview-l");
@@ -463,6 +485,7 @@ export function fakeZaiPage({
     dialog,
     alert,
     conversation,
+    sidebarHistory,
     modelOptions,
     selectedValue: effectiveSelectedValue,
     modelOpen,
@@ -476,6 +499,10 @@ export function fakeZaiPage({
     generates,
     popupOnSend,
     popupText,
+    composeControl,
+    composeStuck,
+    duplicateComposer,
+    composerDisabled: false,
   };
 
   /**
@@ -597,6 +624,17 @@ export function fakeZaiPage({
       if (message.selector !== "#chat-input") {
         return { ok: false, error: { code: "PAGE_AMBIGUOUS", message: "type target not found" } };
       }
+      if (state.duplicateComposer) {
+        // Mirrors requireSingleVisible: an ambiguous action target
+        // refuses (zero best-effort typing).
+        return { ok: false, error: { code: "PAGE_AMBIGUOUS", message: "type matched 2 visible elements (need exactly 1; refusing best-effort action)" } };
+      }
+      if (state.composerDisabled) {
+        // Mirrors page/zaiPage.js setValue: a composer whose input
+        // state is not established does not accept the text — the
+        // typed prompt does not land.
+        return { ok: false, error: { code: "PAGE_REFUSED", message: "the composer did not accept the exact text verbatim" } };
+      }
       state.composerValue = message.text;
       return { ok: true, typed: true, value: state.composerValue };
     }
@@ -678,7 +716,15 @@ export function fakeZaiPage({
       return modelOptionRows(optionValueMatch[1]);
     }
     if (selector === "#chat-input") {
-      return state.authenticated || true ? [{ value: state.composerValue, isComposer: true }] : [];
+      const composer = { value: state.composerValue, isComposer: true, disabled: state.composerDisabled === true };
+      return state.duplicateComposer ? [composer, { ...composer }] : [composer];
+    }
+    // The composer Agent/compose control (LIVE-OBSERVED 2026-09-06:
+    // the unique data-active button of the composer form that
+    // contains #chat-input — the operator-described circular
+    // control).
+    if (selector === "form:has(#chat-input) button[data-active]") {
+      return state.composeControl ? [{ isComposeControl: true, dataActive: "false", disabled: false }] : [];
     }
     if (selector === "#send-message-button") {
       return [Object.assign({ isSend: true }, sendButton())];
@@ -707,9 +753,13 @@ export function fakeZaiPage({
     if (selector === '[class*="user"][class*="message"]' || selector === '[data-role="user"]' || selector === '[class*="user-message"]') {
       return state.conversation.map((text) => ({ text, value: text }));
     }
-    // The remaining conversation candidates behave like the log.
+    // The WEAK broad candidates (the eliminated acceptance surfaces):
+    // they resolve to the NON-MESSAGE sidebar/history rows — never to
+    // the conversation log. A weak surface carrying the exact prompt
+    // is precisely the live false-positive source the corrected
+    // acceptance predicate must ignore.
     if (selector === "main" || selector.includes("conversation") || selector.includes("message-list")) {
-      return state.conversation.length > 0 ? [{ text: state.conversation.join("\n") }] : [];
+      return state.sidebarHistory.map((text) => ({ text }));
     }
     return [];
   }
@@ -760,6 +810,13 @@ export function fakeZaiPage({
       // The real pill click switches the provider app into Agent
       // mode: the Agent pill becomes the active mode pill.
       state.agent.active = true;
+      return { ok: true, clicked: true };
+    }
+    if (element.isComposeControl) {
+      // The real control click re-establishes the composer input
+      // state; the stuck simulation models a control whose click
+      // never yields an enabled composer.
+      state.composerDisabled = state.composeStuck === true;
       return { ok: true, clicked: true };
     }
     return { ok: true, clicked: true };

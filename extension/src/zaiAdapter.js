@@ -16,9 +16,19 @@
  *        data-value `glm-5.3`, LIVE-OBSERVED; the trigger is located
  *        through its live-observed generic candidates, never a
  *        hardcoded model-specific id);
- *     5. enter the EXACT Controller-generated governed prompt verbatim;
+ *     5. enter the EXACT Controller-generated governed prompt verbatim
+ *        (byte-identical read-back BEFORE any send);
+ *     5b. PRE-SEND GATE (continuation 6, PR #6 review 5123047551): a
+ *         FRESH decisive composer read immediately before the send —
+ *         the exact prompt must STILL be present, verbatim; an
+ *         unreadable, empty, or rewritten composer is NEVER sent;
  *     6. send;
- *     7. verify ACTUAL submission from the resulting provider state.
+ *     7. verify ACTUAL submission from the resulting provider state —
+ *         MESSAGE-EXCLUSIVE evidence only: an exact user-message row
+ *         or containment in the `[role="log"]` message region, with
+ *         a DECISIVELY empty composer (an absent or ambiguous
+ *         composer read is never "cleared" and never "present").
+ *         Broad region matches are never acceptance evidence.
  *
  *   known submission-blocking popup: press `Enter` once per retry
  *   attempt, then RESEND the exact prompt (the operator's recovery
@@ -28,6 +38,21 @@
  *   the adapter never blindly presses keys, and the absence of a
  *   popup is NEVER acceptance evidence (acceptance is always the
  *   verified provider-state confirmation of step 7).
+ *
+ *   the second observed failure mode (continuation 6, PR #6 review
+ *   5123047551): the input state can be discarded around a send
+ *   attempt — the composer reads decisively empty while the
+ *   submission is NOT confirmed by message evidence (the operator's
+ *   captured post-run DOM: an empty `#chat-input` and a disabled
+ *   `#send-message-button`, the prompt never entered). The bounded
+ *   remediation re-establishes the input state through the
+ *   provider's Agent/compose UI control (the operator-described
+ *   circular control of the composer form), verifies the composer
+ *   is visible and enabled, re-types the exact prompt
+ *   byte-for-byte, re-reads it byte-for-byte, and only then resends
+ *   — a second bounded submission-recovery path alongside the
+ *   known-popup path, never a blind resend, and never a duplicate
+ *   of an already-confirmed submission.
  *
  *   hung worker: `Stop` -> verified stopped -> the FIXED message
  *   `continue` -> verified acceptance (the exact message confirmed
@@ -172,12 +197,44 @@ const ZAI_LOCATORS = Object.freeze({
   agentTextScan: "#sidebar button[data-active]:not([id])",
   stopControl: Object.freeze(['button[aria-label="Stop"]', 'button[title="Stop"]']),
   stopText: "Stop",
-  conversation: Object.freeze(['[role="log"]', '[class*="conversation"]', '[class*="message-list"]', "main"]),
+  // AUTHENTICATED-SURFACE-DECLARED message-evidence candidates. The
+  // CONTINUATION-6 ELIMINATION (PR #6 review 5123047551): the
+  // acceptance predicate previously consulted BROAD region
+  // candidates ('[class*="conversation"]', '[class*="message-list"]',
+  // 'main') — surfaces that are NOT message-exclusive. A sidebar or
+  // history region whose rendered text can contain the exact prompt
+  // (e.g. an earlier conversation titled with the governed prompt)
+  // combined with an empty or ambiguous composer read produced the
+  // live FALSE POSITIVE: Start reported `submitted` (attempts=1,
+  // popupDismissals=0, generation="waiting") while the operator's
+  // post-run DOM showed an EMPTY `#chat-input` and a DISABLED send
+  // control — the prompt had never been entered. LIVE-OBSERVED
+  // 2026-09-06 (real origin, fact-only): the broad candidates match
+  // ZERO elements on the live surface — they were never
+  // live-observed acceptance surfaces at all. Acceptance evidence is
+  // MESSAGE-EXCLUSIVE ONLY: an exact user-message row, or containment
+  // in the `[role="log"]` message region. The broad candidates are
+  // REMOVED (not merely demoted): a region that can match non-message
+  // text is never evidence.
+  conversation: Object.freeze(['[role="log"]']),
   userMessage: Object.freeze([
     '[class*="user"][class*="message"]',
     '[data-role="user"]',
     '[class*="user-message"]',
   ]),
+  // The composer Agent/compose UI control — the operator-described
+  // CIRCULAR control (PR #6 review 5123047551, requirement 3): the
+  // bounded input-state re-establishment path. LIVE-OBSERVED
+  // 2026-09-06 (real origin, fact-only, zero clicks): the composer
+  // FORM that contains `#chat-input` renders EXACTLY THREE buttons —
+  // `#upload-file-button` (aria-label "More"), the Agent/compose
+  // toggle (NO id, NO aria-label, ALWAYS carrying the provider's
+  // universal mode marker data-active "true"|"false"), and
+  // `#send-message-button`. The structural candidate resolves that
+  // unique data-active button of the composer form; a wrong or
+  // shifted structure resolves to zero/many and the re-establishment
+  // fails closed (never a blind click).
+  composeControl: Object.freeze(["form:has(#chat-input) button[data-active]"]),
 });
 
 /** The exact model the Work Order freezes for new worker sessions. */
@@ -337,11 +394,30 @@ export function createZaiAdapter({
   }
 
   /**
-   * The exact-text confirmation: the strongest evidence available —
-   * an exact user-message match, else exact containment in a resolved
-   * conversation region — never a guessed success.
+   * A DECISIVE composer read (continuation 6, PR #6 review
+   * 5123047551): exactly the string value when the composer resolved
+   * to exactly one visible element, else null (absent OR ambiguous).
+   * An ambiguous read is NEVER coerced: null is never "cleared"
+   * (the pre-correction `?? ""` coercion treated an unreadable
+   * composer as empty — a false-positive acceptance source) and
+   * never "present". Callers must fail closed on null.
    */
-  function conversationContains(facts, text) {
+  function composerValueOf(facts) {
+    const value = facts.composerValue?.value;
+    return typeof value === "string" ? value : null;
+  }
+
+  /**
+   * The MESSAGE-EXCLUSIVE acceptance evidence (continuation 6): an
+   * exact user-message row, else exact containment in the
+   * `[role="log"]` message region — the strongest provider-state
+   * proof available, and the ONLY acceptance surfaces. Broad region
+   * matches (the eliminated candidates) are never evidence: a
+   * non-message surface whose text contains the prompt (a sidebar or
+   * history region) proved nothing while producing a live
+   * false-positive `submitted` — never a guessed success.
+   */
+  function messageEvidenceContains(facts, text) {
     for (const probe of EVIDENCE_PROBES) {
       if (probe.name.startsWith("userMessageCandidate")) {
         const texts = facts[probe.name]?.texts;
@@ -434,9 +510,9 @@ export function createZaiAdapter({
         : { state: "working", detail: "generation is in progress" };
     }
     if (session) {
-      const promptPresent = conversationContains(facts, session.prompt);
-      if (promptPresent && (composerValue === null || composerValue.length === 0)) {
-        return { state: "prompt-submitted", detail: "the session prompt is confirmed present and generation is pending" };
+      const promptPresent = messageEvidenceContains(facts, session.prompt);
+      if (promptPresent && composerValue === "") {
+        return { state: "prompt-submitted", detail: "the session prompt is confirmed present in the message evidence and generation is pending" };
       }
       if (promptPresent && composerValue === session.prompt) {
         return { state: "prompt-unconfirmed", detail: "the prompt remains unsubmitted in the composer" };
@@ -816,16 +892,18 @@ export function createZaiAdapter({
    *   - the composer already holds the exact prompt (an unconfirmed
    *     send, or the popup blocked the submission): it is sent as-is
    *     — the provider surface is not disturbed with a re-type;
-   *   - the composer is empty AND the conversation already contains
-   *     the exact prompt: the submission is ALREADY CONFIRMED — no
-   *     resend (the governed prompt is never submitted twice;
-   *     acceptance is provider-state confirmation, never a blind
-   *     resend);
+   *   - the composer is DECISIVELY empty and the message evidence
+   *     already contains the exact prompt: the submission is ALREADY
+   *     CONFIRMED — no resend (the governed prompt is never submitted
+   *     twice; acceptance is message-exclusive provider-state
+   *     confirmation, never a blind resend);
    *   - otherwise: the prompt is (re)typed and the byte-identical
    *     read-back is verified BEFORE any send (a rewritten or
    *     truncated prompt is never submitted).
-   * A dialog visible at this point fails closed — never type through
-   * a modal.
+   * An ABSENT or AMBIGUOUS composer read is never "empty" and never
+   * "present" — it fails closed (an unreadable input state is never
+   * sent). A dialog visible at this point fails closed — never type
+   * through a modal.
    */
   async function ensurePrompt(tabId, prompt) {
     const facts = await readFacts(tabId);
@@ -839,11 +917,17 @@ export function createZaiAdapter({
         `a dialog is visible while preparing the prompt submission: ${dialog.reason}`
       );
     }
-    const composerValue = typeof facts.facts.composerValue?.value === "string" ? facts.facts.composerValue.value : "";
+    const composerValue = composerValueOf(facts.facts);
+    if (composerValue === null) {
+      return failure(
+        "AMBIGUOUS_STATE",
+        "the composer value could not be read decisively (absent or ambiguous) — refusing to prepare a submission on an unreadable input state"
+      );
+    }
     if (composerValue === prompt) {
       return { ok: true, present: true };
     }
-    if (composerValue.length === 0 && conversationContains(facts.facts, prompt)) {
+    if (composerValue === "" && messageEvidenceContains(facts.facts, prompt)) {
       return { ok: true, confirmed: true, facts: facts.facts };
     }
     return enterPrompt(tabId, prompt);
@@ -855,6 +939,64 @@ export function createZaiAdapter({
    */
   async function send(tabId) {
     return click(tabId, ZAI_LOCATORS.send);
+  }
+
+  /**
+   * The SECOND bounded submission-recovery path (continuation 6, PR
+   * #6 review 5123047551, requirement 3): re-establish the composer
+   * input state through the provider's Agent/compose UI control —
+   * the operator-described CIRCULAR control of the composer form
+   * (the unique data-active button of the form containing
+   * `#chat-input`, LIVE-OBSERVED structure). The control must
+   * resolve to EXACTLY ONE element — a blind click is never issued;
+   * a zero/many resolution fails closed. The click is verified by
+   * POST-ACTION OBSERVATION, never by the click itself: the composer
+   * must become VISIBLE and ENABLED within the settle budget. This
+   * path never types and never sends — the caller's next bounded
+   * attempt re-types the exact prompt byte-for-byte, re-reads it
+   * byte-for-byte, and only then resends.
+   */
+  async function reestablishComposer(tabId) {
+    const controlProbes = ZAI_LOCATORS.composeControl.map((selector, i) => ({
+      name: `composeControl${i}`,
+      selector,
+      mode: "count",
+    }));
+    const facts = await readFacts(tabId, controlProbes);
+    if (!facts.ok) {
+      return facts;
+    }
+    const counts = controlProbes.map((probe) => facts.facts[probe.name]?.count ?? 0);
+    const resolved = counts.findIndex((count) => count === 1);
+    if (resolved === -1) {
+      return failure(
+        "AMBIGUOUS_STATE",
+        `the composer Agent/compose control did not resolve to exactly one element (candidate counts: ${counts.join("/")}) — the input state cannot be re-established`
+      );
+    }
+    const clicked = await click(tabId, ZAI_LOCATORS.composeControl[resolved]);
+    if (!clicked.ok) {
+      return clicked;
+    }
+    // A click is NEVER evidence: verify the composer input state is
+    // actually re-established — visible AND enabled (a decisive
+    // enabled read requires the composer to resolve exactly once).
+    const verified = await settle(tabId, [], (f) =>
+      f.composerVisible?.visible === true && f.composerEnabled?.enabled === true
+    );
+    if (!verified.ok) {
+      return verified;
+    }
+    if (
+      verified.facts.composerVisible?.visible !== true ||
+      verified.facts.composerEnabled?.enabled !== true
+    ) {
+      return failure(
+        "AMBIGUOUS_STATE",
+        "the composer did not become a visible enabled input after the Agent/compose control click — the input state was not re-established"
+      );
+    }
+    return { ok: true };
   }
 
   // ------------------------------------------------------------------
@@ -956,6 +1098,7 @@ export function createZaiAdapter({
     // of an already-confirmed submission.
     let attempts = 0;
     let popupDismissals = 0;
+    let composeReestablishments = 0;
     let lastRefusal = null;
     let prepared = false;
 
@@ -969,6 +1112,7 @@ export function createZaiAdapter({
         prompt,
         attempts,
         popupDismissals,
+        composeReestablishments,
         submittedAt: now(),
         wasWorking: generation === "working",
         recoveries: 0,
@@ -977,7 +1121,7 @@ export function createZaiAdapter({
       return {
         ok: true,
         session: { worker, workItem, tabId },
-        submitted: { attempts, popupDismissals, generation },
+        submitted: { attempts, popupDismissals, composeReestablishments, generation },
       };
     };
 
@@ -1007,10 +1151,45 @@ export function createZaiAdapter({
         continue;
       }
       if (entered.confirmed) {
-        // The submission was already confirmed by provider-state
-        // evidence (e.g. the dismissed popup had let it land): never
-        // resend the governed prompt.
+        // The submission was already confirmed by MESSAGE-EXCLUSIVE
+        // provider-state evidence (e.g. the dismissed popup had let it
+        // land): never resend the governed prompt.
         return recordSubmission(entered.facts);
+      }
+      // 5b. The PRE-SEND GATE (continuation 6, PR #6 review
+      //     5123047551, requirement 1): the exact prompt must be
+      //     verified present in the composer by a FRESH DECISIVE read
+      //     immediately before the send — an unreadable, empty, or
+      //     rewritten composer is NEVER sent. The provider can
+      //     discard the input state between the read-back and the
+      //     send; the gate catches it and the bounded recovery
+      //     re-establishes the input state for a re-typed,
+      //     re-verified resend on the next attempt.
+      const gate = await readFacts(tabId);
+      if (!gate.ok) {
+        lastRefusal = gate;
+        continue;
+      }
+      const gateDialog = classifyDialog(gate.facts, "preparing");
+      if (gateDialog.kind !== "none") {
+        lastRefusal = failure(
+          "UNKNOWN_DIALOG",
+          `a dialog is visible at the send gate: ${gateDialog.reason}`
+        );
+        continue;
+      }
+      if (composerValueOf(gate.facts) !== prompt) {
+        const reestablished = await reestablishComposer(tabId);
+        if (reestablished.ok) {
+          composeReestablishments += 1;
+          lastRefusal = failure(
+            "PAGE_MALFORMED",
+            "the exact prompt was not present in the composer at the send gate (an unreadable, empty, or rewritten composer is never sent) — the composer input state was re-established for a re-typed, re-verified resend"
+          );
+        } else {
+          lastRefusal = reestablished;
+        }
+        continue;
       }
       // 6. Send.
       const sent = await send(tabId);
@@ -1018,15 +1197,24 @@ export function createZaiAdapter({
         lastRefusal = sent;
         continue;
       }
-      // 7. Verify actual submission from the resulting provider state.
+      // 7. Verify ACTUAL submission from the resulting provider
+      //    state. Decisive outcomes only: a dialog, a DECISIVELY
+      //    cleared composer WITH message-exclusive evidence of the
+      //    exact prompt (confirmed), or a composer that still HOLDS
+      //    the prompt (the send did not take). An absent/ambiguous
+      //    composer read is NOT decisive — the budget bounds the
+      //    wait and the final classification fails closed.
       const verdict = await settle(tabId, [], (f) => {
         const dialog = classifyDialog(f, "verifying-submission");
         if (dialog.kind !== "none") {
           return true;
         }
-        const composerValue = typeof f.composerValue?.value === "string" ? f.composerValue.value : "";
-        if (composerValue.length === 0 && conversationContains(f, prompt)) {
-          return true; // confirmed
+        const composerValue = composerValueOf(f);
+        if (composerValue === null) {
+          return false; // an unreadable composer is NOT decisive
+        }
+        if (composerValue === "" && messageEvidenceContains(f, prompt)) {
+          return true; // confirmed by message-exclusive evidence
         }
         return composerValue.length > 0; // unconfirmed (send did not take)
       });
@@ -1072,16 +1260,49 @@ export function createZaiAdapter({
         }
         continue; // resend the exact prompt
       }
-      const composerValue = typeof facts.composerValue?.value === "string" ? facts.composerValue.value : "";
-      if (composerValue.length === 0 && conversationContains(facts, prompt)) {
-        // Submission CONFIRMED by post-action observation.
+      const composerValue = composerValueOf(facts);
+      if (composerValue === "" && messageEvidenceContains(facts, prompt)) {
+        // Submission CONFIRMED by message-exclusive post-action
+        // evidence with a decisively cleared composer.
         return recordSubmission(facts);
       }
-      // Unconfirmed: the send did not take (the composer still holds
-      // the prompt). The bounded retry resends the exact prompt.
+      if (composerValue !== null && composerValue.length > 0) {
+        // Unconfirmed: the send did not take (the composer still holds
+        // the prompt). The bounded retry resends the exact prompt.
+        lastRefusal = failure(
+          "PAGE_MALFORMED",
+          "the prompt remained unsubmitted after the send (submission was not confirmed by observation)"
+        );
+        continue;
+      }
+      if (composerValue === "") {
+        // The SECOND observed failure mode (PR #6 review
+        // 5123047551, requirement 3): the composer is decisively
+        // empty, the submission is NOT confirmed by message
+        // evidence, and no dialog explains it — the provider
+        // discarded the input state around the send attempt (the
+        // operator's captured post-run DOM: an empty composer with
+        // a disabled send control). Fail-closed remediation: the
+        // bounded compose re-establishment; the next attempt
+        // re-types the exact prompt byte-for-byte, re-reads it
+        // byte-for-byte, and only then resends.
+        const reestablished = await reestablishComposer(tabId);
+        if (reestablished.ok) {
+          composeReestablishments += 1;
+          lastRefusal = failure(
+            "PAGE_MALFORMED",
+            "the prompt was not present in the composer after the send attempt (submission not confirmed by message evidence) — the composer input state was re-established for a re-typed, re-verified resend"
+          );
+        } else {
+          lastRefusal = reestablished;
+        }
+        continue;
+      }
+      // An unreadable composer after the budget: never "cleared",
+      // never "present" — fail closed.
       lastRefusal = failure(
-        "PAGE_MALFORMED",
-        "the prompt remained unsubmitted after the send (submission was not confirmed by observation)"
+        "AMBIGUOUS_STATE",
+        "the composer state could not be read decisively after the send (absent or ambiguous) — submission is unconfirmed"
       );
     }
     return (
@@ -1202,16 +1423,18 @@ export function createZaiAdapter({
       }
 
       // 4. verify acceptance: the EXACT fixed message `continue`
-      // must be confirmed present in the conversation/user-message
-      // evidence with the composer cleared (the message left the
-      // composer and landed in the conversation). A resumed
-      // generation state — the Stop control returning, the composer
-      // clearing — is observed context, NEVER acceptance evidence:
-      // it does not identify the recovery message.
+      // must be confirmed present in the MESSAGE-EXCLUSIVE evidence
+      // (an exact user-message row or the [role="log"] message
+      // region) with a DECISIVELY cleared composer — an
+      // absent/ambiguous composer read is never "cleared" (the
+      // message left the composer and landed in the conversation). A
+      // resumed generation state — the Stop control returning, the
+      // composer clearing — is observed context, NEVER acceptance
+      // evidence: it does not identify the recovery message.
       const accepted = await settle(tabId, [], (f) => {
-        const composerValue = typeof f.composerValue?.value === "string" ? f.composerValue.value : "";
-        const cleared = composerValue.length === 0;
-        if (cleared && conversationContains(f, ZAI_RECOVERY_MESSAGE)) {
+        const composerValue = composerValueOf(f);
+        const cleared = composerValue === ""; // decisive only
+        if (cleared && messageEvidenceContains(f, ZAI_RECOVERY_MESSAGE)) {
           return true; // acceptance confirmed by post-action evidence
         }
         // Decisive contradictions end the wait early (classified
@@ -1232,9 +1455,9 @@ export function createZaiAdapter({
         continue;
       }
       const f = accepted.facts;
-      const composerValue = typeof f.composerValue?.value === "string" ? f.composerValue.value : "";
-      const cleared = composerValue.length === 0;
-      const confirmed = conversationContains(f, ZAI_RECOVERY_MESSAGE);
+      const composerValue = composerValueOf(f);
+      const cleared = composerValue === ""; // decisive only
+      const confirmed = messageEvidenceContains(f, ZAI_RECOVERY_MESSAGE);
       if (!(cleared && confirmed)) {
         // Classify a decisive contradiction if one ended the wait.
         const verdict = classifySession(f, session, "recovery-acceptance");

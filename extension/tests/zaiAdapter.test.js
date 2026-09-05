@@ -1,14 +1,17 @@
 /**
  * Z.ai browser Worker adapter tests (CTRL-014) — the offline/injected
  * matrix over the deterministic page simulator: the governed
- * new-session sequence, submission confirmation-before-success, the
- * bounded known-popup Enter recovery with full preparation restart,
- * unknown-dialog/auth-interrupt/budget fail-closed behavior, the
- * fixed Stop -> continue hung-worker recovery (acceptance proven by
- * conversation evidence — a resumed generation state alone never
- * succeeds), identity preservation, and stale/contradictory
- * reference refusal (including the stale correlated Start
- * fail-closed regression).
+ * new-session sequence, submission confirmation-before-success (the
+ * continuation-6 correction: the pre-send gate, MESSAGE-EXCLUSIVE
+ * acceptance evidence, decisive composer reads, and the bounded
+ * compose re-establishment — the operator-described circular
+ * control), the bounded known-popup Enter recovery with full
+ * preparation restart, unknown-dialog/auth-interrupt/budget
+ * fail-closed behavior, the fixed Stop -> continue hung-worker
+ * recovery (acceptance proven by conversation evidence — a resumed
+ * generation state alone never succeeds), identity preservation, and
+ * stale/contradictory reference refusal (including the stale
+ * correlated Start fail-closed regression).
  */
 
 import { test } from "node:test";
@@ -22,6 +25,13 @@ const PROMPT = [
   "",
   "Implement CTRL-014 exactly. Multi-line & special 'characters' — verbatim.",
 ].join("\n");
+
+/**
+ * The composer Agent/compose control locator (LIVE-OBSERVED 2026-09-06:
+ * the unique data-active button of the composer form containing
+ * #chat-input — the operator-described circular control).
+ */
+const COMPOSE_CONTROL = "form:has(#chat-input) button[data-active]";
 
 function build({
   authenticated = true,
@@ -42,6 +52,10 @@ function build({
   modelTriggerAria = true,
   modelIdStuck = false,
   modelTextStuck = false,
+  sidebarHistory = [],
+  composeControl = true,
+  composeStuck = false,
+  duplicateComposer = false,
 } = {}) {
   const pages = [];
   const tabs = [];
@@ -63,6 +77,10 @@ function build({
       modelTriggerAria,
       modelIdStuck,
       modelTextStuck,
+      sidebarHistory,
+      composeControl,
+      composeStuck,
+      duplicateComposer,
     });
     pages.push(page);
     tabs.push({ id: 7 + i, url: "https://chat.z.ai/", title: "Z.ai", page });
@@ -668,18 +686,20 @@ test("a popup that clears the composer re-types the exact prompt before the rese
   assert.deepEqual(typeTexts, [PROMPT, PROMPT]);
 });
 
-test("a send that clears the composer without provider-state confirmation is NEVER success (no popup does not mean accepted)", async () => {
+test("a send that clears the composer without message-evidence confirmation is NEVER success (no popup does not mean accepted)", async () => {
   // The frozen acceptance rule (PR #6 comment 5554526659): "no popup
   // = success" is FORBIDDEN. Here no dialog ever appears, every send
   // click succeeds, the composer clears — but the provider state
-  // never shows the exact prompt in the conversation. Acceptance
-  // requires the provider-state confirmation (conversation evidence +
-  // cleared composer); the adapter must retry within the budget and
-  // finally fail closed without ever claiming submission.
+  // never shows the exact prompt in the MESSAGE evidence. Acceptance
+  // requires message-exclusive confirmation (an exact user-message
+  // row or the [role="log"] region) with a decisively cleared
+  // composer; the corrected adapter additionally runs the bounded
+  // compose re-establishment between attempts (the continuation-6
+  // second failure mode) and still never claims submission.
   const swallowed = build({
     beforeRespond: (message, state) => {
       if (message.op === "probe") {
-        // The adversarial provider state: the conversation NEVER
+        // The adversarial provider state: the message evidence NEVER
         // contains the exact prompt (the hook filters it out of every
         // observation; the send click itself always succeeds).
         state.conversation = state.conversation.filter((t) => t !== PROMPT);
@@ -689,12 +709,16 @@ test("a send that clears the composer without provider-state confirmation is NEV
   const result = await swallowed.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/not confirmed by observation/.test(result.error.message));
+  assert.ok(/not present in the composer after the send attempt/.test(result.error.message));
   assert.ok(!swallowed.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
-  const sends = swallowed.pages[0].history().filter(
-    (c) => c.op === "click" && c.selector === "#send-message-button"
-  ).length;
+  const history = swallowed.pages[0].history();
+  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
   assert.equal(sends, 3); // the bounded budget of send attempts
+  // The bounded compose re-establishment ran once per exhausted
+  // attempt (the input state was re-established, re-typed, and
+  // re-verified — still no acceptance without message evidence).
+  const composeClicks = history.filter((c) => c.op === "click" && c.selector === COMPOSE_CONTROL).length;
+  assert.equal(composeClicks, 3);
 });
 
 test("a dialog during preparation (before any send) fails closed UNKNOWN_DIALOG", async () => {
@@ -726,12 +750,10 @@ test("two simultaneous dialogs during submission fail closed without pressing an
     dialogText: { text: null },
     alertText: { text: null },
     conversationCandidate0: { text: null },
-    conversationCandidate1: { text: null },
-    conversationCandidate2: { text: null },
-    conversationCandidate3: { text: null },
     userMessageCandidate0: { texts: [] },
     userMessageCandidate1: { texts: [] },
     userMessageCandidate2: { texts: [] },
+    composeControl0: { count: 1 },
   });
   const agentFacts = () => ({
     agentCandidate0: { count: 1 },
@@ -775,6 +797,295 @@ test("two simultaneous dialogs during submission fail closed without pressing an
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "UNKNOWN_DIALOG");
   assert.ok(/simultaneously/.test(result.error.message));
+});
+
+// --------------------------------------------------------------------
+// Continuation 6 (PR #6 review 5123047551) — the live false-positive
+// correction: the pre-send gate, message-exclusive acceptance
+// evidence, decisive composer reads, and the bounded compose
+// re-establishment (the operator-described circular control).
+// --------------------------------------------------------------------
+
+test("the reproduced live false positive: a weak surface carrying the prompt is NEVER already-confirmed evidence (the prompt is typed, sent, and accepted on message evidence only)", async () => {
+  // The live defect signature: Start returned submitted (attempts=1,
+  // popupDismissals=0, generation=waiting) while the operator's
+  // post-run DOM showed an EMPTY #chat-input and a DISABLED send
+  // control — the prompt had never been entered. Root cause: the
+  // acceptance predicate consulted broad non-message surfaces (a
+  // sidebar/history region whose text contained the prompt). The
+  // correction: acceptance evidence is message-exclusive, so the
+  // weak surface never shortcuts the submission — the honest path
+  // types, verifies at the send gate, sends, and accepts only on
+  // the real message evidence.
+  const { adapter, pages } = build({ sidebarHistory: [PROMPT] });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 1);
+  assert.equal(result.submitted.popupDismissals, 0);
+  assert.equal(result.submitted.composeReestablishments, 0);
+  const history = pages[0].history().filter((c) => c.op !== "probe");
+  // The honest path: the prompt WAS typed and sent (the weak surface
+  // never stood in for a submission).
+  assert.deepEqual(history.map((c) => c.op), ["click", "click", "click", "type", "click"]);
+  assert.equal(history.filter((c) => c.op === "type").length, 1);
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1);
+  // The acceptance evidence is the conversation message row — the
+  // submission ACTUALLY landed exactly once.
+  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
+});
+
+test("a weak surface carrying the prompt NEVER confirms an unlanded submission (fail closed, no success)", async () => {
+  // The adversarial variant of the live false positive: the send
+  // discards the prompt (empty composer, disabled send) and the ONLY
+  // surface carrying the prompt is the weak non-message surface. The
+  // pre-correction predicate accepted exactly this state; the
+  // corrected predicate runs the bounded compose re-establishment
+  // and fails closed — never a success, never a duplicate send past
+  // the budget.
+  const swallowed = build({
+    sidebarHistory: [PROMPT],
+    beforeRespond: (message, state) => {
+      if (message.op === "probe") {
+        state.conversation = state.conversation.filter((t) => t !== PROMPT);
+      }
+    },
+  });
+  const result = await swallowed.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "PAGE_MALFORMED");
+  assert.ok(/not present in the composer after the send attempt/.test(result.error.message));
+  assert.ok(!swallowed.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
+});
+
+test("the pre-send gate: a prompt lost between the read-back and the send is NEVER sent — the composer is re-established, the prompt re-typed, and only then sent once", async () => {
+  // The operator-observed discarding mode: the typed read-back
+  // verifies, then the provider discards the input state before the
+  // send. The gate (a fresh decisive read immediately before the
+  // send) refuses to send the empty composer; the bounded recovery
+  // re-establishes the input state; the next attempt re-types the
+  // exact prompt byte-identical and only THEN sends — exactly one
+  // send in the whole history, never an empty-composer send.
+  let readBacks = 0;
+  let discards = 0;
+  const built = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "type") {
+        readBacks = 0; // the read-back follows the type
+      }
+      if (message.op === "probe") {
+        readBacks += 1;
+        if (readBacks > 1 && state.composerValue === PROMPT && discards === 0) {
+          discards = 1;
+          state.composerValue = ""; // discarded after the read-back, before the send
+        }
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 2);
+  assert.equal(result.submitted.popupDismissals, 0);
+  assert.equal(result.submitted.composeReestablishments, 1);
+  const history = built.pages[0].history().filter((c) => c.op !== "probe");
+  // pill -> trigger -> option -> type -> [gate refuses] -> compose
+  // control -> re-type -> send. The ONLY send comes AFTER the second
+  // type (the first send never happened — the gate refused it).
+  assert.deepEqual(history.map((c) => c.op), ["click", "click", "click", "type", "click", "type", "click"]);
+  const clickSelectors = history.filter((c) => c.op === "click").map((c) => c.selector);
+  assert.deepEqual(clickSelectors, [
+    "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type",
+    'button[aria-label="Select a model"]',
+    'button[aria-label="model-item"][data-value="glm-5.3"]',
+    COMPOSE_CONTROL,
+    "#send-message-button",
+  ]);
+  const typeTexts = history.filter((c) => c.op === "type").map((c) => c.text);
+  assert.deepEqual(typeTexts, [PROMPT, PROMPT]); // byte-identical re-type
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1);
+  assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
+});
+
+test("the second observed failure mode: a send that discards the prompt (empty composer, disabled send) triggers the bounded compose re-establishment, re-type, re-read, and resend", async () => {
+  // PR #6 review 5123047551, requirement 3: after the initial send
+  // attempt the prompt is NOT present in the composer (the provider
+  // discarded the input state — the operator's captured post-run
+  // DOM). The correction: re-establish the input state through the
+  // Agent/compose control, re-type the exact prompt byte-for-byte,
+  // re-read it byte-for-byte, and only then resend.
+  let sendAttempts = 0;
+  const built = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button") {
+        sendAttempts += 1;
+        if (sendAttempts === 1) {
+          state.__discard = true; // the first send discards the input state
+        }
+      }
+      if (message.op === "probe" && state.__discard) {
+        state.__discard = false;
+        if (state.conversation[state.conversation.length - 1] === PROMPT) {
+          state.conversation.pop(); // the submission did not land
+        }
+        state.stop.visible = false; // nothing is generating
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 2);
+  assert.equal(result.submitted.popupDismissals, 0);
+  assert.equal(result.submitted.composeReestablishments, 1);
+  const history = built.pages[0].history().filter((c) => c.op !== "probe");
+  assert.deepEqual(history.map((c) => c.op), ["click", "click", "click", "type", "click", "click", "type", "click"]);
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === COMPOSE_CONTROL).length, 1);
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 2);
+  const typeTexts = history.filter((c) => c.op === "type").map((c) => c.text);
+  assert.deepEqual(typeTexts, [PROMPT, PROMPT]);
+  // Acceptance came only from the message evidence after the RESEND.
+  assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
+});
+
+test("a compose control whose click never re-establishes an enabled composer fails closed (never success, never a blind resend)", async () => {
+  // The stuck recovery: the Agent/compose control click "succeeds"
+  // but the composer never becomes an enabled input, and the
+  // unestablished composer refuses the re-type. The Start fails
+  // closed within the bounded budget without ever claiming
+  // submission.
+  let sendAttempts = 0;
+  const built = build({
+    composeStuck: true,
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button") {
+        sendAttempts += 1;
+        if (sendAttempts === 1) {
+          state.__discard = true;
+        }
+      }
+      if (message.op === "probe" && state.__discard) {
+        state.__discard = false;
+        if (state.conversation[state.conversation.length - 1] === PROMPT) {
+          state.conversation.pop();
+        }
+        state.stop.visible = false;
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "PAGE_REFUSED");
+  assert.ok(/did not accept the exact text verbatim/.test(result.error.message));
+  assert.ok(!built.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
+  const history = built.pages[0].history();
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === COMPOSE_CONTROL).length, 1);
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1);
+  // Every re-type was REFUSED by the unestablished composer (the
+  // bounded attempt budget of type commands) — the typed text never
+  // landed: the composer stays empty.
+  assert.equal(history.filter((c) => c.op === "type").length, 3);
+  assert.equal(built.pages[0].state.composerValue, "");
+});
+
+test("an ambiguous composer surface (two visible #chat-input elements) fails closed before ANY action — nothing prepared, typed, or sent", async () => {
+  // The pre-correction `?? \"\"` coercion treated an unreadable
+  // composer as empty (cleared). The corrected adapter requires
+  // DECISIVE reads: an ambiguous composer surface (the value and
+  // enabled probes degrade to null facts) never reaches preparation
+  // — the precheck itself fails closed.
+  const built = build({ duplicateComposer: true });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/not ready for a new worker session/.test(result.error.message));
+  const ops = built.pages[0].history().filter((c) => c.op !== "probe").map((c) => c.op);
+  assert.deepEqual(ops, []); // nothing was clicked, typed, or sent
+});
+
+test("an unreadable composer value is NEVER treated as cleared or present — Start refuses at the decisive-read gate without typing or sending", async () => {
+  // Canned facts: a structurally normal authenticated surface whose
+  // composer VALUE probe is ambiguous (value: null). The preparation
+  // is idempotently established (already active/selected — zero
+  // clicks), then ensurePrompt requires a DECISIVE read and fails
+  // closed: null is never "" (cleared) and never the prompt.
+  const tabs = [{ id: 7, url: "https://chat.z.ai/" }];
+  const tabsApi = fakeMessagingTabsApi({ tabs });
+  let types = 0;
+  let sends = 0;
+  const baseFacts = () => ({
+    authButtons: { texts: ["New Chat", "Agent"] },
+    composerVisible: { visible: true, count: 1 },
+    composerEnabled: { enabled: true },
+    composerValue: { value: null, ambiguous: true },
+    sendVisible: { visible: true, count: 1 },
+    dialogCount: { count: 0 },
+    alertVisible: { visible: false, count: 0 },
+    stopCandidate0: { visible: false, count: 0 },
+    stopCandidate1: { visible: false, count: 0 },
+    dialogText: { text: null },
+    alertText: { text: null },
+    conversationCandidate0: { text: null },
+    userMessageCandidate0: { texts: [] },
+    userMessageCandidate1: { texts: [] },
+    userMessageCandidate2: { texts: [] },
+    composeControl0: { count: 1 },
+    agentCandidate0: { count: 1 },
+    agentActive0: { count: 1 },
+    agentActive1: { count: 0 },
+    agentActive2: { count: 0 },
+    agentActive3: { count: 0 },
+    modelTriggerCount0: { count: 1 },
+    modelTriggerCount1: { count: 1 },
+    modelTriggerText0: { text: "GLM-5.3" },
+    modelTriggerText1: { text: "GLM-5.3" },
+    modelTriggerSelectedId: { count: 1 },
+  });
+  const bridge = {
+    send: async (_tabId, command) => {
+      if (command.op === "probe") {
+        return { ok: true, facts: baseFacts() };
+      }
+      if (command.op === "type") {
+        types += 1;
+        return { ok: true, typed: true, value: command.text };
+      }
+      if (command.op === "click" && command.selector === "#send-message-button") {
+        sends += 1;
+        return { ok: true, clicked: true };
+      }
+      return { ok: true, clicked: true };
+    },
+  };
+  const adapter = createZaiAdapter({ tabsApi, pageBridge: bridge, sleep: async () => {}, settlePolls: 2, settleIntervalMs: 0 });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/could not be read decisively/.test(result.error.message));
+  assert.equal(types, 0); // never typed into an unreadable input state
+  assert.equal(sends, 0); // never sent
+});
+
+test("a Start whose exact prompt is ALREADY in the message evidence with a decisively-empty composer never resends (no duplicate submission)", async () => {
+  // Requirement 5 (PR #6 review 5123047551): when the provider state
+  // shows the prompt already landed (message rows carry the exact
+  // prompt, composer decisively empty — e.g. the in-memory registry
+  // was lost on service-worker restart after a landed submission),
+  // the re-run Start re-establishes the idempotent preparation and
+  // re-reports the submission WITHOUT typing or sending again. The
+  // SAME result shape (attempts=1, popupDismissals=0,
+  // generation=waiting) is now reachable ONLY through genuine
+  // message evidence — contrast the weak-surface variant above,
+  // which types and sends.
+  const { adapter, pages } = build({ conversation: [PROMPT] });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 1);
+  assert.equal(result.submitted.popupDismissals, 0);
+  assert.equal(result.submitted.composeReestablishments, 0);
+  assert.equal(result.submitted.generation, "waiting");
+  const history = pages[0].history().filter((c) => c.op !== "probe");
+  assert.deepEqual(history.map((c) => c.op), ["click", "click", "click"]); // preparation only
+  assert.equal(history.filter((c) => c.op === "type").length, 0);
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 0);
+  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
 });
 
 // --------------------------------------------------------------------
