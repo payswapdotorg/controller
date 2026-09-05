@@ -70,7 +70,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from controller.authority import WORK_ITEMS_DIR, verify_authority
 from controller.domain import DomainEvent, GovernedWorkItem, reconstruct_domain
@@ -92,6 +92,7 @@ from controller.recovery import (
     RecoveryPlan,
 )
 from controller.review import ArchitectReviewLoop, ReviewLoopOutcome
+from controller.states import LifecycleState
 from controller.zai import ZaiAdapter, ZaiTransport, ZaiWorkerSession
 
 #: Environment variables the runtime reads provider tokens from (AC6). The
@@ -337,11 +338,31 @@ class RecordingZaiTransport:
 # ---------------------------------------------------------------------------
 
 _STATE_FILE = Path("spec/state/controller-program-state.json")
-_STATUS_LINE = re.compile(r"^Status:\s*`[A-Z_]+`\s*$", re.MULTILINE)
+_STATUS_LINE = re.compile(r"^Status:\s*`([A-Z_]+)`\s*$", re.MULTILINE)
+_ANY_STATUS_LINE = re.compile(r"^Status:.*$", re.MULTILINE)
 
 
 class RuntimeRecorderError(ControllerError):
     """The governed recording failed; the write is refused (fail closed)."""
+
+
+def _load_state_object(state_path: Path) -> dict[str, Any]:
+    """Load the controlled machine state as an object, typed fail-closed.
+
+    The review iteration-1 correction for the reconciliation projection:
+    an unreadable (missing/IO) or malformed (invalid JSON, non-object)
+    machine state raises :class:`RuntimeRecorderError` — never a raw
+    ``OSError``/``JSONDecodeError`` — before any write is considered.
+    """
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeRecorderError(
+            f"the controlled machine state at {state_path} is unreadable: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise RuntimeRecorderError(f"the controlled machine state at {state_path} is not an object")
+    return data
 
 
 @dataclass
@@ -369,21 +390,22 @@ class RuntimeRecorder:
     def project_event(self, repo_root: Path, event: DomainEvent) -> None:
         """Record one boundary-validated transition, then re-verify authority.
 
-        Fail closed (refusing the write is impossible after the fact, so
-        the error surfaces and the runtime stops) if the projection
-        would leave authority invalid or unverifiable.
+        Review iteration-1 correction (both surfaces preflighted read-only
+        before either write): the machine state must identify the event's
+        work item at the event's source state, AND the active work order's
+        ``Status:`` line must be present, grammar-valid, unambiguous, and
+        equal to the event's source state — all proven BEFORE the machine
+        state is mutated. A stale, missing, malformed, or ambiguous Status
+        line, an unreadable work order, or an unreadable/moved machine
+        state therefore refuses the projection with BOTH authority
+        surfaces unchanged (the split-surface hazard is closed at the
+        validation layer; only an I/O failure after a fully preflighted
+        pair of writes can still interrupt mid-projection, and it raises
+        this typed error so the runtime stops for governance attention).
         """
         state_path = repo_root / _STATE_FILE
-        try:
-            data = json.loads(state_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise RuntimeRecorderError(
-                f"the controlled machine state at {state_path} is unreadable: {exc}"
-            ) from exc
-        if not isinstance(data, dict):
-            raise RuntimeRecorderError(
-                f"the controlled machine state at {state_path} is not an object"
-            )
+        # Preflight surface 1 — the machine state (read-only).
+        data = _load_state_object(state_path)
         if data.get("activeWorkItem") != event.work_item:
             raise RuntimeRecorderError(
                 f"the boundary event names work item '{event.work_item}', but "
@@ -396,48 +418,124 @@ class RuntimeRecorder:
                 f"machine state records {data.get('status')!r}: the state moved "
                 "between reconstruction and recording — fail closed, never overwrite"
             )
+        # Preflight surface 2 — the work-order Status line (read-only).
+        order_path = repo_root / WORK_ITEMS_DIR / f"{event.work_item}.md"
+        updated_order = self._preflight_work_order_status(order_path, event)
+        # Both surfaces proven coherent — project both, then re-verify.
         data["status"] = event.to_state.value
-        state_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        self._record_work_order_status(repo_root, event)
+        try:
+            state_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            order_path.write_text(updated_order, encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeRecorderError(
+                f"the governed projection could not write the authority surfaces: {exc}"
+            ) from exc
         verify_authority(repo_root)
 
     def project_reconciliation(self, repo_root: Path, record: Mapping[str, object]) -> None:
-        """Record the CTRL-008-derived completed ledger (nothing else)."""
+        """Record the CTRL-008-derived completed ledger (nothing else).
+
+        Review iteration-1 correction (typed, coherent, no partial write):
+        the record's shape (its completed work item, its completed-before
+        basis, its completed-after ledger), the machine state's
+        readability, the active-Work-Item identity, the reconciliation
+        position, and the ledger's agreement with the record's
+        derivation basis are ALL preflighted read-only before the single
+        ledger write. Any refusal — malformed record, unreadable or
+        malformed machine state (typed, never a raw JSON/OS error), a
+        record that does not name the active Work Item, a machine state
+        not at the reconciliation position, or a drifted ledger — leaves
+        the completed ledger byte-identical (no partial projection).
+        """
+        work_item = record.get("work_item")
+        if not isinstance(work_item, str) or not work_item:
+            raise RuntimeRecorderError(
+                "the reconciliation record does not name its completed work item"
+            )
+        completed_before = record.get("completed_before")
+        if not isinstance(completed_before, list) or not all(
+            isinstance(entry, str) for entry in completed_before
+        ):
+            raise RuntimeRecorderError(
+                "the reconciliation record's completed-before ledger is malformed"
+            )
         completed_after = record.get("completed_after")
         if not isinstance(completed_after, list) or not all(
-            isinstance(item, str) for item in completed_after
+            isinstance(entry, str) for entry in completed_after
         ):
             raise RuntimeRecorderError("the reconciliation record's completed ledger is malformed")
         state_path = repo_root / _STATE_FILE
-        data = json.loads(state_path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
+        data = _load_state_object(state_path)
+        if data.get("activeWorkItem") != work_item:
             raise RuntimeRecorderError(
-                f"the controlled machine state at {state_path} is not an object"
+                f"the reconciliation record names work item '{work_item}', but "
+                f"machine state identifies '{data.get('activeWorkItem')}' as active: "
+                "a cross-item recording is refused"
+            )
+        if data.get("status") != LifecycleState.RECONCILING.value:
+            raise RuntimeRecorderError(
+                "the completed ledger is projected only from the "
+                f"{LifecycleState.RECONCILING.value} position, but machine state "
+                f"records {data.get('status')!r}: fail closed, never overwrite"
+            )
+        if data.get("completed") != completed_before:
+            raise RuntimeRecorderError(
+                "the completed ledger drifted from the record's derivation "
+                "basis: fail closed, never overwrite"
             )
         data["completed"] = list(completed_after)
-        state_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        try:
+            state_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeRecorderError(
+                f"the governed projection could not write the machine state: {exc}"
+            ) from exc
         verify_authority(repo_root)
 
-    def _record_work_order_status(self, repo_root: Path, event: DomainEvent) -> None:
-        """Update the active work order's ``Status:`` line (the second
-        authority-checked surface). A work order that lost its status
-        line is a contradiction, not something to repair. Called only
-        from :meth:`project_event` **after** the machine state write and
-        **before** the whole-tree re-verification, with the event's work
-        item already proven identical to the active one."""
-        order_path = repo_root / WORK_ITEMS_DIR / f"{event.work_item}.md"
+    def _preflight_work_order_status(self, order_path: Path, event: DomainEvent) -> str:
+        """Validate the active work order's ``Status:`` surface and return
+        the updated text WITHOUT writing (review iteration-1: the write
+        is deferred until both authority surfaces have preflighted, so a
+        refusal never leaves them split).
+
+        The guard is exact: the Status line must exist, match the frozen
+        ``Status: `STATE``` grammar, appear exactly once, and its current
+        value must equal the event's source state — a stale work-order
+        Status (the surface moved between reconstruction and recording,
+        or was never aligned) is refused rather than substituted
+        blindly. A work order that lost its status line is a
+        contradiction, not something to repair."""
         try:
             text = order_path.read_text(encoding="utf-8")
         except OSError as exc:
             raise RuntimeRecorderError(
                 f"the active work order at {order_path} is unreadable: {exc}"
             ) from exc
-        updated = _STATUS_LINE.sub(f"Status: `{event.to_state.value}`", text, count=1)
-        if updated == text and f"Status: `{event.to_state.value}`" not in text:
+        matches = list(_STATUS_LINE.finditer(text))
+        if not matches:
+            if _ANY_STATUS_LINE.search(text):
+                raise RuntimeRecorderError(
+                    f"the active work order at {order_path} carries a malformed "
+                    "Status line (outside the frozen 'Status: `STATE`' grammar): "
+                    "the projection is refused"
+                )
             raise RuntimeRecorderError(
                 f"the active work order at {order_path} lost its Status line"
             )
-        order_path.write_text(updated, encoding="utf-8")
+        if len(matches) > 1:
+            raise RuntimeRecorderError(
+                f"the active work order at {order_path} carries {len(matches)} "
+                "grammar-valid Status lines: an ambiguous authority surface is refused"
+            )
+        current = matches[0].group(1)
+        if current != event.from_state.value:
+            raise RuntimeRecorderError(
+                f"the boundary event transitions from {event.from_state.value}, but "
+                f"the active work order at {order_path} records Status '{current}': "
+                "the two authority surfaces disagree — refused with both "
+                "unchanged (fail closed, never overwrite)"
+            )
+        return _STATUS_LINE.sub(f"Status: `{event.to_state.value}`", text, count=1)
 
 
 # ---------------------------------------------------------------------------

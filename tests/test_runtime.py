@@ -34,8 +34,12 @@ Coverage maps to the CTRL-011 acceptance criteria:
 * AC7 (fail closed): malformed/contradictory authority aborts the
   cycle before any provider call; provider failures propagate as the
   frozen typed errors; the recorder refuses cross-item, stale, and
-  malformed projections; the CLI exits non-zero with a FAIL-CLOSED
-  line.
+  malformed projections — preflighting BOTH authority surfaces
+  read-only before either write so a refusal never splits them
+  (review iteration-1), and the reconciliation projection refuses
+  typed (never a raw JSON/OS error) on unreadable state, cross-item
+  identity, non-reconciling positions, and ledger drift; the CLI
+  exits non-zero with a FAIL-CLOSED line.
 * AC8 (safety boundaries): the dispatch cycle performs exactly one
   provider mutation (the worker start) and zero GitHub mutations; the
   reporting surface carries method+path only; the runtime performs no
@@ -708,7 +712,15 @@ class FailClosedCycleTests(RuntimeFixture):
 
 
 class RecorderGuardTests(RuntimeFixture):
-    """The governed recording refuses every ambiguous projection."""
+    """The governed recording refuses every ambiguous projection.
+
+    Review iteration-1 regressions: every refusal must leave BOTH
+    authority surfaces byte-identical (the recorder preflights the
+    machine state and the work-order Status line read-only before
+    either write), and the reconciliation projection refuses — typed,
+    never a raw JSON/OS error — on malformed records, unreadable state,
+    cross-item identity, non-reconciling positions, and ledger drift.
+    """
 
     def _event(self, work_item: str, from_state: str, to_state: str) -> DomainEvent:
         return DomainEvent(
@@ -718,39 +730,214 @@ class RecorderGuardTests(RuntimeFixture):
             to_state=LifecycleState(to_state),
         )
 
+    def _bytes(self, root: Path, relative: str) -> bytes:
+        return (root / relative).read_bytes()
+
+    # -- project_event: refusal leaves BOTH surfaces unchanged ---------------
+
     def test_cross_item_projection_is_refused(self) -> None:
         root = self._repo("READY")
+        state_before = self._bytes(root, STATE_FILE_REL)
         recorder = RuntimeRecorder()
         with self.assertRaises(RuntimeRecorderError):
             recorder.project_event(root, self._event("CTRL-002", "READY", "DISPATCHED"))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
 
     def test_stale_from_state_is_refused(self) -> None:
         root = self._repo("READY")
+        state_before = self._bytes(root, STATE_FILE_REL)
         recorder = RuntimeRecorder()
         with self.assertRaises(RuntimeRecorderError):
             recorder.project_event(root, self._event(WORK_ITEM, "DISPATCHED", "IMPLEMENTING"))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
 
     def test_unreadable_machine_state_is_refused(self) -> None:
         root = self._repo("READY")
         (root / STATE_FILE_REL).write_text("[]", encoding="utf-8")
+        order_before = self._bytes(root, WORK_ORDER_REL)
         recorder = RuntimeRecorder()
         with self.assertRaises(RuntimeRecorderError):
             recorder.project_event(root, self._event(WORK_ITEM, "READY", "DISPATCHED"))
+        self.assertEqual(self._bytes(root, WORK_ORDER_REL), order_before)
+
+    def test_stale_work_order_status_refuses_with_zero_projection_writes(self) -> None:
+        """The review iteration-1 headline regression: the work order's
+        Status line moved (or was never aligned) while the machine state
+        stayed — the projection is refused and NEITHER surface is
+        written (the old recorder substituted blindly after already
+        mutating the machine state)."""
+        root = self._repo("READY", work_item_status="DISPATCHED")
+        state_before = self._bytes(root, STATE_FILE_REL)
+        order_before = self._bytes(root, WORK_ORDER_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_event(root, self._event(WORK_ITEM, "READY", "DISPATCHED"))
+        self.assertIn("two authority surfaces disagree", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+        self.assertEqual(self._bytes(root, WORK_ORDER_REL), order_before)
+
+    def test_missing_work_order_status_line_refuses_without_any_write(self) -> None:
+        root = self._repo("READY")
+        order_path = root / WORK_ORDER_REL
+        order_path.write_text(
+            f"# {WORK_ITEM} — Synthetic Test Item\n\nNo status line at all.\n",
+            encoding="utf-8",
+        )
+        state_before = self._bytes(root, STATE_FILE_REL)
+        order_before = self._bytes(root, WORK_ORDER_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_event(root, self._event(WORK_ITEM, "READY", "DISPATCHED"))
+        self.assertIn("lost its Status line", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+        self.assertEqual(self._bytes(root, WORK_ORDER_REL), order_before)
+
+    def test_malformed_work_order_status_line_refuses_without_any_write(self) -> None:
+        root = self._repo("READY")
+        order_path = root / WORK_ORDER_REL
+        order_path.write_text(
+            f"# {WORK_ITEM} — Synthetic Test Item\n\nStatus: READY\n\nSynthetic work order body.\n",
+            encoding="utf-8",
+        )
+        state_before = self._bytes(root, STATE_FILE_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_event(root, self._event(WORK_ITEM, "READY", "DISPATCHED"))
+        self.assertIn("malformed Status line", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+
+    def test_ambiguous_status_lines_refuse_without_any_write(self) -> None:
+        root = self._repo("READY")
+        order_path = root / WORK_ORDER_REL
+        order_path.write_text(
+            f"# {WORK_ITEM} — Synthetic Test Item\n\nStatus: `READY`\n\n"
+            "Synthetic body.\n\nStatus: `DISPATCHED`\n",
+            encoding="utf-8",
+        )
+        state_before = self._bytes(root, STATE_FILE_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_event(root, self._event(WORK_ITEM, "READY", "DISPATCHED"))
+        self.assertIn("ambiguous authority surface", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+
+    def test_unreadable_work_order_refuses_with_machine_state_unchanged(self) -> None:
+        """The split-surface regression: the old recorder mutated the
+        machine state first and failed on the work order read afterward;
+        the preflight ordering refuses with the machine state intact."""
+        root = self._repo("READY")
+        (root / WORK_ORDER_REL).unlink()
+        state_before = self._bytes(root, STATE_FILE_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_event(root, self._event(WORK_ITEM, "READY", "DISPATCHED"))
+        self.assertIn("unreadable", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+
+    def test_event_projection_writes_both_surfaces_coherently(self) -> None:
+        """The happy path after the preflight reordering: one event moves
+        the machine state and the work-order Status line together, and
+        the whole tree stays authority-verifiable."""
+        root = self._repo("READY")
+        recorder = RuntimeRecorder()
+        recorder.project_event(root, self._event(WORK_ITEM, "READY", "DISPATCHED"))
+        state = self._state_json(root)
+        self.assertEqual(state["status"], "DISPATCHED")
+        self.assertIn("Status: `DISPATCHED`", (root / WORK_ORDER_REL).read_text(encoding="utf-8"))
+        verify_authority(root)
+
+    # -- project_reconciliation: typed, coherent, no partial write ------------
+
+    def _reconciliation_record(self, **overrides: Any) -> dict[str, Any]:
+        record: dict[str, Any] = {
+            "work_item": WORK_ITEM,
+            "completed_before": list(COMPLETED),
+            "completed_after": list(COMPLETED) + [WORK_ITEM],
+        }
+        record.update(overrides)
+        return record
 
     def test_malformed_reconciliation_ledger_is_refused(self) -> None:
-        root = self._repo("COMPLETE")
+        root = self._repo("RECONCILING")
+        state_before = self._bytes(root, STATE_FILE_REL)
         recorder = RuntimeRecorder()
         with self.assertRaises(RuntimeRecorderError):
             recorder.project_reconciliation(root, {"completed_after": "CTRL-001"})
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+
+    def test_reconciliation_without_identity_is_refused(self) -> None:
+        root = self._repo("RECONCILING")
+        state_before = self._bytes(root, STATE_FILE_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_reconciliation(root, self._reconciliation_record(work_item=None))
+        self.assertIn("does not name its completed work item", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+
+    def test_reconciliation_malformed_completed_before_is_refused(self) -> None:
+        root = self._repo("RECONCILING")
+        state_before = self._bytes(root, STATE_FILE_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_reconciliation(
+                root, self._reconciliation_record(completed_before="CTRL-001")
+            )
+        self.assertIn("completed-before ledger is malformed", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+
+    def test_reconciliation_unreadable_machine_state_is_typed(self) -> None:
+        root = self._repo("RECONCILING")
+        recorder = RuntimeRecorder()
+        record = self._reconciliation_record()
+        # Invalid JSON, a non-object, and a missing file each surface the
+        # typed recorder error — never a raw JSONDecodeError/OSError.
+        (root / STATE_FILE_REL).write_text("not json at all", encoding="utf-8")
+        with self.assertRaises(RuntimeRecorderError):
+            recorder.project_reconciliation(root, record)
+        (root / STATE_FILE_REL).write_text("[]", encoding="utf-8")
+        with self.assertRaises(RuntimeRecorderError):
+            recorder.project_reconciliation(root, record)
+        (root / STATE_FILE_REL).unlink()
+        with self.assertRaises(RuntimeRecorderError):
+            recorder.project_reconciliation(root, record)
+
+    def test_reconciliation_cross_item_identity_is_refused(self) -> None:
+        root = self._repo("RECONCILING")
+        state_before = self._bytes(root, STATE_FILE_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_reconciliation(root, self._reconciliation_record(work_item="CTRL-002"))
+        self.assertIn("cross-item recording is refused", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+
+    def test_reconciliation_position_not_reconciling_is_refused(self) -> None:
+        root = self._repo("MERGED")
+        state_before = self._bytes(root, STATE_FILE_REL)
+        recorder = RuntimeRecorder()
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_reconciliation(root, self._reconciliation_record())
+        self.assertIn("fail closed, never overwrite", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
+
+    def test_reconciliation_ledger_drift_is_refused(self) -> None:
+        root = self._repo("RECONCILING")
+        state_before = self._bytes(root, STATE_FILE_REL)
+        recorder = RuntimeRecorder()
+        drifted = self._reconciliation_record(completed_before=list(COMPLETED)[:-1])
+        with self.assertRaises(RuntimeRecorderError) as ctx:
+            recorder.project_reconciliation(root, drifted)
+        self.assertIn("drifted from the record's derivation basis", str(ctx.exception))
+        self.assertEqual(self._bytes(root, STATE_FILE_REL), state_before)
 
     def test_reconciliation_projects_only_the_completed_ledger(self) -> None:
-        root = self._repo("COMPLETE")
+        root = self._repo("RECONCILING")
         recorder = RuntimeRecorder()
         before = self._state_json(root)
-        recorder.project_reconciliation(root, {"completed_after": list(COMPLETED) + [WORK_ITEM]})
+        recorder.project_reconciliation(root, self._reconciliation_record())
         after = self._state_json(root)
         self.assertEqual(after["completed"], list(COMPLETED) + [WORK_ITEM])
-        # Nothing else moved: no stage change, no next-item activation.
+        # Nothing else moved: no stage change, no next-item activation,
+        # no status/identity change — the ledger is the only projection.
         for key in ("automationStage", "activeWorkItem", "status", "nextAction"):
             self.assertEqual(after[key], before[key])
         verify_authority(root)
