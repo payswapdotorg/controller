@@ -79,7 +79,7 @@ CTRL-003 GitHub adapter   CTRL-004 Z.ai provider boundary
            CTRL-012 Browser Control Surface Foundation ✓ COMPLETE
                   |
                   v
-           CTRL-013 GitHub Browser-App Integration
+           CTRL-013 GitHub Browser-App Integration  ← CURRENT / READY
                   |
                   v
            CTRL-014 Z.ai Browser Worker Adapter
@@ -121,7 +121,7 @@ Stage 7 — End-to-end autonomous governed loop
 
 Only the active Work Item identified by authoritative machine state is executable. Later roadmap items are planned sequencing, not active authorization. A later item becomes executable only after the preceding item is complete/reconciled and an explicit Architect-governed activation changes repository authority and creates/updates that Work Order.
 
-`CTRL-012` is complete and reconciled. `CTRL-013` is the next planned item but is **not activated or executable**. No Work Item after CTRL-013 is independently authorized.
+`CTRL-012` is complete and reconciled. `CTRL-013` is the current active and authorized Work Item. No Work Item after CTRL-013 is independently authorized.
 
 ## Work Item definitions
 
@@ -137,11 +137,11 @@ Status: **COMPLETE / RECONCILED.** Implemented in PR #38 and merged at `95158485
 
 ### CTRL-013 — GitHub Browser-App Integration
 
-Integrate GitHub authentication and repository selection into the extension using supported GitHub authorization mechanisms. Establish repository observation/mutation calls required by the existing Controller runtime without moving authority into extension storage.
+Integrate GitHub authentication and repository selection into the extension using supported GitHub authorization mechanisms. Establish the repository observation/mutation boundary needed by the existing Controller runtime without moving authority into extension storage.
 
 Dependency: CTRL-012 complete and reconciled.
 
-Status: **PLANNED / NOT ACTIVATED.**
+Status: **READY / CURRENT.** Explicitly activated after CTRL-012 reconciliation by the Architect-governed activation represented by this governance branch/PR. The exact dispatch base will be the `main` SHA produced by the accepted activation merge.
 
 Exit condition: user can connect GitHub, select `pectoraux/smallapp`, read authoritative state, and invoke Controller-observable GitHub operations with no PAT pasted into the extension UI.
 

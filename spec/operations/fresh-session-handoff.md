@@ -8,17 +8,17 @@ Repository: `pectoraux/controller`
 
 Automation stage: `STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP`
 
-Completed and reconciled: `CTRL-001` through `CTRL-011`.
+Completed and reconciled: `CTRL-001` through `CTRL-012`.
 
-Current active Work Item: `CTRL-012 — Browser Control Surface Foundation`.
+Current active Work Item: `CTRL-013 — GitHub Browser-App Integration`.
 
 Current Work Item status: `READY`.
 
-Only CTRL-012 is executable. CTRL-013 through CTRL-020 are planned sequencing only; they require explicit activation after the preceding Work Item is complete and reconciled.
+Only CTRL-013 is executable. CTRL-014 through CTRL-020 are planned sequencing only; they require explicit activation after the preceding Work Item is complete and reconciled.
 
 ## Product decision
 
-The MVP is a browser extension, not a VS Code extension, local daemon, desktop application, or standalone web app. The MVP does not require a local checkout of the controlled product repository. GitHub is the controlled-repository execution/evidence surface.
+The MVP is a Chromium browser extension, not a VS Code extension, local daemon, desktop application, or standalone web app. The MVP does not require a local checkout of the controlled product repository. GitHub is the controlled-repository execution/evidence surface.
 
 The browser extension exists because provider operations must occur through already-authenticated provider web UIs. Human authentication is performed directly at the provider site. The extension is responsible for operating supported provider pages after authentication; the Controller core remains the governance engine.
 
@@ -56,6 +56,12 @@ Do not invent alternate recovery prose. Recovery is bounded and preserves worker
 
 Human authentication is out of band. The Architect adapter will later deliver the Controller-generated review packet into the selected ChatGPT conversation and normalize explicit `APPROVE` / `REQUEST_CHANGES` decisions. Exact UI selectors and observation strategy are intentionally deferred to CTRL-015 and must be based on the live supported UI rather than guessed selectors.
 
+## CTRL-013 handoff
+
+CTRL-013 owns the GitHub browser-app integration foundation for the extension. It must provide supported GitHub authorization, accessible repository discovery/selection, canonical `owner/name` identity, observation of the GitHub evidence required by the existing Controller boundaries, and only the existing Controller-authorized mutation surface. It must not duplicate lifecycle/merge/review predicates, introduce PAT entry, store raw credentials, use GitHub page-click automation for API-available operations, or activate provider-specific Worker/Architect UI automation.
+
+The concrete MVP repository is `pectoraux/smallapp`. The extension must support selecting it, but repository authority is always read from the controlled repository itself.
+
 ## Governance invariants
 
 - Controlled repository remains the durable source of truth.
@@ -82,4 +88,4 @@ Human authentication is out of band. The Architect adapter will later deliver th
 
 ## Current next action
 
-Dispatch `CTRL-012` from the exact current `main` SHA. The worker owns only the Browser Control Surface Foundation scope defined in `spec/work-items/CTRL-012.md`. Do not pre-implement CTRL-013 through CTRL-020.
+Dispatch `CTRL-013` from the exact current `main` SHA after its governance activation is merged. The worker owns only the GitHub Browser-App Integration scope defined in `spec/work-items/CTRL-013.md`. Do not pre-implement CTRL-014 through CTRL-020.

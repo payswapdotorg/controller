@@ -61,7 +61,7 @@ The Controller safely carries a repository-authorized READY Work Item through di
 
 The accepted CTRL-010 dogfood record demonstrates this composed capability, including deliberate lost-state-write recovery, zero second merge mutation, deterministic reconciliation and fail-closed contradiction probes.
 
-Stage 7 remains the active governance stage. CTRL-011 completed the production runtime packaging. CTRL-012 is now complete and reconciled as the Browser Control Surface Foundation. CTRL-013 through CTRL-020 remain the explicitly planned product-surface sequence; each must be separately activated only after its predecessor is complete/reconciled.
+Stage 7 remains the active governance stage. CTRL-011 completed the production runtime packaging. CTRL-012 is complete and reconciled as the Browser Control Surface Foundation. CTRL-013 is now the sole active browser-MVP Work Item; CTRL-014 through CTRL-020 remain planned and require separate activation.
 
 ## Browser MVP operating model
 
@@ -120,11 +120,11 @@ Runtime state must be reconstructible from repository/GitHub evidence. No hidden
 
 ## Current operating position
 
-CTRL-001 through CTRL-012 are accepted, merged and reconciled. CTRL-012 — Browser Control Surface Foundation is complete. CTRL-013 — GitHub Browser-App Integration is the next planned item but is **not activated**.
+CTRL-001 through CTRL-012 are accepted, merged and reconciled. CTRL-012 — Browser Control Surface Foundation is complete. CTRL-013 — GitHub Browser-App Integration is now the sole active and authorized Work Item.
 
 Stage 7 active.
 You still perform: product/architecture authority; policy definition/change; semantic Architect review where required; contradiction, safety and exception handling; human authentication at provider sites; and future roadmap/work-order activation.
 You no longer need to perform: routine mechanical orchestration already covered by the accepted Controller capabilities, and, after CTRL-014/016, routine supported browser interaction with configured providers.
-The next automation milestone is: **CTRL-013 — GitHub Browser-App Integration, pending explicit activation after CTRL-012 reconciliation.**
+The next automation milestone is: **CTRL-013 — GitHub Browser-App Integration**.
 
 A fresh session continues by reading, in order: `spec/state/controller-program-state.json`, `spec/roadmap/roadmap.md`, `spec/architecture/controller-architecture.md`, this document, `spec/work-items/<active item>.md`, and `spec/operations/fresh-session-handoff.md`. The exact current `main` SHA must be observed before dispatch. No conversation history is required.

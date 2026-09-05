@@ -4,8 +4,8 @@
   "roadmap": "spec/roadmap/roadmap.md",
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
-  "activeWorkItem": "CTRL-012",
-  "status": "COMPLETE",
+  "activeWorkItem": "CTRL-013",
+  "status": "READY",
   "automationStage": "STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP",
   "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009", "CTRL-010", "CTRL-011", "CTRL-012"],
   "rules": {
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": false,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "CTRL-012 is complete and reconciled from observed implementation merge 951584850609a5804b27348f0e540a80306be7d8 from exact approved head 0edc3a2c933384a5f52ec3de33cf4794eabac0f7. The Browser Control Surface Foundation is reviewed and merged. The roadmap remains in Stage 7; CTRL-013 is planned but not yet activated. Future execution requires explicit activation from repository authority."
+  "nextAction": "CTRL-013 is READY and explicitly activated from reconciled CTRL-012 completion at main. Dispatch it from the exact current main SHA after this governance activation is merged. Build only the GitHub Browser-App Integration Work Order. CTRL-014 and later remain planned and inactive."
 }
