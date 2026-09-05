@@ -76,7 +76,7 @@ CTRL-003 GitHub adapter   CTRL-004 Z.ai provider boundary
            CTRL-011 Production Controller Runtime
                   |
                   v
-           CTRL-012 Browser Control Surface Foundation
+           CTRL-012 Browser Control Surface Foundation ✓ COMPLETE
                   |
                   v
            CTRL-013 GitHub Browser-App Integration
@@ -121,7 +121,7 @@ Stage 7 — End-to-end autonomous governed loop
 
 Only the active Work Item identified by authoritative machine state is executable. Later roadmap items are planned sequencing, not active authorization. A later item becomes executable only after the preceding item is complete/reconciled and an explicit Architect-governed activation changes repository authority and creates/updates that Work Order.
 
-`CTRL-012` is the current active and authorized Work Item. No Work Item after CTRL-012 is independently authorized yet.
+`CTRL-012` is complete and reconciled. `CTRL-013` is the next planned item but is **not activated or executable**. No Work Item after CTRL-013 is independently authorized.
 
 ## Work Item definitions
 
@@ -133,11 +133,15 @@ Dependency: CTRL-011 complete.
 
 Exit condition: extension loads in a supported Chromium-based browser; provider registrations are durable only as non-authoritative local configuration; Controller authority remains repository-derived; extension can identify a selected controlled repository and render its authoritative Work Item/state.
 
+Status: **COMPLETE / RECONCILED.** Implemented in PR #38 and merged at `951584850609a5804b27348f0e540a80306be7d8` from approved head `0edc3a2c933384a5f52ec3de33cf4794eabac0f7`.
+
 ### CTRL-013 — GitHub Browser-App Integration
 
 Integrate GitHub authentication and repository selection into the extension using supported GitHub authorization mechanisms. Establish repository observation/mutation calls required by the existing Controller runtime without moving authority into extension storage.
 
-Dependency: CTRL-012.
+Dependency: CTRL-012 complete and reconciled.
+
+Status: **PLANNED / NOT ACTIVATED.**
 
 Exit condition: user can connect GitHub, select `pectoraux/smallapp`, read authoritative state, and invoke Controller-observable GitHub operations with no PAT pasted into the extension UI.
 
@@ -170,11 +174,19 @@ Hung-worker recovery contract:
 - verify the recovery message was accepted;
 - otherwise fail closed after bounded attempts.
 
+Dependency: CTRL-013 complete and reconciled.
+
+Status: **PLANNED / NOT ACTIVATED.**
+
 Exit condition: a real browser session can receive an APP-001 handoff, confirm prompt submission, expose worker progress/terminal states, and recover a deliberately hung session without changing repository authority.
 
 ### CTRL-015 — ChatGPT Browser Architect Adapter
 
 Implement the Architect browser adapter for `chatgpt.com` using supported browser-extension interaction and live UI observations. Authentication is human-managed. The adapter must deliver Controller-generated review packets, observe the resulting Architect response, and normalize only explicit `APPROVE`, `REQUEST_CHANGES`, or an exception/unknown outcome. No response is never approval.
+
+Dependency: CTRL-014 complete and reconciled.
+
+Status: **PLANNED / NOT ACTIVATED.**
 
 Exit condition: a real review packet can be delivered to the selected Architect conversation and the adapter can distinguish explicit approval/change findings from unknown or blocked states without guessing.
 
@@ -182,11 +194,19 @@ Exit condition: a real review packet can be delivered to the selected Architect 
 
 Compose the extension, GitHub integration, Z.ai Worker adapter, ChatGPT Architect adapter, and existing Controller runtime into the complete operator flow. Add READY detection, Start Work, worker/review status, retry/recovery telemetry, and fail-closed operator presentation. No new lifecycle or merge predicates are permitted.
 
+Dependency: CTRL-015 complete and reconciled.
+
+Status: **PLANNED / NOT ACTIVATED.**
+
 Exit condition: from the extension, a user can connect services, select a repository, see a READY Work Item, start it, observe the resulting Controller lifecycle, and receive clear governance-hold/error states.
 
 ### CTRL-017 — pectoraux/smallapp Live End-to-End Dogfood
 
 Run the complete browser-operated governed loop against `pectoraux/smallapp` and `APP-001`. Prove the exact Z.ai first-prompt sequence, bounded submission retry, hang recovery via Stop + `continue`, GitHub PR/CI observation, ChatGPT Architect review, REQUEST_CHANGES continuation where applicable, exact-head merge gating, and deterministic reconciliation.
+
+Dependency: CTRL-016 complete and reconciled.
+
+Status: **PLANNED / NOT ACTIVATED.**
 
 Exit condition: APP-001 reaches COMPLETE from READY using the browser MVP with auditable evidence and no manual mechanical orchestration beyond human authentication and semantic Architect authority.
 
@@ -194,17 +214,29 @@ Exit condition: APP-001 reaches COMPLETE from READY using the browser MVP with a
 
 Harden provider adapters against expected transient UI failures, provider latency, tab loss, navigation drift and bounded retry/restart conditions. Add deterministic provider state observations, diagnostics, explicit unknown-state escalation, and regression fixtures based on captured/synthetic provider UI states that do not require real credentials.
 
+Dependency: CTRL-017 complete and reconciled.
+
+Status: **PLANNED / NOT ACTIVATED.**
+
 Exit condition: repeated controlled failure probes are deterministic, bounded and fail closed; recovery never silently crosses Worker/Work Item/session identity.
 
 ### CTRL-019 — Security, Permissions & Packaging Hardening
 
 Minimize extension permissions, isolate provider credentials/authentication from Controller data, harden content-script/message boundaries, redact telemetry, review browser-origin trust boundaries, document supported browsers/providers, and create reproducible extension packaging/signing instructions.
 
+Dependency: CTRL-018 complete and reconciled.
+
+Status: **PLANNED / NOT ACTIVATED.**
+
 Exit condition: security/permission audit passes and the extension package can be installed reproducibly with a documented upgrade path.
 
 ### CTRL-020 — MVP Release
 
 Package the browser extension plus Controller runtime as the first usable Pectoraux MVP. Publish operator documentation, installation/configuration procedure, supported provider matrix, known limitations, and a recovery playbook. The MVP remains GitHub-backed and browser-provider-driven; no local checkout or VS Code integration is required.
+
+Dependency: CTRL-019 complete and reconciled.
+
+Status: **PLANNED / NOT ACTIVATED.**
 
 Exit condition: a fresh user/session can install, connect GitHub, register Z.ai and ChatGPT, select a repository, start a READY Work Item, supervise/operate the provider browsers through the extension, and reach a reconciled completion without relying on conversation history.
 
