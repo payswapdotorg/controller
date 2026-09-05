@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pectoraux Controller</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>Pectoraux Controller</h1>
+    <p class="doctrine">Operator surface — non-authoritative. Repository authority wins.</p>
+  </header>
+
+  <main>
+    <section id="configuration-error" class="error-panel hidden">
+      <h2>Extension configuration</h2>
+      <p class="fail-closed" id="configuration-error-text"></p>
+    </section>
+
+    <section id="workers">
+      <h2>Workers</h2>
+      <ul id="worker-list" class="registration-list"></ul>
+      <form id="register-worker" class="registration-form">
+        <label>Name <input name="name" autocomplete="off" required placeholder="Z.ai"></label>
+        <label>Provider
+          <select name="providerKind">
+            <option value="zai">Z.ai</option>
+          </select>
+        </label>
+        <label>Provider URL <input name="providerUrl" autocomplete="off" required placeholder="https://chat.z.ai"></label>
+        <button type="submit">Register Worker</button>
+      </form>
+      <p class="form-error hidden" id="worker-form-error"></p>
+    </section>
+
+    <section id="architects">
+      <h2>Architects</h2>
+      <ul id="architect-list" class="registration-list"></ul>
+      <form id="register-architect" class="registration-form">
+        <label>Name <input name="name" autocomplete="off" required placeholder="ChatGPT"></label>
+        <label>Provider
+          <select name="providerKind">
+            <option value="chatgpt">ChatGPT</option>
+          </select>
+        </label>
+        <label>Provider URL <input name="providerUrl" autocomplete="off" required placeholder="https://chatgpt.com"></label>
+        <button type="submit">Register Architect</button>
+      </form>
+      <p class="form-error hidden" id="architect-form-error"></p>
+    </section>
+
+    <section id="repository">
+      <h2>Controlled repository</h2>
+      <p id="selected-repository" class="selected">none selected</p>
+      <form id="select-repository" class="registration-form">
+        <label>Repository (owner/name)
+          <input name="repository" autocomplete="off" required placeholder="pectoraux/controller">
+        </label>
+        <button type="submit">Select</button>
+      </form>
+      <p class="form-error hidden" id="repository-form-error"></p>
+    </section>
+
+    <section id="authority">
+      <h2>Controller state</h2>
+      <button id="refresh-state" type="button">Refresh state</button>
+      <p class="hint">Reads the two repository authority surfaces at one observed commit SHA.</p>
+      <div id="authority-state" class="state-panel">No state loaded yet.</div>
+      <div id="authority-error" class="error-panel hidden">
+        <p class="fail-closed" id="authority-error-text"></p>
+      </div>
+    </section>
+
+    <section id="tabs">
+      <h2>Provider tabs</h2>
+      <div id="tab-discovery-result" class="tab-panel"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>The extension never requests or stores provider credentials. Provider
+    authentication happens directly in the provider UI. Fail-closed by design:
+    missing, malformed, stale or contradictory authority is an error state,
+    never an inferred fallback.</p>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

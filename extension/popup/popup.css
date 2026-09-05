@@ -1,0 +1,185 @@
+:root {
+  color-scheme: light dark;
+  --accent: #1f6feb;
+  --error: #b42318;
+  --muted: #59636e;
+  --panel: #f2f4f7;
+  font-family: system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #4493f8;
+    --error: #f85149;
+    --muted: #8c959f;
+    --panel: #1c2128;
+  }
+}
+
+body {
+  width: 420px;
+  margin: 0;
+  padding: 0 12px 12px;
+  font-size: 13px;
+}
+
+header {
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--muted);
+}
+
+h1 {
+  margin: 0;
+  font-size: 15px;
+}
+
+h2 {
+  font-size: 13px;
+  margin: 14px 0 6px;
+  color: var(--accent);
+}
+
+.doctrine {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+section {
+  margin-bottom: 6px;
+}
+
+.registration-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+
+.registration-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin-bottom: 2px;
+  background: var(--panel);
+  border-radius: 4px;
+}
+
+.registration-list .meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.registration-list .meta .name {
+  font-weight: 600;
+}
+
+.registration-list .meta .detail {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.registration-list button {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.registration-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.registration-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1 1 120px;
+}
+
+.registration-form input,
+.registration-form select {
+  font-size: 12px;
+  padding: 3px 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.form-error {
+  color: var(--error);
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.selected {
+  font-family: ui-monospace, monospace;
+  margin: 0 0 6px;
+}
+
+.state-panel {
+  background: var(--panel);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.state-panel .row {
+  margin: 2px 0;
+}
+
+.state-panel .label {
+  color: var(--muted);
+}
+
+.state-panel .value {
+  font-weight: 600;
+}
+
+.error-panel .fail-closed {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border-left: 3px solid var(--error);
+  padding: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 4px 0;
+}
+
+.tab-panel {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+footer {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--muted);
+  color: var(--muted);
+  font-size: 10px;
+}
