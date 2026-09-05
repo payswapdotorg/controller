@@ -179,11 +179,17 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
     fetchImpl: globalThis.fetch.bind(globalThis),
     tabsApi: chrome.tabs,
   });
-  void service.start();
+  // Messages that arrive while the configuration load is still in
+  // flight wait for it (the store read is async); start() never
+  // rejects — a malformed store resolves as the corrupt fail-closed
+  // state.
+  const ready = service.start();
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-    service.handleMessage(request).then(sendResponse, (err) => {
-      sendResponse({ ok: false, error: { code: "INTERNAL_ERROR", message: String(err) } });
-    });
+    ready
+      .then(() => service.handleMessage(request))
+      .then(sendResponse, (err) => {
+        sendResponse({ ok: false, error: { code: "INTERNAL_ERROR", message: String(err) } });
+      });
     return true; // the response is async
   });
 }
