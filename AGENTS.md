@@ -17,9 +17,9 @@ Then inspect the live GitHub `main` SHA and any existing PRs/branches relevant t
 
 ## Current authorization
 
-The current active Work Item is `CTRL-012 — Browser Control Surface Foundation` and its repository status is `READY`.
+The current active Work Item is `CTRL-013 — GitHub Browser-App Integration` and its repository status is `READY`.
 
-Only the active Work Item is executable. Do not implement CTRL-013 or later until the repository explicitly activates them by updating authoritative machine state and the corresponding Work Order.
+Only the active Work Item is executable. Do not implement CTRL-014 or later until the repository explicitly activates them by updating authoritative machine state and the corresponding Work Order.
 
 ## Controller governance
 
@@ -33,7 +33,7 @@ Only the active Work Item is executable. Do not implement CTRL-013 or later unti
 
 ## MVP product direction
 
-The Controller MVP is a browser extension. It does not require a local product checkout, VS Code extension, desktop agent, or hosted web app.
+The Controller MVP is a Chromium browser extension. It does not require a local product checkout, VS Code extension, desktop daemon, or hosted web app.
 
 GitHub is used as the controlled-repository execution/evidence surface through supported APIs.
 
@@ -60,6 +60,10 @@ Hung worker recovery:
 Unexpected popup, authentication interruption, ambiguous state, exhausted retry budget or identity contradiction must fail closed.
 
 Provider-specific DOM/selectors belong inside provider adapters, not the Controller core.
+
+## CTRL-013 handoff
+
+CTRL-013 owns the GitHub Browser-App Integration foundation. Use supported GitHub authorization/application mechanisms without requiring a PAT in the extension UI. Support accessible repository discovery/selection, canonical `owner/name` identity, observation of the GitHub evidence required by existing Controller boundaries, and only existing Controller-authorized mutation operations. Do not duplicate lifecycle/merge/review predicates or perform GitHub page-click automation where supported APIs are available. The concrete MVP target repository is `pectoraux/smallapp`.
 
 ## Fresh-session expectation
 
