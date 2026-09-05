@@ -61,17 +61,17 @@ The stage mapping is an operational interpretation of the roadmap, not permissio
 
 ## Sequencing rule
 
-CTRL-001 through CTRL-010 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, PR #11, PR #14, PR #17, PR #20, PR #23, PR #26, and PR #30, with reconciliation checkpoints recorded via PR #24, PR #28, and this CTRL-010 reconciliation checkpoint. All ten items are in machine state `completed`. No successor Work Item is currently defined. The roadmap's Stage 6 prerequisite mapping (`CTRL-009 + CTRL-010`) now has accepted implementation, reconciliation, and end-to-end execution evidence.
+CTRL-001 through CTRL-010 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, PR #11, PR #14, PR #17, PR #20, PR #23, PR #26, and PR #30, with reconciliation checkpoints recorded via PR #24, PR #28, and PR #31. All ten items are in machine state `completed`. No successor Work Item is currently defined. The roadmap's Stage 7 completion definition is satisfied by the accepted CTRL-009 recovery/idempotency and CTRL-010 end-to-end dogfood evidence.
 
 ## Human-operator progression
 
-During Stage 0, the human operator performs the Controller's mechanical orchestration: routing Work Orders to Z.ai, bringing PR/CI state to the Architect, relaying durable review findings back to Z.ai, and performing currently-authorized merge/post-merge actions.
-
-As each automation stage is reached, the Architect must explicitly report what manual duties have been removed. The operator must never be expected to infer an automation transition from implementation alone.
+During Stage 0, the human operator performs the Controller's mechanical orchestration. As each automation stage is reached, the Architect must explicitly report what manual duties have been removed. The operator must never be expected to infer an automation transition from implementation alone.
 
 ## Completion definition
 
 The Controller roadmap is complete when the automated loop can safely take a repository-authorized READY work item from dispatch through Z.ai implementation, PR/CI, Architect review/change iteration, approval, merge, post-merge reconciliation and deterministic selection of the next eligible item, including restart recovery and a successful dogfood run.
+
+That completion evidence has been accepted through CTRL-010's deterministic end-to-end dogfood record. Stage 7 is therefore the active terminal roadmap stage unless a future explicit roadmap extension is authored and accepted.
 
 ## Explicit exclusions
 

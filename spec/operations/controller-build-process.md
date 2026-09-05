@@ -59,7 +59,9 @@ Human retains: product/architecture authority, policy changes, contradiction han
 
 The Controller safely carries a repository-authorized READY Work Item through dispatch, implementation, PR/CI, Architect review/change iteration, approval, merge, post-merge reconciliation and selection of the next eligible Work Item, including restart recovery and deterministic resumption.
 
-Stage 7 requires a separate explicit Architect-governed transition. It must never be inferred from implementation alone.
+The accepted CTRL-010 dogfood record demonstrates this composed capability, including deliberate lost-state-write recovery, zero second merge mutation, deterministic reconciliation and fail-closed contradiction probes.
+
+Stage 7 is active as the terminal stage of the current roadmap. There is no successor Work Item or further stage currently defined. Any future expansion requires an explicit roadmap/architecture change and Architect-governed transition.
 
 ## Normative transition report
 
@@ -76,11 +78,11 @@ Do not silently move between stages.
 
 ## Governed construction loop
 
-While the Controller is incomplete, the semantic governance order remains:
+The semantic governance order remains:
 
 ```text
 1. Architect reads repository authority.
-2. Identify the exact next eligible Work Item.
+2. Identify the exact next eligible Work Item, if one exists.
 3. Establish exact base SHA and worker context.
 4. Worker implements only the owned surface and opens/updates one PR.
 5. Observe PR, CI and evidence.
@@ -102,16 +104,11 @@ Merge must use the exact expected head and execute at most one mutation attempt.
 
 Runtime state must be reconstructible from repository/GitHub evidence. No hidden controller database may become the authoritative source of truth.
 
-## Current bootstrap position
+## Current operating position
 
-CTRL-001 through CTRL-010 are accepted, merged and reconciled. Their implementation/reconciliation evidence is recorded in the roadmap, work orders and repository state. The current authoritative machine state is `STAGE-6-MERGE-RECONCILIATION-AUTOMATION` with all ten Work Items in `completed` and no successor Work Item currently defined.
+CTRL-001 through CTRL-010 are accepted, merged and reconciled. The authoritative machine state is `STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP` with all ten Work Items in `completed` and no successor Work Item defined.
 
-Stage 6 was explicitly activated only after accepted CTRL-009 recovery/idempotency and CTRL-010 end-to-end dogfood evidence, including the demonstrated lost-state-write interruption, one authorized merge mutation, zero second merge attempt, deterministic reconciliation and fail-closed contradiction probes.
-
-## Stage 6 active
-
-You still perform: product/architecture authority; policy definition/change; semantic Architect review where required; contradiction, safety and exception handling.
-
-You no longer need to perform: mechanical merge clicking or routine post-merge bookkeeping for eligible Work Items. Accepted Controller capabilities own those mechanics subject to merge predicates, repository authority and fail-closed behavior.
-
-The next automation milestone is: **Stage 7 — End-to-end autonomous governed loop**. No successor Work Item is currently defined, and Stage 7 is not automatically activated by the existence of Stage 6 evidence. A separate explicit Architect-governed transition is required.
+Stage 7 active.
+You still perform: product/architecture authority; policy definition/change; semantic Architect review where required; contradiction, safety and exception handling; and any future roadmap extension.
+You no longer need to perform: routine mechanical orchestration, mechanical merge clicking or routine post-merge bookkeeping for governed Work Items covered by the accepted Controller capabilities.
+The next automation milestone is: none defined in the current roadmap. A future capability requires an explicit roadmap/architecture extension and Architect-governed transition.
