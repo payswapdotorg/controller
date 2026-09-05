@@ -398,6 +398,61 @@ refusal, never an incorrect action):
   are constructor-injectable constants; the defaults are frozen in
   `src/zaiAdapter.js` (`DEFAULTS`).
 
+### The operator live-test harness (CTRL-014 live evidence)
+
+A **developer/operator TEST page only** — `harness/harness.html` —
+exists to invoke the EXISTING CTRL-014 message boundary against the
+real installed extension and record reproducible live evidence for
+the Architect review (the live-evidence invocation work order, PR #6
+comment 5553979616). It is deliberately outside the production
+surface: the manifest does not declare it, the popup does not link
+it, and it adds no runtime orchestration (that is CTRL-016 scope).
+
+**Open it (operator, after the prerequisites above):**
+
+1. Load the extension unpacked and register the `Z.ai` Worker (popup).
+2. Authenticate `https://chat.z.ai` in a normal tab (human, out of band).
+3. Find the extension id (`chrome://extensions` → Pectoraux Controller
+   → ID) and open
+   `chrome-extension://<extension-id>/harness/harness.html`.
+4. Check the operator acknowledgment — invocations stay disabled
+   until you do. You are declaring a deliberate live test with the
+   exact Controller-generated governed prompt.
+
+**Use it:**
+
+- **ObserveZaiSession** — one button; the typed observation for the
+  selected Worker is recorded as evidence.
+- **StartZaiWorkerSession** — paste the Work Item identity and the
+  EXACT Controller-generated governed prompt into the prompt field.
+  The harness carries the prompt **verbatim** (a live character count
+  is the readback; it never authors, rewrites, normalizes, or
+  substitutes text). The result — submission confirmation with
+  attempts/popup-dismissals/generation, an idempotent
+  already-active report, or a typed refusal — is recorded verbatim.
+- **RecoverZaiHungWorker** — the `tabId` is prefilled from the exact
+  session correlation the last SUCCESSFUL start result reported (a
+  refusal or malformed result never prefills anything; type the exact
+  correlation yourself then). No new recovery semantics exist here —
+  the page sends exactly the existing frozen request.
+- **Evidence log** — one deterministic JSON line per invocation
+  (fixed key order: `seq`, `timestamp`, `requestKind`, `request`
+  verbatim including the prompt, `response` verbatim, `correlation`).
+  The log lives in the page's memory only — never persisted, never
+  sent anywhere; no credential or provider token can appear on this
+  surface by construction. **Copy evidence (JSONL)** puts the whole
+  log on your clipboard for the Architect review.
+
+**Discipline (audited):** the harness page's only extension API is
+`chrome.runtime.sendMessage` with the frozen message forms (the three
+CTRL-014 kinds plus `GetConfiguration` for the Worker list); it
+carries no provider locator, no provider origin, and no provider
+interpretation (all provider knowledge stays in `src/zaiAdapter.js`);
+it performs no network, storage, or tab access of its own. The pure
+request/evidence plumbing is `src/harnessCore.js` (node-tested in
+`tests/harness.test.js`; every request it builds validates at the
+real message boundary).
+
 ## The typed message boundary
 
 Every extension surface speaks through one closed vocabulary
@@ -481,8 +536,27 @@ extension/
                          the merge transport is pure — one POST, zero
                          reads, frozen method, exact-head sha pin)
     service.js           the background service worker message router
+    zaiAdapter.js        the Z.ai browser Worker adapter — the ONLY
+                         place Z.ai provider knowledge lives (locators,
+                         the governed new-session sequence, bounded
+                         popup + hung-worker recovery, the in-memory
+                         session registry)
+    zaiPageBridge.js     the typed service-worker-to-tab channel
+    harnessCore.js       the operator live-test harness PURE plumbing
+                         (frozen request forms, exact-correlation
+                         extraction, deterministic evidence records;
+                         provider-agnostic, DOM-free, chrome-free)
+  page/
+    zaiPage.js           the single content script (matched only to
+                         https://chat.z.ai/*): the closed-vocabulary
+                         DOM primitive executor
   popup/
     popup.html/js/css    the operator UI (message-boundary only)
+  harness/
+    harness.html/js/css  the OPERATOR LIVE-TEST page (developer/test
+                         surface only — not manifest-declared, not
+                         popup-linked; invokes the frozen CTRL-014
+                         message kinds and records the evidence log)
   tests/                 node --test suite (offline, deterministic)
 ```
 
