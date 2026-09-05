@@ -8,7 +8,7 @@
 
 - **current state:** `STAGE_7_ACTIVE`
 - **active Work Order:** CTRL-012 — Browser Control Surface Foundation (READY; implementation in progress)
-- **PR:** implementation PR opening on branch `ctrl-012-browser-control-surface` (implementation head `85f9bd4`)
+- **PR:** #38 (implementation, open) — branch `ctrl-012-browser-control-surface`, implementation head `85f9bd4`
 - **last completed architect action:** activation of CTRL-012 as the sole executable Work Item (commits `488ea8a`..`398c0e8` on `main`: the browser-controller product roadmap, the fresh-session handoff, the CTRL-012 Work Order, and the machine-state activation)
 - **last completed worker action:** CTRL-011 runtime delivery, review iteration, approval, merge, and reconciliation (completed x11)
 - **current implementation action:** CTRL-012 Browser Control Surface Foundation — the extension package (manifest/popup/service worker), the typed message boundary, the closed provider registry, repository identity selection, the GET-only authority projection with pinned-SHA reads, tab discovery primitives, the Node test suite, and operator documentation
