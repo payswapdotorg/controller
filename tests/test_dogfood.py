@@ -20,7 +20,6 @@ from pathlib import Path
 
 from controller.authority import reconstruct
 from controller.dogfood import (
-    DogfoodStepRecord,
     SCENARIO_AUTOMATION_STAGE,
     SCENARIO_COMPLETED_BEFORE,
     SCENARIO_DISPATCH_BASE,
@@ -31,6 +30,7 @@ from controller.dogfood import (
     SCENARIO_SESSION_ID,
     SCENARIO_WORK_ITEM,
     SCENARIO_WORK_ORDER_PATH,
+    DogfoodStepRecord,
     run_fail_closed_probes,
     run_governed_dogfood,
 )

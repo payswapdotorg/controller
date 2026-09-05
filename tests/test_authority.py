@@ -35,10 +35,13 @@ _ALL_REQUIRED_FIELDS = [
 class RealRepositoryTests(unittest.TestCase):
     def test_real_repository_authority_validates(self) -> None:
         program = verify_authority(REPO_ROOT)
-        self.assertEqual(program.active_work_item, "CTRL-010")
+        self.assertEqual(program.active_work_item, "CTRL-011")
         self.assertIs(program.status, LifecycleState.READY)
         self.assertEqual(program.schema_version, "0.1")
-        self.assertEqual(program.automation_stage, "STAGE-1-STATE-MACHINE-AUTOMATION")
+        self.assertEqual(
+            program.automation_stage,
+            "STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP",
+        )
         self.assertEqual(
             program.completed,
             (
@@ -51,16 +54,24 @@ class RealRepositoryTests(unittest.TestCase):
                 "CTRL-007",
                 "CTRL-008",
                 "CTRL-009",
+                "CTRL-010",
             ),
         )
 
-    def test_real_repository_declares_all_architecture_rules_true(self) -> None:
+    def test_real_repository_declares_stage7_architecture_rules(self) -> None:
         program = verify_authority(REPO_ROOT)
-        self.assertTrue(all(program.rules.values()))
         self.assertEqual(len(program.rules), 7)
+        self.assertFalse(program.rules["humanOperatorIsTemporaryMechanicalController"])
+        self.assertTrue(
+            all(
+                value
+                for name, value in program.rules.items()
+                if name != "humanOperatorIsTemporaryMechanicalController"
+            )
+        )
 
     def test_real_work_item_status_parses(self) -> None:
-        self.assertIs(load_work_item_status(REPO_ROOT, "CTRL-010"), LifecycleState.READY)
+        self.assertIs(load_work_item_status(REPO_ROOT, "CTRL-011"), LifecycleState.READY)
 
 
 class ValidLoadTests(unittest.TestCase):
@@ -203,6 +214,76 @@ class ContradictoryAuthorityTests(unittest.TestCase):
         write_state(self.root, canonical_state(rules=rules))
         program = load_program_state(self.root)
         self.assertTrue(program.rules["someFutureRule"])
+
+
+class StageDerivedRuleTests(unittest.TestCase):
+    """The mechanical-controller rule is stage-semantic (CTRL-011).
+
+    The accepted Stage-7 transition transfers the routine mechanical
+    orchestration role from the human operator to the Controller, so the
+    expected value of ``humanOperatorIsTemporaryMechanicalController`` is
+    derived from the automation stage: ``false`` at exactly the accepted
+    Stage-7 marker, ``true`` at every other stage. Any other combination
+    is a contradiction and fails closed.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = make_repo(Path(self._tmp.name))
+
+    def _with_rules(self, mechanical: bool, stage: str) -> None:
+        rules = dict(canonical_state()["rules"])
+        rules["humanOperatorIsTemporaryMechanicalController"] = mechanical
+        write_state(self.root, canonical_state(rules=rules, automationStage=stage))
+
+    def test_stage7_with_transferred_role_validates(self) -> None:
+        self._with_rules(mechanical=False, stage="STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP")
+        program = load_program_state(self.root)
+        self.assertFalse(program.rules["humanOperatorIsTemporaryMechanicalController"])
+
+    def test_stage7_with_untransferred_role_is_a_contradiction(self) -> None:
+        self._with_rules(mechanical=True, stage="STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP")
+        with self.assertRaises(ContradictionError):
+            load_program_state(self.root)
+
+    def test_pre_stage7_with_transferred_role_is_a_contradiction(self) -> None:
+        self._with_rules(mechanical=False, stage="STAGE-1-STATE-MACHINE-AUTOMATION")
+        with self.assertRaises(ContradictionError):
+            load_program_state(self.root)
+
+    def test_unknown_stage_keeps_pre_transfer_expectation(self) -> None:
+        self._with_rules(mechanical=False, stage="STAGE-8-SOME-FUTURE-STAGE")
+        with self.assertRaises(ContradictionError):
+            load_program_state(self.root)
+
+    def test_expected_rule_value_is_stage_derived_only_for_the_one_rule(self) -> None:
+        from controller.authority import expected_rule_value
+
+        self.assertTrue(
+            expected_rule_value(
+                "humanOperatorIsTemporaryMechanicalController",
+                "STAGE-6-MERGE-RECONCILIATION-AUTOMATION",
+            )
+        )
+        self.assertFalse(
+            expected_rule_value(
+                "humanOperatorIsTemporaryMechanicalController",
+                "STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP",
+            )
+        )
+        for rule in (
+            "repositoryIsSourceOfTruth",
+            "controllerRuntimeStateIsReconstructible",
+            "onePrPerWorkItem",
+            "workerCannotMerge",
+            "failClosedOnContradiction",
+            "architectMustAnnounceAutomationStage",
+        ):
+            self.assertTrue(
+                expected_rule_value(rule, "STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP")
+            )
+            self.assertTrue(expected_rule_value(rule, "STAGE-0-MANUAL-CONTROLLER"))
 
 
 if __name__ == "__main__":
