@@ -35,8 +35,8 @@ _ALL_REQUIRED_FIELDS = [
 class RealRepositoryTests(unittest.TestCase):
     def test_real_repository_authority_validates(self) -> None:
         program = verify_authority(REPO_ROOT)
-        self.assertEqual(program.active_work_item, "CTRL-013")
-        self.assertIs(program.status, LifecycleState.COMPLETE)
+        self.assertEqual(program.active_work_item, "CTRL-014")
+        self.assertIs(program.status, LifecycleState.READY)
         self.assertEqual(program.schema_version, "0.1")
         self.assertEqual(
             program.automation_stage,
@@ -74,6 +74,9 @@ class RealRepositoryTests(unittest.TestCase):
         )
 
     def test_real_work_item_status_parses(self) -> None:
+        # The activated item is READY; the reconciled predecessor stays
+        # COMPLETE in the completed ledger's work-order evidence.
+        self.assertIs(load_work_item_status(REPO_ROOT, "CTRL-014"), LifecycleState.READY)
         self.assertIs(load_work_item_status(REPO_ROOT, "CTRL-013"), LifecycleState.COMPLETE)
 
 

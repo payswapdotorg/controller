@@ -1,8 +1,9 @@
 /**
- * Manifest and packaging tests (CTRL-012 + CTRL-013): the extension
- * loads unpacked with exactly the declared, minimal surface — every
- * manifest-referenced file exists, permissions are minimal, no remote
- * code, no content scripts, no provider host permissions.
+ * Manifest and packaging tests (CTRL-012 + CTRL-013 + CTRL-014): the
+ * extension loads unpacked with exactly the declared, minimal
+ * surface — every manifest-referenced file exists, permissions are
+ * minimal, no remote code, and provider host permissions stay scoped
+ * to exactly the authorized adapters.
  *
  * CTRL-013 refinements: the manifest legitimately gains the
  * `https://github.com/*` host permission (the OAuth device-flow
@@ -14,6 +15,19 @@
  * Authorization header from the session-only token; what remains
  * banned is literal secret material (token prefixes with real-looking
  * bodies) and credential-shaped stored fields.
+ *
+ * CTRL-014 refinements: the manifest legitimately gains the
+ * `https://chat.z.ai/*` provider host permission and EXACTLY ONE
+ * content script (page/zaiPage.js — the generic closed-vocabulary
+ * DOM primitive executor for the Z.ai Worker adapter). ChatGPT
+ * remains unauthorized (no host permission, no content script —
+ * CTRL-015 scope). The DOM-automation ban now separates the two
+ * layers: background/service-worker modules STILL contain no DOM
+ * API at all (all provider knowledge is locator strings inside the
+ * adapter), while page/zaiPage.js is the single declared DOM
+ * executor whose vocabulary is closed (probe/click/clickIndex/type/
+ * pressEnter — no evaluation, no network, no storage, no remote
+ * code).
  */
 
 import { test } from "node:test";
@@ -27,13 +41,16 @@ test("the manifest parses as Manifest V3 with the minimal permissions", () => {
   const manifest = loadManifest();
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual([...manifest.permissions].sort(), ["storage", "tabs"]);
-  // The three hosts are: the GitHub REST API, raw repository content,
-  // and github.com for exactly the OAuth device-flow endpoints (API
-  // posts, never page interaction — content scripts remain banned).
+  // The four hosts are: the GitHub REST API, raw repository content,
+  // github.com for exactly the OAuth device-flow endpoints (API
+  // posts, never page interaction — no github.com content script),
+  // and chat.z.ai for exactly the CTRL-014 Z.ai Worker adapter's
+  // page surface (the single declared content script).
   assert.deepEqual(manifest.host_permissions, [
     "https://api.github.com/*",
     "https://raw.githubusercontent.com/*",
     "https://github.com/*",
+    "https://chat.z.ai/*",
   ]);
   // No other API permissions (no identity, no scripting, no webRequest...).
   assert.deepEqual(manifest.permissions, ["storage", "tabs"]);
@@ -54,14 +71,50 @@ test("the manifest documents the OAuth deployment configuration with the minimal
   assert.match(identity, /UNCONFIGURED_CLIENT_ID = "PASTE-YOUR-GITHUB-OAUTH-CLIENT-ID-HERE"/);
 });
 
-test("the manifest grants NO provider host permissions (adapters come later)", () => {
+test("the manifest grants exactly the Z.ai provider host and ONE content script; ChatGPT stays unauthorized (CTRL-015 scope)", () => {
   const manifest = loadManifest();
   const hosts = JSON.stringify(manifest.host_permissions ?? []);
-  assert.equal(hosts.includes("chat.z.ai"), false);
-  assert.equal(hosts.includes("chatgpt.com"), false);
-  assert.equal(manifest.content_scripts, undefined);
+  assert.equal(hosts.includes("chat.z.ai"), true); // CTRL-014: the authorized Worker adapter surface
+  assert.equal(hosts.includes("chatgpt.com"), false); // CTRL-015: not yet authorized
+  // Exactly one content script, matched ONLY to the Z.ai origin,
+  // loading only the local page surface, after the document settles.
+  assert.equal(Array.isArray(manifest.content_scripts), true);
+  assert.equal(manifest.content_scripts.length, 1);
+  const script = manifest.content_scripts[0];
+  assert.deepEqual(script.matches, ["https://chat.z.ai/*"]);
+  assert.deepEqual(script.js, ["page/zaiPage.js"]);
+  assert.equal(script.run_at, "document_idle");
   assert.equal(manifest.web_accessible_resources, undefined);
   assert.deepEqual(manifest.optional_permissions ?? [], []);
+});
+
+test("the content script grants no automation API beyond the DOM primitives (no scripting/declarativeNetRequest)", () => {
+  const manifest = loadManifest();
+  // The content script is declared statically in the manifest: the
+  // dynamic chrome.scripting API is NOT requested and never used.
+  assert.equal(manifest.permissions.includes("scripting"), false);
+  assert.equal(manifest.permissions.includes("declarativeNetRequest"), false);
+  assert.equal(manifest.permissions.includes("webRequest"), false);
+  assert.equal(manifest.permissions.includes("cookies"), false);
+  const page = readExtensionFile("page/zaiPage.js");
+  // Code-only scan (comment prose may legitimately mention the
+  // provider origin; code may never reference a remote URL).
+  const pageCode = page
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("*") && !line.trimStart().startsWith("//"))
+    .join("\n");
+  // No remote code, no network, no storage, no credential surface.
+  assert.equal(/https?:\/\/[^"'` ]+/.test(pageCode), false);
+  assert.equal(pageCode.includes("fetch("), false);
+  assert.equal(pageCode.includes("XMLHttpRequest"), false);
+  assert.equal(pageCode.includes("localStorage"), false);
+  assert.equal(pageCode.includes("chrome.storage"), false);
+  // The closed op vocabulary; nothing evaluates arbitrary code.
+  assert.equal(pageCode.includes("eval("), false);
+  assert.equal(pageCode.includes("Function("), false);
+  // The ONLY key the surface can press is Enter, on explicit command.
+  assert.ok(/pressEnter/.test(page));
+  assert.ok(!/pressTab|pressEscape|pressControl/.test(page));
 });
 
 test("the github.com host grant carries no page-automation surface", () => {
@@ -69,7 +122,12 @@ test("the github.com host grant carries no page-automation surface", () => {
   // content scripts, no scripting API, no injected anything — GitHub
   // page-click automation is forbidden by the Work Order and absent.
   const manifest = loadManifest();
-  assert.equal(manifest.content_scripts, undefined);
+  // github.com has NO content script: the only declared script is
+  // matched to chat.z.ai alone.
+  assert.equal(
+    (manifest.content_scripts ?? []).every((cs) => JSON.stringify(cs.matches).includes("github.com") === false),
+    true
+  );
   assert.equal(manifest.permissions.includes("scripting"), false);
   assert.equal(manifest.permissions.includes("declarativeNetRequest"), false);
   const identity = readExtensionFile("src/githubIdentity.js");
@@ -93,6 +151,7 @@ test("every manifest-referenced file exists on disk (load-unpacked proof)", () =
     manifest.background.service_worker,
     "popup/popup.js",
     "popup/popup.css",
+    ...(manifest.content_scripts ?? []).flatMap((cs) => cs.js),
   ];
   for (const relative of referenced) {
     const path = join(EXTENSION_ROOT, relative);
@@ -127,8 +186,11 @@ test("the service worker wires exactly the real chrome surfaces and one listener
   assert.equal((js.match(/onMessage\.addListener/g) ?? []).length, 1);
 });
 
-test("the extension source contains no provider DOM automation (CTRL-014/015 scope)", () => {
+test("the background modules contain no DOM automation — all provider knowledge is locator strings inside the adapter (CTRL-014)", () => {
   // Background modules run in the service worker: no DOM API at all.
+  // zaiAdapter.js and zaiPageBridge.js join this list: they carry
+  // Z.ai locator STRINGS and typed sequencing only — the DOM itself
+  // is touched exclusively by the declared content script.
   const backgroundSources = [
     "src/service.js",
     "src/messages.js",
@@ -141,6 +203,8 @@ test("the extension source contains no provider DOM automation (CTRL-014/015 sco
     "src/tabDiscovery.js",
     "src/githubIdentity.js",
     "src/githubClient.js",
+    "src/zaiAdapter.js",
+    "src/zaiPageBridge.js",
     "src/errors.js",
     "src/forms.js",
   ];
@@ -188,8 +252,11 @@ test("no credential material in any extension source", () => {
     "src/tabDiscovery.js",
     "src/githubIdentity.js",
     "src/githubClient.js",
+    "src/zaiAdapter.js",
+    "src/zaiPageBridge.js",
     "src/errors.js",
     "src/forms.js",
+    "page/zaiPage.js",
     "popup/popup.js",
     "popup/popup.html",
     "manifest.json",

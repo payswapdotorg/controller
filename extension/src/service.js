@@ -62,6 +62,21 @@
  *     token to its GET-only content reads when present, so private
  *     controlled repositories are readable exactly when the operator's
  *     connection permits them.
+ *
+ * CTRL-014 routing doctrine:
+ *   - the three Zai kinds are provider-page EXECUTION actions for the
+ *     Worker role, not governance mutations — the router performs the
+ *     worker-registration lookup and the zai provider/role gate, then
+ *     delegates entirely to the adapter (every provider locator and
+ *     observation lives in zaiAdapter.js); the router interprets
+ *     NOTHING from the provider page;
+ *   - human authentication is out of band: the adapter detects
+ *     authentication-required surfaces and fails closed; no credential
+ *     ever crosses this boundary;
+ *   - the adapter's session registry is in-memory and non-authoritative;
+ *   - no popup controls invoke these kinds (runtime composition is
+ *     CTRL-016 scope) — they are the typed surface for the future
+ *     runtime, exercised today through the message boundary.
  */
 
 import { ControllerContentClient } from "./controllerClient.js";
@@ -79,6 +94,9 @@ import { validateRequest } from "./messages.js";
 import { discoverProviderTabs, openProviderTab } from "./tabDiscovery.js";
 import { createGitHubIdentity } from "./githubIdentity.js";
 import { createGitHubClient } from "./githubClient.js";
+import { createZaiAdapter } from "./zaiAdapter.js";
+import { createZaiPageBridge } from "./zaiPageBridge.js";
+import { PROVIDERS } from "./providers.js";
 import { validateRepositoryIdentity } from "./repository.js";
 import { failure } from "./errors.js";
 
@@ -88,11 +106,13 @@ import { failure } from "./errors.js";
  * @param {{ storage: object, fetchImpl: Function, tabsApi: object,
  *           apiRoot?: string, rawRoot?: string,
  *           identity?: object, githubClient?: object,
+ *           zaiAdapter?: object,
  *           getClientId?: Function, getScopes?: Function,
  *           sleep?: Function, now?: Function }} wiring
- *        `identity`/`githubClient` override the built-ins in tests; the
- *        browser wiring builds the real device-flow identity (manifest
- *        client id/scopes) and the real app client; the optional
+ *        `identity`/`githubClient`/`zaiAdapter` override the built-ins
+ *        in tests; the browser wiring builds the real device-flow
+ *        identity (manifest client id/scopes), the real app client,
+ *        and the real Z.ai adapter over the page bridge; the optional
  *        getClientId/getScopes/sleep/now hooks let tests exercise the
  *        REAL identity offline with deterministic clocks.
  */
@@ -104,6 +124,7 @@ export function createControllerService({
   rawRoot,
   identity,
   githubClient,
+  zaiAdapter,
   getClientId,
   getScopes,
   sleep,
@@ -127,6 +148,18 @@ export function createControllerService({
     });
   const github =
     githubClient ?? createGitHubClient({ fetchImpl, identity: githubIdentity, ...(apiRoot ? { apiRoot } : {}) });
+  // The Z.ai browser Worker adapter: every provider locator and
+  // observation lives inside zaiAdapter.js; the router only gates on
+  // the registered Worker's provider identity and delegates.
+  const zai =
+    zaiAdapter ??
+    createZaiAdapter({
+      tabsApi,
+      pageBridge: createZaiPageBridge({ tabsApi }),
+      providerUrl: PROVIDERS.zai.canonicalOrigin,
+      ...(sleep !== undefined ? { sleep } : {}),
+      ...(now !== undefined ? { now } : {}),
+    });
   // The authority content client reads with the session token attached
   // when present (GET-only reads; private controlled repositories
   // become readable exactly when the connection permits them).
@@ -507,6 +540,45 @@ export function createControllerService({
           );
         }
 
+        // -- CTRL-014: Z.ai browser Worker adapter ----------------------
+
+        case "ObserveZaiSession":
+        case "StartZaiWorkerSession":
+        case "RecoverZaiHungWorker": {
+          const gated = _requireZaiWorker(configurationForRequest, validated.request.worker);
+          if (!gated.ok) {
+            return gated;
+          }
+          if (validated.request.kind === "ObserveZaiSession") {
+            const observed = await zai.observeSession(validated.request.worker);
+            return observed.ok ? { ok: true, observation: observed.observation } : observed;
+          }
+          if (validated.request.kind === "StartZaiWorkerSession") {
+            const started = await zai.startWorkerSession({
+              worker: validated.request.worker,
+              workItem: validated.request.workItem,
+              prompt: validated.request.prompt,
+            });
+            return started.ok
+              ? {
+                  ok: true,
+                  ...(started.alreadyActive !== undefined ? { alreadyActive: started.alreadyActive } : {}),
+                  session: started.session,
+                  ...(started.submitted !== undefined ? { submitted: started.submitted } : {}),
+                  ...(started.observation !== undefined ? { observation: started.observation } : {}),
+                }
+              : started;
+          }
+          const recovered = await zai.recoverHungWorker({
+            worker: validated.request.worker,
+            workItem: validated.request.workItem,
+            tabId: validated.request.tabId,
+          });
+          return recovered.ok
+            ? { ok: true, recovered: recovered.recovered, session: recovered.session }
+            : recovered;
+        }
+
         default:
           // Unreachable: validateRequest admits only REQUEST_KINDS.
           return failure("UNKNOWN_MESSAGE", `unhandled request kind '${validated.request.kind}'`);
@@ -525,6 +597,35 @@ export function createControllerService({
       );
     }
     return { ok: true };
+  }
+
+  /**
+   * @private — the Z.ai Worker gate: the named Worker must be a
+   * registered Worker whose provider is exactly `zai` at the frozen
+   * canonical origin. The router interprets nothing else; every
+   * provider-page fact is the adapter's.
+   */
+  function _requireZaiWorker(configuration, workerName) {
+    const registration = (configuration.workers ?? []).find((entry) => entry.name === workerName);
+    if (registration === undefined) {
+      return failure(
+        "REGISTRATION_NOT_FOUND",
+        `no worker named '${workerName}' is registered`
+      );
+    }
+    if (registration.provider?.kind !== "zai") {
+      return failure(
+        "INVALID_REGISTRATION",
+        `worker '${workerName}' is registered with provider '${String(registration.provider?.kind)}' — the Z.ai browser Worker adapter serves exactly the 'zai' provider`
+      );
+    }
+    if (registration.providerUrl !== PROVIDERS.zai.canonicalOrigin) {
+      return failure(
+        "INVALID_REGISTRATION",
+        `worker '${workerName}' provider URL '${registration.providerUrl}' is not the frozen Z.ai canonical origin ${PROVIDERS.zai.canonicalOrigin}`
+      );
+    }
+    return { ok: true, registration };
   }
 
   /** @private — complete the in-flight device flow, then persist metadata. */

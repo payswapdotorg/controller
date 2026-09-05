@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pectoraux Controller",
   "version": "0.1.0",
-  "description": "Pectoraux Controller browser operator surface (non-authoritative): registers Workers/Architects, connects GitHub (OAuth device flow), selects the controlled repository, and presents repository-derived Controller authority state and evidence.",
+  "description": "Pectoraux Controller browser operator surface (non-authoritative): registers Workers/Architects, connects GitHub (OAuth device flow), selects the controlled repository, presents repository-derived Controller authority state and evidence, and executes the governed Z.ai browser Worker adapter (CTRL-014) against an already-authenticated human session.",
   "action": {
     "default_title": "Pectoraux Controller",
     "default_popup": "popup/popup.html"
@@ -18,7 +18,15 @@
   "host_permissions": [
     "https://api.github.com/*",
     "https://raw.githubusercontent.com/*",
-    "https://github.com/*"
+    "https://github.com/*",
+    "https://chat.z.ai/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://chat.z.ai/*"],
+      "js": ["page/zaiPage.js"],
+      "run_at": "document_idle"
+    }
   ],
   "oauth2": {
     "client_id": "PASTE-YOUR-GITHUB-OAUTH-CLIENT-ID-HERE",

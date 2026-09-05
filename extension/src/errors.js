@@ -19,6 +19,14 @@
  * authorization codes NEVER appear in any message string (work order,
  * security requirements: "do not log access tokens or authorization
  * codes").
+ *
+ * CTRL-014 additions (spec/work-items/CTRL-014.md): the Z.ai browser
+ * Worker adapter refusals — provider-page channel failures, unknown
+ * dialogs, ambiguous provider state, authentication interruption
+ * mid-sequence, exhausted bounded retry budgets, unknown worker
+ * sessions, and provider-side error surfaces. Provider page content
+ * is never echoed into error messages beyond the typed facts needed
+ * to act (no conversation text, no credentials, no cookies).
  */
 
 /**
@@ -55,6 +63,15 @@ export const ERROR_CODES = Object.freeze([
   "GITHUB_UNAVAILABLE", // GitHub API transport failure (5xx/timeout/network)
   "GITHUB_MALFORMED", // a GitHub API response is structurally unusable
   "GITHUB_NOT_FOUND", // a GitHub resource 404 that is not repository-scoped
+  // Z.ai browser Worker adapter refusals (CTRL-014).
+  "PAGE_UNAVAILABLE", // the provider page channel failed (no content script / tab gone / timeout)
+  "PAGE_MALFORMED", // the provider page surface returned an unusable/contradictory response
+  "AUTHENTICATION_INTERRUPTED", // authentication was required/lost mid-sequence
+  "UNKNOWN_DIALOG", // an unrecognized/differently-shaped dialog is present
+  "AMBIGUOUS_STATE", // contradictory or insufficient provider facts (incl. multi-tab ambiguity)
+  "RETRY_EXHAUSTED", // a bounded retry/recovery budget was exhausted without confirmation
+  "SESSION_UNKNOWN", // no active adapter session for the referenced worker/work item
+  "PROVIDER_ERROR", // an observed provider-side error surface
   // The closed fallback for unexpected internal failures.
   "INTERNAL_ERROR",
 ]);

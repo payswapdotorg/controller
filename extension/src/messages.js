@@ -70,6 +70,24 @@
  * three) mutations controller/github.py (CTRL-003, AC6) exposes, with
  * the same closed field grammar. No message kind exists for approving,
  * commenting, completing, advancing, or any other governance action.
+ *
+ * Message vocabulary (added by CTRL-014 — the Z.ai browser Worker
+ * adapter; the execution surface for the Worker role at chat.z.ai):
+ *
+ *   ObserveZaiSession     { worker }                    -> typed session observation
+ *   StartZaiWorkerSession { worker, workItem, prompt }  -> governed new-session result
+ *   RecoverZaiHungWorker  { worker, workItem, tabId }   -> governed hang-recovery result
+ *
+ *   These are provider-page execution actions against an
+ *   already-authenticated human session — NOT governance mutations:
+ *   no kind approves, merges, comments, completes, advances, or
+ *   redefines anything in the repository. The `prompt` field is the
+ *   exact Controller-generated governed prompt, carried verbatim (the
+ *   adapter must not rewrite it); `workItem` is the exact Work Item
+ *   identity the session is bound to; `tabId` pins the recovery to the
+ *   exact browser-session correlation the start result reported. The
+ *   adapter (zaiAdapter.js) owns every provider-specific locator and
+ *   observation; the message boundary carries only the closed forms.
  */
 
 import { failure } from "./errors.js";
@@ -101,6 +119,10 @@ export const REQUEST_KINDS = Object.freeze([
   "CreateBranch",
   "OpenPullRequest",
   "MergePullRequest",
+  // CTRL-014 — Z.ai browser Worker adapter.
+  "ObserveZaiSession",
+  "StartZaiWorkerSession",
+  "RecoverZaiHungWorker",
 ]);
 
 /** Field sets per kind (closed forms — exactly these fields). */
@@ -128,6 +150,10 @@ const KIND_FIELDS = Object.freeze({
   CreateBranch: ["repository", "branch", "fromSha"],
   OpenPullRequest: ["repository", "branch", "baseBranch", "baseSha", "title", "body"],
   MergePullRequest: ["repository", "prNumber", "workItem", "baseRef", "baseSha", "headSha"],
+  // CTRL-014 kinds.
+  ObserveZaiSession: ["worker"],
+  StartZaiWorkerSession: ["worker", "workItem", "prompt"],
+  RecoverZaiHungWorker: ["worker", "workItem", "tabId"],
 });
 
 /** The closed PR list state vocabulary (GitHub's three list states). */
@@ -257,6 +283,34 @@ export function validateRequest(value) {
       if (typeof value[field] !== "string" || value[field].length === 0) {
         return failure("MALFORMED_MESSAGE", `request OpenPullRequest: field '${field}' must be a non-empty string`);
       }
+    }
+  }
+  if (kind === "ObserveZaiSession" || kind === "StartZaiWorkerSession" ||
+      kind === "RecoverZaiHungWorker") {
+    // The Worker identity the Z.ai adapter session is bound to.
+    if (typeof value.worker !== "string" || value.worker.length === 0) {
+      return failure("MALFORMED_MESSAGE", `request ${kind}: field 'worker' must be a non-empty string`);
+    }
+  }
+  if (kind === "StartZaiWorkerSession" || kind === "RecoverZaiHungWorker") {
+    // The exact Work Item identity the session is correlated to.
+    if (typeof value.workItem !== "string" || value.workItem.length === 0) {
+      return failure("MALFORMED_MESSAGE", `request ${kind}: field 'workItem' must be a non-empty string`);
+    }
+  }
+  if (kind === "StartZaiWorkerSession") {
+    // The exact Controller-generated governed prompt, carried verbatim.
+    // The adapter enters it without rewriting; the boundary refuses an
+    // empty prompt (nothing honest to submit) but never truncates or
+    // normalizes the text itself.
+    if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) {
+      return failure("MALFORMED_MESSAGE", "request StartZaiWorkerSession: field 'prompt' must be a non-empty string (the exact governed prompt)");
+    }
+  }
+  if (kind === "RecoverZaiHungWorker") {
+    // The exact browser-session correlation the start result reported.
+    if (!isPositiveInteger(value.tabId)) {
+      return failure("MALFORMED_MESSAGE", "request RecoverZaiHungWorker: field 'tabId' must be a positive integer (the session correlation from StartZaiWorkerSession)");
     }
   }
   return { ok: true, request: value };

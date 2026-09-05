@@ -178,6 +178,27 @@ export function fakeTabsApi({ tabs = [], createFailure = null, queryFailure = nu
       created.push(options);
       return tab;
     },
+    // CTRL-014: the base fake models tabs WITHOUT the Z.ai content
+    // script — every page-channel send fails closed exactly like a
+    // real tab with no receiving end.
+    async sendMessage() {
+      throw new Error("Could not establish connection. Receiving end does not exist.");
+    },
+    async update(tabId, options) {
+      const tab = tabs.find((entry) => entry.id === tabId);
+      if (!tab) {
+        throw new Error(`cannot update tab ${tabId}: no such tab`);
+      }
+      Object.assign(tab, options);
+      return tab;
+    },
+    async get(tabId) {
+      const tab = tabs.find((entry) => entry.id === tabId);
+      if (!tab) {
+        throw new Error(`cannot get tab ${tabId}: no such tab`);
+      }
+      return tab;
+    },
     _created() {
       return created;
     },
@@ -328,4 +349,341 @@ export function fakePullRequestPayload(number, overrides = {}) {
     merge_commit_sha: null,
     ...overrides,
   };
+}
+
+/**
+ * A chrome.tabs fake with messaging (update/get/sendMessage) for the
+ * CTRL-014 Z.ai adapter tests: tabs carry a `page` handler that
+ * answers `sendMessage` exactly like the content script channel.
+ */
+export function fakeMessagingTabsApi({ tabs = [] } = {}) {
+  const queried = [];
+  const updates = [];
+  const fetched = [];
+  return {
+    async query(pattern) {
+      queried.push(pattern);
+      const prefix = String(pattern.url).replace(/\*$/, "");
+      return tabs.filter((tab) => typeof tab.url === "string" && tab.url.startsWith(prefix));
+    },
+    async create(options) {
+      const tab = { id: 900 + tabs.length, ...options, active: true };
+      tabs.push(tab);
+      return tab;
+    },
+    async update(tabId, options) {
+      updates.push({ tabId, options });
+      const tab = tabs.find((entry) => entry.id === tabId);
+      if (!tab) {
+        throw new Error(`cannot update tab ${tabId}: no such tab`);
+      }
+      Object.assign(tab, options);
+      return tab;
+    },
+    async get(tabId) {
+      fetched.push(tabId);
+      const tab = tabs.find((entry) => entry.id === tabId);
+      if (!tab) {
+        throw new Error(`cannot get tab ${tabId}: no such tab`);
+      }
+      return tab;
+    },
+    async sendMessage(tabId, message) {
+      const tab = tabs.find((entry) => entry.id === tabId);
+      if (!tab || typeof tab.page !== "object" || tab.page === null) {
+        return Promise.reject(new Error(`Could not establish connection. Receiving end does not exist.`));
+      }
+      return tab.page.handle(message);
+    },
+    _tabs: tabs,
+    _queried: queried,
+    _updates: updates,
+  };
+}
+
+/**
+ * The deterministic offline Z.ai page simulator (CTRL-014).
+ *
+ * Models the live-observed provider surface so the adapter's full
+ * sequencing matrix runs offline: buttons (text/aria/disabled/active),
+ * the composer, the send control, the model selector (trigger +
+ * option rows), the Agent control, the Stop control, the modal
+ * dialog, the alert surface, and the conversation. Command semantics
+ * mirror page/zaiPage.js exactly (probe/click/clickIndex/type/
+ * pressEnter), including the null-fact degradation for absent
+ * surfaces and the refusal semantics for ambiguous actions.
+ *
+ * `beforeRespond(command, state, history)` lets a test mutate the
+ * page state at a precise point in the sequence (authentication
+ * dropping, a popup surviving Enter, a send that does not take).
+ */
+export function fakeZaiPage({
+  authenticated = false,
+  buttons = null,
+  composerValue = "",
+  dialog = null,
+  alert = null,
+  conversation = [],
+  modelOptions = ["GLM-5.3-Flash  NEW  Lightweight flagship", "GLM-5.3   Flagship model", "GLM-5.2   Previous flagship"],
+  selectedModel = "GLM-5.3-Flash",
+  modelOpen = false,
+  agent = { present: false, active: false },
+  stop = { visible: false },
+  generates = true,
+  popupOnSend = false,
+  popupText = "Confirm submission",
+  beforeRespond = null,
+} = {}) {
+  const history = [];
+  const state = {
+    authenticated,
+    composerValue,
+    dialog,
+    alert,
+    conversation,
+    modelOptions,
+    selectedModel,
+    modelOpen,
+    agent,
+    stop,
+    generates,
+    popupOnSend,
+    popupText,
+  };
+  const defaultButtons = () =>
+    state.authenticated
+      ? [
+          { text: "New Chat", ariaLabel: "New Chat", disabled: false, active: false },
+          ...(state.agent.present
+            ? [{ text: "Agent", ariaLabel: "Agent", disabled: false, active: state.agent.active }]
+            : []),
+        ]
+      : [
+          { text: "Sign in", ariaLabel: null, disabled: false, active: false },
+          { text: "Sign in", ariaLabel: null, disabled: false, active: false },
+          { text: "ZCode", ariaLabel: null, disabled: false, active: false },
+        ];
+  const visibleButtons = () => (buttons ? buttons(state) : defaultButtons());
+
+  function sendButton() {
+    // The send control is visible whenever the composer is present.
+    return { disabled: state.composerValue.length === 0 };
+  }
+
+  function submit() {
+    if (state.popupOnSend && state.composerValue.length > 0) {
+      state.dialog = { text: state.popupText };
+      return; // the popup blocked the submission: the prompt stays put
+    }
+    if (state.composerValue.length > 0) {
+      state.conversation.push(state.composerValue);
+      state.composerValue = "";
+      if (state.generates) {
+        state.stop.visible = true;
+      }
+    }
+  }
+
+  function handle(message) {
+    if (beforeRespond) {
+      beforeRespond(message, state, history);
+    }
+    history.push(message);
+    if (typeof message !== "object" || message === null || message.zaiPage !== true) {
+      return { ok: false, error: { code: "PAGE_MALFORMED", message: "not a Z.ai page command" } };
+    }
+    if (message.op === "probe") {
+      const facts = {};
+      for (const probe of message.probes) {
+        const fact = probeFact(probe);
+        if (fact.ok === false) {
+          return fact;
+        }
+        facts[probe.name] = fact.fact;
+      }
+      return { ok: true, facts };
+    }
+    if (message.op === "click") {
+      const target = resolveSelector(message.selector);
+      if (!target.ok) {
+        return target;
+      }
+      return applyAction(target.element, target.how);
+    }
+    if (message.op === "clickIndex") {
+      const list = resolveList(message.selector);
+      if (message.index >= list.length) {
+        return { ok: false, error: { code: "PAGE_AMBIGUOUS", message: "clickIndex out of range" } };
+      }
+      return applyAction(list[message.index], "index");
+    }
+    if (message.op === "type") {
+      if (message.selector !== "#chat-input") {
+        return { ok: false, error: { code: "PAGE_AMBIGUOUS", message: "type target not found" } };
+      }
+      state.composerValue = message.text;
+      return { ok: true, typed: true, value: state.composerValue };
+    }
+    if (message.op === "pressEnter") {
+      if (state.dialog) {
+        state.dialog = null; // the known dismissable popup
+      }
+      return { ok: true, pressed: "Enter", target: "TEXTAREA" };
+    }
+    return { ok: false, error: { code: "PAGE_MALFORMED", message: "unknown op" } };
+  }
+
+  function probeFact(probe) {
+    const count = (selector) => resolveList(selector).length;
+    switch (probe.mode) {
+      case "count":
+        return { ok: true, fact: { count: count(probe.selector), matching: count(probe.selector) } };
+      case "texts": {
+        const list = resolveList(probe.selector);
+        if (probe.selector === "button") {
+          return { ok: true, fact: { texts: visibleButtons().map((b) => b.text) } };
+        }
+        if (probe.selector === 'button[aria-label="model-item"]') {
+          return { ok: true, fact: { texts: state.modelOpen ? state.modelOptions : [] } };
+        }
+        return { ok: true, fact: { texts: list.map(String) } };
+      }
+      case "visible":
+        return { ok: true, fact: { visible: count(probe.selector) > 0, count: count(probe.selector) } };
+      case "enabled": {
+        const list = resolveList(probe.selector);
+        if (list.length !== 1) {
+          return { ok: true, fact: { enabled: null, ambiguous: list.length > 1 } };
+        }
+        return { ok: true, fact: { enabled: !list[0].disabled } };
+      }
+      case "text": {
+        const list = resolveList(probe.selector);
+        if (list.length !== 1) {
+          return { ok: true, fact: { text: null, ambiguous: list.length > 1 } };
+        }
+        return { ok: true, fact: { text: textOf(list[0]) } };
+      }
+      case "value": {
+        const list = resolveList(probe.selector);
+        if (list.length !== 1) {
+          return { ok: true, fact: { value: null, ambiguous: list.length > 1 } };
+        }
+        return { ok: true, fact: { value: list[0].value ?? null } };
+      }
+      default:
+        return { ok: false, error: { code: "PAGE_MALFORMED", message: "bad mode" } };
+    }
+  }
+
+  function resolveList(selector) {
+    if (selector === "button") {
+      return visibleButtons();
+    }
+    if (selector === 'button[aria-label="model-item"]') {
+      return state.modelOpen ? state.modelOptions.map((text) => ({ text, modelOption: true })) : [];
+    }
+    if (selector.includes("model-selector")) {
+      return [{ text: state.selectedModel, isTrigger: true }];
+    }
+    if (selector === "#chat-input") {
+      return state.authenticated || true ? [{ value: state.composerValue, isComposer: true }] : [];
+    }
+    if (selector === "#send-message-button") {
+      return [Object.assign({ isSend: true }, sendButton())];
+    }
+    if (selector === '[role="dialog"], dialog') {
+      return state.dialog ? [{ text: state.dialog.text }] : [];
+    }
+    if (selector === '[role="alert"]') {
+      return state.alert ? [{ text: state.alert.text }] : [];
+    }
+    if (selector === 'button[aria-label="Agent"]') {
+      return state.agent.present && state.authenticated ? [agentButton()] : [];
+    }
+    if (selector.includes('aria-pressed="true"') || selector.includes('data-state="active"') ||
+        selector.includes('aria-selected="true"') || selector.includes('aria-current="true"')) {
+      return state.agent.present && state.agent.active ? [agentButton()] : [];
+    }
+    if (selector.includes('aria-label="Stop"') || selector.includes('title="Stop"')) {
+      return state.stop.visible ? [{ text: "Stop", isStop: true, disabled: false }] : [];
+    }
+    if (selector === '[role="log"]') {
+      return state.conversation.length > 0 ? [{ text: state.conversation.join("\n") }] : [];
+    }
+    if (selector === '[class*="user"][class*="message"]' || selector === '[data-role="user"]' || selector === '[class*="user-message"]') {
+      return state.conversation.map((text) => ({ text, value: text }));
+    }
+    // The remaining conversation candidates behave like the log.
+    if (selector === "main" || selector.includes("conversation") || selector.includes("message-list")) {
+      return state.conversation.length > 0 ? [{ text: state.conversation.join("\n") }] : [];
+    }
+    return [];
+  }
+
+  function agentButton() {
+    return { text: "Agent", ariaLabel: "Agent", disabled: false, active: state.agent.active };
+  }
+
+  function resolveSelector(selector) {
+    const list = resolveList(selector);
+    if (list.length !== 1) {
+      return {
+        ok: false,
+        error: { code: "PAGE_AMBIGUOUS", message: `matched ${list.length} visible elements` },
+      };
+    }
+    return { ok: true, element: list[0], how: "selector" };
+  }
+
+  function textOf(element) {
+    if (element.isComposer) {
+      return element.value ?? "";
+    }
+    return element.text ?? "";
+  }
+
+  function applyAction(element, how) {
+    if (element.isSend) {
+      if (element.disabled) {
+        return { ok: false, error: { code: "PAGE_REFUSED", message: "the send control is disabled" } };
+      }
+      submit();
+      return { ok: true, clicked: true };
+    }
+    if (element.isTrigger) {
+      state.modelOpen = true;
+      return { ok: true, clicked: true };
+    }
+    if (element.modelOption) {
+      state.selectedModel = element.text.split(/\s+/)[0];
+      state.modelOpen = false;
+      return { ok: true, clicked: true };
+    }
+    if (element.isStop) {
+      state.stop.visible = false;
+      return { ok: true, clicked: true };
+    }
+    if (element.ariaLabel === "Agent" || element.text === "Agent") {
+      state.agent.active = true;
+      return { ok: true, clicked: true };
+    }
+    return { ok: true, clicked: true };
+  }
+
+  return Object.freeze({
+    state,
+    handle,
+    history: () => [...history],
+  });
+}
+
+/**
+ * A page bridge over the fake messaging tabs API: answers exactly
+ * like createZaiPageBridge would against the tab's page handler.
+ */
+export function fakePageBridge(tabsApi) {
+  return Object.freeze({
+    send: (tabId, command) => tabsApi.sendMessage(tabId, command),
+  });
 }
