@@ -5,9 +5,9 @@
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
   "activeWorkItem": "CTRL-011",
-  "status": "READY",
+  "status": "COMPLETE",
   "automationStage": "STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP",
-  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009", "CTRL-010"],
+  "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009", "CTRL-010", "CTRL-011"],
   "rules": {
     "repositoryIsSourceOfTruth": true,
     "controllerRuntimeStateIsReconstructible": true,
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": false,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "Dispatch CTRL-011 — Production Controller Runtime against exact repository authority and current main base; implementation must add the runnable one-shot and bounded long-running runtime without reimplementing governance predicates or introducing authoritative controller persistence."
+  "nextAction": "CTRL-011 is complete and reconciled from observed implementation merge 31b4596ce233cd7a0e367de537e885ed4c9cbeef. The production Controller runtime, CLI, bounded polling/restart behavior, credential isolation, fail-closed recording and the accepted base-coherence corrections have been reviewed and merged. Stage 7 remains active; no later Work Item is authorized by the current roadmap."
 }

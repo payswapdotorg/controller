@@ -1,6 +1,6 @@
 # CTRL-011 — Production Controller Runtime
 
-Status: `READY`
+Status: `COMPLETE`
 
 ## Intent
 
@@ -57,3 +57,20 @@ The runtime may orchestrate existing adapters and boundaries, but it must not in
 ## Owned surface
 
 Primarily `controller/runtime.py`, `controller/__main__.py` and runtime-specific tests/docs. Changes to frozen architecture, existing lifecycle policy, roadmap semantics, or earlier Work Item surfaces require explicit Architect review and are outside this Work Item's default authority.
+
+## Acceptance / completion record
+
+CTRL-011 implementation was delivered in PR #36 from the exact dispatched base `0c6727dc189fb0ae277416a676cf43a12062eeaa`. Architect review iteration 1 identified a recorder split-surface hazard; the worker corrected it in `6f5aa1b`, then delivered the exact reviewed head `6a7719498cb4fd508a05c34df83fca093133fba6` on the same governed PR. Architect approval was recorded on that exact head; PR #36 was merged as `31b4596ce233cd7a0e367de537e885ed4c9cbeef`.
+
+The accepted implementation provides the runnable `cycle` one-shot and bounded `run` process, offline `status`, environment-only provider credentials, restart reconstruction without an authoritative local session store, guarded two-surface authority recording, structured operator output, bounded polling/backoff, and fail-closed behavior. The two explicitly flagged base-coherence corrections were accepted during Architect review: the Stage-7-derived expectation for `humanOperatorIsTemporaryMechanicalController`, with `REQUIRED_RULES` membership unchanged, and the frozen Work Order `Status:` grammar normalization.
+
+Validation evidence accepted with the implementation: 651 tests + 209 subtests, `mypy --strict` clean in 38 files, Ruff clean, `controller validate`/`domain`/`status` clean, external-I/O guard 8/8, and `scripts/audit_ctrl_011.sh 0c6727dc189fb0ae277416a676cf43a12062eeaa` PASS (8/8). No worker merge/approval authority, no authoritative controller persistence, no roadmap/stage mutation, and no new lifecycle or governance predicate were introduced.
+
+## Merge / reconciliation evidence
+
+- Implementation PR: #36
+- Exact reviewed implementation head: `6a7719498cb4fd508a05c34df83fca093133fba6`
+- Implementation merge commit: `31b4596ce233cd7a0e367de537e885ed4c9cbeef`
+- Review correction commit: `6f5aa1b` on the same PR
+- Stage: `STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP`
+- Current roadmap successor policy: no later Work Item is authorized by the current roadmap; future capability requires an explicit Architect-governed roadmap/architecture extension.

@@ -61,11 +61,11 @@ Stage 7  End-to-end autonomous governed loop
         ↓ CTRL-011 Production Controller Runtime
 ```
 
-Stage 7 is the accepted governance capability boundary. CTRL-011 is the production-runtime packaging/integration work that makes the accepted Stage-7 boundaries directly runnable as an operator/service process; it does not redefine the Stage-7 governance semantics.
+Stage 7 is the accepted governance capability boundary. CTRL-011 is the production-runtime packaging/integration work that made the accepted Stage-7 boundaries directly runnable as an operator/service process; it does not redefine the Stage-7 governance semantics.
 
 ## Sequencing rule
 
-CTRL-001 through CTRL-010 are complete and reconciled. CTRL-011 is the sole current successor Work Item and is authorized for implementation under the accepted Stage-7 architecture. No later Work Item is authorized by this roadmap.
+CTRL-001 through CTRL-011 are complete and reconciled. CTRL-011 was the sole authorized successor after CTRL-010 and is now complete. No later Work Item is authorized by this roadmap.
 
 ## Human-operator progression
 
@@ -73,7 +73,7 @@ The human remains product/architecture authority and exception handler. The rout
 
 ## Completion definition
 
-The Controller roadmap's Stage-7 governance definition is satisfied by the accepted CTRL-009 recovery/idempotency and CTRL-010 end-to-end dogfood evidence. CTRL-011 completes the production-runtime surface needed to operate those accepted capabilities as a continuously usable Controller process.
+The Controller roadmap's Stage-7 governance definition is satisfied by the accepted CTRL-009 recovery/idempotency and CTRL-010 end-to-end dogfood evidence. CTRL-011 completes the production-runtime surface needed to operate those accepted capabilities as a continuously usable Controller process; that implementation has now been reviewed, merged and reconciled.
 
 ## Explicit exclusions
 
@@ -83,3 +83,4 @@ The Controller roadmap's Stage-7 governance definition is satisfied by the accep
 - Do not automate merge on insufficient evidence or unresolved architectural contradiction.
 - Do not silently change lifecycle, merge, review, or evidence predicates while implementing CTRL-011.
 - Do not introduce authoritative controller persistence.
+- No later Work Item is implied by CTRL-011 completion; future capability requires an explicit roadmap/architecture extension.
