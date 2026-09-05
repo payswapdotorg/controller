@@ -61,7 +61,7 @@ The Controller safely carries a repository-authorized READY Work Item through di
 
 The accepted CTRL-010 dogfood record demonstrates this composed capability, including deliberate lost-state-write recovery, zero second merge mutation, deterministic reconciliation and fail-closed contradiction probes.
 
-Stage 7 is the active governance stage. CTRL-011 is the production-runtime implementation layer that packages these accepted capabilities into a continuously usable process without redefining governance semantics.
+Stage 7 is the active governance stage. CTRL-011 was the production-runtime implementation layer that packaged these accepted capabilities into a continuously usable process without redefining governance semantics.
 
 ## Normative transition report
 
@@ -106,9 +106,9 @@ Runtime state must be reconstructible from repository/GitHub evidence. No hidden
 
 ## Current operating position
 
-CTRL-001 through CTRL-010 are accepted, merged and reconciled. CTRL-011 — Production Controller Runtime is now the sole active READY Work Item under Stage 7.
+CTRL-001 through CTRL-011 are accepted, merged and reconciled. CTRL-011 — Production Controller Runtime is complete, and no later Work Item is authorized by the current roadmap.
 
 Stage 7 active.
 You still perform: product/architecture authority; policy definition/change; semantic Architect review where required; contradiction, safety and exception handling; and any future roadmap extension.
 You no longer need to perform: routine mechanical orchestration, mechanical merge clicking or routine post-merge bookkeeping for governed Work Items covered by the accepted Controller capabilities.
-The next automation milestone is: **CTRL-011 — Production Controller Runtime**. Its purpose is to provide the directly runnable one-shot and bounded long-running process around the already-accepted governance boundaries.
+The next automation milestone is: **none currently authorized**. CTRL-011 completed the production-runtime surface under the accepted Stage-7 governance boundary. Any future capability requires an explicit roadmap/architecture extension and Architect-governed activation.
