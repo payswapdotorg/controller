@@ -29,7 +29,14 @@ deliberate restart recovered through CTRL-009, reconciliation, and
 explicit Stage-6 prerequisite evidence — while every governed decision
 remains with the boundary that owns it (the dogfood layer composes;
 it never re-implements a predicate, never advances the stage, and
-writes only the synthetic scenario repository). No worker merging, no
+writes only the synthetic scenario repository). CTRL-011 production
+controller runtime: the runnable one-shot and bounded long-running
+process over the accepted Stage-7 boundaries — authority first on
+every cycle, CTRL-009 reconstruction/routing, exactly one boundary
+step per cycle, the guarded authority projection, structured operator
+reports, externally supplied provider tokens only, and fail-closed
+exit semantics; it adds no second authority model and no controller
+persistence. No worker merging, no
 database, no scheduler — those stay outside the frozen authority.
 """
 
@@ -156,6 +163,25 @@ from controller.review import (
     ReviewLoopOutcome,
     ReviewPacket,
 )
+from controller.runtime import (
+    GITHUB_TOKEN_ENV,
+    ZAI_TOKEN_ENV,
+    CallRecord,
+    ControllerRuntime,
+    CycleStatus,
+    RecordingGithubTransport,
+    RecordingZaiTransport,
+    RuntimeClock,
+    RuntimeConfiguration,
+    RuntimeConfigurationError,
+    RuntimeCycleReport,
+    RuntimeRecorder,
+    RuntimeRecorderError,
+    RuntimeSleeper,
+    RuntimeTokens,
+    SystemClock,
+    SystemSleeper,
+)
 from controller.states import (
     ALL_STATES,
     LIFECYCLE_SEQUENCE,
@@ -184,12 +210,15 @@ __all__ = [
     "ALL_STATES",
     "ArchitectReviewLoop",
     "AuthorityContext",
+    "CallRecord",
     "Command",
     "CommandName",
     "CommandTargetError",
-    "ControllerError",
-    "ControllerState",
     "ContradictionError",
+    "ControllerError",
+    "ControllerRuntime",
+    "ControllerState",
+    "CycleStatus",
     "DEFAULT_API_ROOT",
     "DispatchEligibility",
     "DogfoodExecutionRecord",
@@ -199,8 +228,8 @@ __all__ = [
     "DomainCommand",
     "DomainError",
     "DomainEvent",
-    "Event",
     "EXCEPTION_COMMANDS",
+    "Event",
     "EvidenceClassification",
     "EvidenceContradictionError",
     "EvidenceGate",
@@ -212,6 +241,7 @@ __all__ = [
     "EvidencePolicyError",
     "EvidenceRetryRequest",
     "FindingSeverity",
+    "GITHUB_TOKEN_ENV",
     "GithubAdapter",
     "GithubAdapterError",
     "GithubAmbiguityError",
@@ -246,15 +276,17 @@ __all__ = [
     "MergePolicy",
     "MergePolicyError",
     "MergeReconciliationLoop",
+    "ObservedArchitectDecision",
     "OrchestrationContradictionError",
     "OrchestrationError",
     "OrchestrationMissingReferenceError",
     "OrchestrationOutcome",
     "OrchestrationReferences",
     "Orchestrator",
-    "ObservedArchitectDecision",
     "ProgramState",
     "ReconciliationRecord",
+    "RecordingGithubTransport",
+    "RecordingZaiTransport",
     "RecoveryBoundary",
     "RecoveryCondition",
     "RecoveryContradictionError",
@@ -272,10 +304,20 @@ __all__ = [
     "ReviewMissingReferenceError",
     "ReviewPacket",
     "ReviewPacketError",
-    "SessionBinding",
+    "RuntimeClock",
+    "RuntimeConfiguration",
+    "RuntimeConfigurationError",
+    "RuntimeCycleReport",
+    "RuntimeRecorder",
+    "RuntimeRecorderError",
+    "RuntimeSleeper",
+    "RuntimeTokens",
     "STATE_FILE",
     "SUPPORTED_SCHEMA_VERSION",
+    "SessionBinding",
     "SpecError",
+    "SystemClock",
+    "SystemSleeper",
     "TERMINAL_EXCEPTION_STATES",
     "TRANSITIONS",
     "UrllibGithubTransport",
@@ -283,6 +325,7 @@ __all__ = [
     "WORK_ITEMS_DIR",
     "WorkItemIdentity",
     "ZAI_DEFAULT_API_ROOT",
+    "ZAI_TOKEN_ENV",
     "ZaiAdapter",
     "ZaiAdapterError",
     "ZaiAuthError",
@@ -295,8 +338,8 @@ __all__ = [
     "ZaiPolicyViolationError",
     "ZaiRateLimitError",
     "ZaiRejectedRequestError",
-    "ZaiTransportError",
     "ZaiTransport",
+    "ZaiTransportError",
     "ZaiWorkerContext",
     "ZaiWorkerSession",
     "allowed_commands",

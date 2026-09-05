@@ -1,6 +1,6 @@
 # CTRL-011 — Production Controller Runtime
 
-Status: READY
+Status: `READY`
 
 ## Intent
 

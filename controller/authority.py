@@ -37,9 +37,24 @@ WORK_ITEMS_DIR = "spec/work-items"
 #: The only machine-state schema this controller understands.
 SUPPORTED_SCHEMA_VERSION = "0.1"
 
+#: The accepted Stage-7 automation stage (``spec/operations/stage-7-
+#: transition.md``, the roadmap's human-operator progression, and the
+#: build process's normative transition report). At Stage 7 the routine
+#: mechanical-orchestration role is explicitly transferred from the human
+#: operator to the Controller, so the human-operator rule below is expected
+#: ``false`` there and ``true`` at every earlier stage.
+STAGE_7_AUTOMATION_STAGE = "STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP"
+
+#: The one stage-semantic architecture rule: its expected value is derived
+#: from the automation stage rather than being unconditionally true.
+_MECHANICAL_CONTROLLER_RULE = "humanOperatorIsTemporaryMechanicalController"
+
 #: Non-negotiable rules asserted by the frozen architecture. The machine
-#: state file must affirm every one of them; a missing or false rule means
-#: the repository contradicts its own architecture and must fail closed.
+#: state file must carry every one of them with the architecture-expected
+#: value: six rules are unconditionally true, and the mechanical-controller
+#: rule is stage-derived (see :func:`expected_rule_value`). A missing rule or
+#: a value that disagrees with the expected one means the repository
+#: contradicts its own architecture and must fail closed.
 REQUIRED_RULES: tuple[str, ...] = (
     "repositoryIsSourceOfTruth",
     "controllerRuntimeStateIsReconstructible",
@@ -105,7 +120,29 @@ def _require_str_list(data: Mapping[str, object], key: str, context: str) -> tup
     return tuple(value)
 
 
-def _require_rules(data: Mapping[str, object], context: str) -> Mapping[str, bool]:
+def expected_rule_value(rule: str, automation_stage: str) -> bool:
+    """The value the frozen architecture expects ``rule`` to carry at
+    ``automation_stage``.
+
+    Six of the seven required rules are unconditionally ``true``. The
+    mechanical-controller rule is stage-semantic: before the accepted
+    Stage-7 transition the human operator performs the routine mechanical
+    controller steps (expected ``true``); at Stage 7 that role is explicitly
+    transferred to the Controller by Architect-governed authority, so the
+    expected value is ``false`` — the human remains product/architecture
+    authority and exception handler. Every other automation-stage value,
+    including any unannounced future stage, keeps the pre-transfer
+    expectation, so no stage string can silently flip the rule; only the
+    exact accepted Stage-7 marker does.
+    """
+    if rule == _MECHANICAL_CONTROLLER_RULE:
+        return automation_stage != STAGE_7_AUTOMATION_STAGE
+    return True
+
+
+def _require_rules(
+    data: Mapping[str, object], context: str, automation_stage: str
+) -> Mapping[str, bool]:
     value = data.get("rules")
     if not isinstance(value, dict):
         raise SpecError(f"{context}: field 'rules' must be an object")
@@ -119,10 +156,13 @@ def _require_rules(data: Mapping[str, object], context: str) -> Mapping[str, boo
             raise ContradictionError(
                 f"{context}: machine state omits architecture rule '{required}'"
             )
-        if not rules[required]:
+        expected = expected_rule_value(required, automation_stage)
+        if rules[required] is not expected:
             raise ContradictionError(
                 f"{context}: machine state contradicts frozen architecture rule "
-                f"'{required}' (expected true, found false)"
+                f"'{required}' (expected {str(expected).lower()} at automation "
+                f"stage '{automation_stage}', found "
+                f"{str(rules[required]).lower()})"
             )
     return rules
 
@@ -176,7 +216,8 @@ def load_program_state(repo_root: Path) -> ProgramState:
             )
 
     status_value = _require_str(data, "status", context)
-    rules = _require_rules(data, context)
+    automation_stage = _require_str(data, "automationStage", context)
+    rules = _require_rules(data, context, automation_stage)
 
     return ProgramState(
         schema_version=schema_version,
@@ -186,7 +227,7 @@ def load_program_state(repo_root: Path) -> ProgramState:
         build_process=referenced["buildProcess"],
         active_work_item=_require_str(data, "activeWorkItem", context),
         status=_parse_lifecycle(status_value, context),
-        automation_stage=_require_str(data, "automationStage", context),
+        automation_stage=automation_stage,
         completed=_require_str_list(data, "completed", context),
         rules=rules,
         next_action=_require_str(data, "nextAction", context),
