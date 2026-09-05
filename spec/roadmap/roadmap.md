@@ -82,7 +82,7 @@ CTRL-003 GitHub adapter   CTRL-004 Z.ai provider boundary
            CTRL-013 GitHub Browser-App Integration ✓ COMPLETE
                   |
                   v
-           CTRL-014 Z.ai Browser Worker Adapter
+           CTRL-014 Z.ai Browser Worker Adapter  ← CURRENT / READY
                   |
                   v
            CTRL-015 ChatGPT Browser Architect Adapter
@@ -121,7 +121,7 @@ Stage 7 — End-to-end autonomous governed loop
 
 Only the active Work Item identified by authoritative machine state is executable. Later roadmap items are planned sequencing, not active authorization. A later item becomes executable only after the preceding item is complete/reconciled and an explicit Architect-governed activation changes repository authority and creates/updates that Work Order.
 
-`CTRL-013` is complete and reconciled. `CTRL-014` is the next planned item but is **not activated or executable**. No Work Item after CTRL-013 is independently authorized.
+`CTRL-013` is complete and reconciled. `CTRL-014` is the current active and authorized Work Item. No Work Item after CTRL-014 is independently authorized.
 
 ## Work Item definitions
 
@@ -176,7 +176,7 @@ Hung-worker recovery contract:
 
 Dependency: CTRL-013 complete and reconciled.
 
-Status: **PLANNED / NOT ACTIVATED.**
+Status: **READY / CURRENT.** Explicitly activated by the Architect on the repository of record after CTRL-013 reconciliation; implementation must dispatch from the exact main SHA produced by the activation merge. CTRL-015 and later remain planned and inactive.
 
 Exit condition: a real browser session can receive an APP-001 handoff, confirm prompt submission, expose worker progress/terminal states, and recover a deliberately hung session without changing repository authority.
 

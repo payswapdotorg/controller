@@ -61,7 +61,7 @@ The Controller safely carries a repository-authorized READY Work Item through di
 
 The accepted CTRL-010 dogfood record demonstrates this composed capability, including deliberate lost-state-write recovery, zero second merge mutation, deterministic reconciliation and fail-closed contradiction probes.
 
-Stage 7 remains the active governance stage. CTRL-011 completed the production runtime packaging. CTRL-012 is complete and reconciled as the Browser Control Surface Foundation. CTRL-013 is now the sole active browser-MVP Work Item; CTRL-014 through CTRL-020 remain planned and require separate activation.
+Stage 7 remains the active governance stage. CTRL-011 completed the production runtime packaging. CTRL-012 is complete and reconciled as the Browser Control Surface Foundation. CTRL-013 is complete and reconciled. CTRL-014 is now the sole active browser-MVP Work Item; CTRL-015 through CTRL-020 remain planned and require separate activation.
 
 ## Browser MVP operating model
 
@@ -120,13 +120,13 @@ Runtime state must be reconstructible from repository/GitHub evidence. No hidden
 
 ## Current operating position
 
-CTRL-001 through CTRL-013 are accepted, merged and reconciled. CTRL-013 — GitHub Browser-App Integration is complete. CTRL-014 — Z.ai Browser Worker Adapter is the next planned item but is **not activated**.
+CTRL-001 through CTRL-013 are accepted, merged and reconciled. CTRL-014 — Z.ai Browser Worker Adapter is the sole active and authorized Work Item.
 
-The authoritative repository of record is `payswapdotorg/controller`, re-pinned from the prior remote by the Architect governance dispatch (issue #1): the fork preserves the governed history (its `main` is the observed CTRL-013 implementation merge `cbb40d00c4971d4b8cb9af78d8eb3c4dd179ab99`), no history was reset, and no parallel authority was introduced.
+The authoritative repository of record is `payswapdotorg/controller`, re-pinned from the prior remote by the Architect governance dispatch (issue #1). CTRL-013 reconciliation was merged on the repository of record before this activation.
 
 Stage 7 active.
 You still perform: product/architecture authority; policy definition/change; semantic Architect review where required; contradiction, safety and exception handling; human authentication at provider sites; and future roadmap/work-order activation.
 You no longer need to perform: routine mechanical orchestration already covered by the accepted Controller capabilities, and, after CTRL-014/016, routine supported browser interaction with configured providers.
-The next automation milestone is: **CTRL-014 — Z.ai Browser Worker Adapter, pending explicit activation after CTRL-013 reconciliation.**
+The next automation milestone is: **CTRL-014 — Z.ai Browser Worker Adapter**.
 
 A fresh session continues by reading, in order: `spec/state/controller-program-state.json`, `spec/roadmap/roadmap.md`, `spec/architecture/controller-architecture.md`, this document, `spec/work-items/<active item>.md`, and `spec/operations/fresh-session-handoff.md`. The exact current `main` SHA must be observed before dispatch. No conversation history is required.

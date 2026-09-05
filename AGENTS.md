@@ -17,9 +17,9 @@ Then inspect the live GitHub `main` SHA and any existing PRs/branches relevant t
 
 ## Current authorization
 
-The current active Work Item is `CTRL-013 — GitHub Browser-App Integration` and its repository status is `READY`.
+The current active Work Item is `CTRL-014 — Z.ai Browser Worker Adapter` and its repository status is `READY`.
 
-Only the active Work Item is executable. Do not implement CTRL-014 or later until the repository explicitly activates them by updating authoritative machine state and the corresponding Work Order.
+Only the active Work Item is executable. Do not implement CTRL-015 or later until the repository explicitly activates them by updating authoritative machine state and the corresponding Work Order.
 
 ## Controller governance
 
@@ -61,9 +61,11 @@ Unexpected popup, authentication interruption, ambiguous state, exhausted retry 
 
 Provider-specific DOM/selectors belong inside provider adapters, not the Controller core.
 
-## CTRL-013 handoff
+### CTRL-014 boundary
 
-CTRL-013 owns the GitHub Browser-App Integration foundation. Use supported GitHub authorization/application mechanisms without requiring a PAT in the extension UI. Support accessible repository discovery/selection, canonical `owner/name` identity, observation of the GitHub evidence required by existing Controller boundaries, and only existing Controller-authorized mutation operations. Do not duplicate lifecycle/merge/review predicates or perform GitHub page-click automation where supported APIs are available. The concrete MVP target repository is `pectoraux/smallapp`.
+CTRL-014 owns only the Z.ai browser Worker adapter. It must operate an already-authenticated `chat.z.ai` UI through supported Chromium extension interaction, expose typed provider observations/actions, confirm actual prompt submission, implement the explicitly bounded popup-retry and Stop + `continue` hang-recovery contracts, preserve Worker/Work Item/session identity, and fail closed on unknown or contradictory provider state.
+
+It must not implement ChatGPT UI automation (CTRL-015), compose the browser runtime/lifecycle UI (CTRL-016), duplicate Controller lifecycle/review/merge predicates, introduce a second authority store, collect provider credentials, or bypass provider security mechanisms.
 
 ## Fresh-session expectation
 
