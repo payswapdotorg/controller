@@ -559,7 +559,7 @@ test("a send that never confirms submission retries within the budget, then fail
 // The known submission-blocking popup recovery.
 // --------------------------------------------------------------------
 
-test("the known popup triggers one Enter, then a RESEND of the exact prompt (no preparation restart)", async () => {
+test("the known popup triggers one Enter, then the FULL PREPARATION RESTART and the resend of the exact prompt", async () => {
   const { adapter, pages } = build({
     popupOnSend: true,
     popupText: "Confirm your submission",
@@ -573,12 +573,17 @@ test("the known popup triggers one Enter, then a RESEND of the exact prompt (no 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 2);
   assert.equal(result.submitted.popupDismissals, 1);
-  // The operator's recovery loop (PR #6 comment 5554526659): Enter
-  // once, then RESEND the exact prompt — the preparation stays
-  // established (the popup blocked the submission, so the prompt
-  // still sits in the composer byte-identical and is sent AS-IS,
-  // with no re-type disturbing the provider surface). The Agent
-  // pill and the model trigger are each clicked EXACTLY ONCE.
+  // CONTINUATION 9 (PR #6 review 5123260890, requirement 3): Enter
+  // exactly once, verify the dismissal, then RESTART THE FULL
+  // PREPARATION SEQUENCE before the resend. The preparation steps
+  // are idempotent: the restart RE-VERIFIES the Agent mode and the
+  // GLM-5.3 selection (each already established — the re-selection
+  // no-ops, so each control is still clicked EXACTLY ONCE), the
+  // prompt still sits in the composer byte-identical (the popup
+  // blocked the submission, so it is sent AS-IS with no re-type),
+  // and the decisive submission acceptance follows. The popup
+  // restart-regression below models the disturbed-surface case this
+  // re-verification exists for.
   const history = pages[0].history();
   const clicks = history.filter((c) => c.op === "click").length;
   const types = history.filter((c) => c.op === "type").length;
@@ -1175,6 +1180,179 @@ test("every ok:true Start with a submission carries EXACTLY the four-field submi
   assert.equal(again.ok, true, JSON.stringify(again));
   assert.equal(again.alreadyActive, true);
   assert.ok(!("submitted" in again), "the alreadyActive re-report never carries a submitted record");
+});
+
+// --------------------------------------------------------------------
+// Continuation 9 (PR #6 review 5123260890) — the operator's committed
+// main-branch proof artifacts (payswapdotorg/controller 5d14d90: the
+// captured Z.ai HTML + screenshot) analyzed as OPERATOR EVIDENCE ONLY
+// (never CTRL-014 acceptance): the user-message row's trimmed text is
+// the exact submitted prompt byte-for-byte, the row reads
+// "ispatch APP-001 ..." (the intended prompt's leading "D" lost), the
+// assistant replied "Model is currently at capacity ...", the composer
+// reads empty, and [role="log"] matches ZERO elements. The three
+// machine-side locks: the near-miss row is NEVER acceptance, a mixed
+// message REGION (assistant echo) is never USER-message evidence, and
+// the known-popup path restarts the FULL preparation sequence.
+// --------------------------------------------------------------------
+
+test("the operator's captured near-miss run: a user-message row that lost the prompt's LEADING CHARACTER is NEVER acceptance — Start keeps the byte-identical chain (including the leading character) and fails closed, never ok:true", async () => {
+  // The operator's literal captured run (main 5d14d90, PR #6 review
+  // 5123260890): the submitted row reads "ispatch APP-001 ..." — the
+  // intended governed prompt's leading "D" is missing, so the landed
+  // message is NOT byte-identical to the exact prompt. The machine
+  // chain stays byte-identical the whole way (every bounded attempt
+  // types the FULL prompt including the leading "D" and re-verifies
+  // the read-back), and the acceptance predicate requires the EXACT
+  // user-message row — the near-miss row never confirms, no matter
+  // how waiting-shaped the surface is (generation:"waiting" is
+  // context, never a predicate). The budget ends in a TYPED refusal.
+  const GOVERNED = "Dispatch APP-001 from this exact main SHA through the Pectoraux Controller. No successor Work Item is authorized.";
+  const NEAR_MISS = GOVERNED.slice(1); // the leading "D" lost — the captured row
+  const built = build({
+    beforeRespond: (message, state) => {
+      // The pre-send gate passes (the composer holds the EXACT
+      // prompt, leading "D" included); the SURFACE loses the
+      // leading character at submission time, exactly as captured:
+      // the landed row is the near-miss, the composer clears.
+      if (message.op === "click" && message.selector === "#send-message-button") {
+        state.composerValue = NEAR_MISS;
+      }
+      // The provider is at capacity: nothing generates — the
+      // waiting-shaped surface of the captured run.
+      if (message.op === "probe") {
+        state.stop.visible = false;
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: GOVERNED });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "PAGE_MALFORMED");
+  assert.ok(/not present in the composer after the send attempt/.test(result.error.message));
+  // The typed chain is byte-identical INCLUDING the leading
+  // character: every bounded attempt typed the FULL governed prompt.
+  const typedTexts = built.pages[0].history().filter((c) => c.op === "type").map((c) => c.text);
+  assert.equal(typedTexts.length, 3); // the bounded budget
+  assert.deepEqual(typedTexts, [GOVERNED, GOVERNED, GOVERNED]);
+  // The near-miss row landed (the surface's loss — operator
+  // evidence), but the EXACT prompt never appeared as a user row,
+  // and the near-miss never confirmed a submission.
+  assert.equal(built.pages[0].state.conversation.filter((t) => t === NEAR_MISS).length, 3);
+  assert.ok(!built.pages[0].state.conversation.includes(GOVERNED)); // never claimed submitted
+  const sends = built.pages[0].history().filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
+  assert.equal(sends, 3); // the bounded budget of send attempts
+  // The bounded compose re-establishment ran once per exhausted
+  // attempt (the cleared-but-unconfirmed second failure mode).
+  const composeClicks = built.pages[0].history().filter((c) => c.op === "click" && c.selector === COMPOSE_CONTROL).length;
+  assert.equal(composeClicks, 3);
+});
+
+test("an ASSISTANT echo of the exact prompt in a mixed message REGION is never USER-message acceptance evidence — the region path is removed, and re-adding it fails this regression", async () => {
+  // PR #6 review 5123260890, requirement 2: "exact prompt observed in
+  // message-exclusive USER-message evidence". The eliminated
+  // [role="log"] REGION-containment path accepted ANY text in the
+  // region — including an assistant echo of the exact prompt, which
+  // with an empty composer would have confirmed a submission that
+  // never happened. This canned-facts page serves the region-shaped
+  // echo (conversationCandidate0 carries the exact prompt) while the
+  // USER rows never do: the adapter must not consult the region at
+  // all, exhaust the bounded budget, and fail closed. If the region
+  // path were ever re-added, this page would confirm and the
+  // regression would fail.
+  const tabs = [{ id: 7, url: "https://chat.z.ai/" }];
+  const tabsApi = fakeMessagingTabsApi({ tabs });
+  let typed = "";
+  const baseFacts = () => ({
+    authButtons: { texts: ["New Chat", "Agent"] },
+    composerVisible: { visible: true, count: 1 },
+    composerEnabled: { enabled: true },
+    composerValue: { value: typed },
+    sendVisible: { visible: true, count: 1 },
+    dialogCount: { count: 0 },
+    alertVisible: { visible: false, count: 0 },
+    stopCandidate0: { visible: false, count: 0 },
+    stopCandidate1: { visible: false, count: 0 },
+    dialogText: { text: null },
+    alertText: { text: null },
+    // The assistant echo: the REGION text carries the exact prompt;
+    // the USER-message rows never do.
+    conversationCandidate0: { text: PROMPT },
+    userMessageCandidate0: { texts: [] },
+    userMessageCandidate1: { texts: [] },
+    userMessageCandidate2: { texts: [] },
+    composeControl0: { count: 1 },
+    agentCandidate0: { count: 1 },
+    agentActive0: { count: 1 },
+    agentActive1: { count: 0 },
+    agentActive2: { count: 0 },
+    agentActive3: { count: 0 },
+    modelTriggerCount0: { count: 1 },
+    modelTriggerCount1: { count: 1 },
+    modelTriggerText0: { text: "GLM-5.3" },
+    modelTriggerText1: { text: "GLM-5.3" },
+    modelTriggerSelectedId: { count: 1 },
+  });
+  const bridge = {
+    send: async (_tabId, command) => {
+      if (command.op === "probe") {
+        return { ok: true, facts: baseFacts() };
+      }
+      if (command.op === "type") {
+        typed = command.text;
+        return { ok: true, typed: true, value: command.text };
+      }
+      if (command.op === "click" && command.selector === "#send-message-button") {
+        typed = ""; // the composer clears; the echo is all that remains
+        return { ok: true, clicked: true };
+      }
+      return { ok: true, clicked: true };
+    },
+  };
+  const adapter = createZaiAdapter({ tabsApi, pageBridge: bridge, sleep: async () => {}, settlePolls: 2, settleIntervalMs: 0 });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.ok(["PAGE_MALFORMED", "AMBIGUOUS_STATE", "RETRY_EXHAUSTED"].includes(result.error.code));
+  // The USER-message rows never carried the exact prompt; the
+  // region-shaped echo was never consulted as evidence.
+  assert.ok(!("submitted" in result), "an assistant echo never produces a submitted record");
+});
+
+test("a popup whose dismissal ALSO resets the governed surface preparation: the FULL PREPARATION RESTART re-establishes the Agent mode before the resend (never a bare resend on an unverified surface)", async () => {
+  // PR #6 review 5123260890, requirement 3: the popup interaction can
+  // disturb the governed surface state. Here the Enter dismissal
+  // also switches the provider app OFF the Agent mode (the pill's
+  // data-active marker flips). The restart must RE-SELECT the Agent
+  // pill (clicked TWICE in the whole run) and re-verify the model
+  // ground truths BEFORE the resend — with the pre-continuation-9
+  // "resend without restart" semantics the submission would have
+  // been sent on a NON-GOVERNED (chat-mode) surface.
+  const { adapter, pages } = build({
+    popupOnSend: true,
+    popupText: "Confirm your submission",
+    beforeRespond: (message, state) => {
+      if (message.op === "pressEnter") {
+        state.popupOnSend = false; // dismissed for good on the first Enter
+        state.agent.active = false; // the popup interaction reset the governed mode
+      }
+    },
+  });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 2);
+  assert.equal(result.submitted.popupDismissals, 1);
+  const history = pages[0].history();
+  const pillClicks = history.filter(
+    (c) => c.op === "click" && c.selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type"
+  ).length;
+  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
+  const enters = history.filter((c) => c.op === "pressEnter").length;
+  assert.equal(pillClicks, 2); // the initial selection + the RESTART re-selection
+  assert.equal(sends, 2); // the initial send + the resend
+  assert.equal(enters, 1); // exactly one Enter per popup observation
+  // The governed surface was re-established before the accepted
+  // submission: the Agent mode is ACTIVE at acceptance.
+  assert.equal(pages[0].state.agent.active, true);
+  assert.ok(pages[0].state.conversation.includes(PROMPT));
 });
 
 test("an ambiguous composer surface (two visible #chat-input elements) fails closed before ANY action — nothing prepared, typed, or sent", async () => {

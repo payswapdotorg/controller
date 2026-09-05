@@ -24,20 +24,31 @@
  *         unreadable, empty, or rewritten composer is NEVER sent;
  *     6. send;
  *     7. verify ACTUAL submission from the resulting provider state —
- *         MESSAGE-EXCLUSIVE evidence only: an exact user-message row
- *         or containment in the `[role="log"]` message region, with
- *         a DECISIVELY empty composer (an absent or ambiguous
+ *         MESSAGE-EXCLUSIVE USER-message evidence only: the exact
+ *         prompt observed as an EXACT user-message row, with a
+ *         DECISIVELY empty composer (an absent or ambiguous
  *         composer read is never "cleared" and never "present").
- *         Broad region matches are never acceptance evidence.
+ *         Containment in a mixed message REGION (user + assistant
+ *         text, e.g. `[role="log"]`) is never acceptance evidence —
+ *         an assistant echo of the exact prompt with an empty
+ *         composer is not a submission (continuation 9, PR #6
+ *         review 5123260890, requirement 2). `generation:"waiting"`
+ *         is reported context only — it NEVER participates in the
+ *         acceptance predicate. Broad region matches are never
+ *         acceptance evidence.
  *
- *   known submission-blocking popup: press `Enter` once per retry
- *   attempt, then RESEND the exact prompt (the operator's recovery
- *   loop — the preparation stays established; never a full
- *   preparation restart, and never a resend of an already-confirmed
- *   submission). Unknown/differently-shaped dialogs fail closed —
- *   the adapter never blindly presses keys, and the absence of a
- *   popup is NEVER acceptance evidence (acceptance is always the
- *   verified provider-state confirmation of step 7).
+ *   known submission-blocking popup: press `Enter` exactly once for
+ *   that retry, verify the dismissal by post-action observation,
+ *   then RESTART THE FULL PREPARATION SEQUENCE (Agent -> model ->
+ *   prompt — the idempotent re-selection re-establishes every
+ *   governed ground truth the popup interaction may have disturbed;
+ *   continuation 9, PR #6 review 5123260890, requirement 3) and only
+ *   then permit the same decisive submission acceptance. Never a
+ *   bare resend on an unverified surface, never a resend of an
+ *   already-confirmed submission, and never popup absence as
+ *   success (acceptance is always the verified provider-state
+ *   confirmation of step 7). Unknown/differently-shaped dialogs
+ *   fail closed — the adapter never blindly presses keys.
  *
  *   the second observed failure mode (continuation 6, PR #6 review
  *   5123047551): the input state can be discarded around a send
@@ -56,8 +67,8 @@
  *
  *   hung worker: `Stop` -> verified stopped -> the FIXED message
  *   `continue` -> verified acceptance (the exact message confirmed
- *   present in the conversation/user-message evidence with the
- *   composer cleared — a resumed generation state alone is NEVER
+ *   present in the user-message evidence with the composer cleared
+ *   — a resumed generation state alone is NEVER
  *   acceptance evidence). No alternate recovery wording. Bounded
  *   attempts; failure to confirm a required transition is a typed
  *   governance-hold outcome.
@@ -211,12 +222,25 @@ const ZAI_LOCATORS = Object.freeze({
   // control — the prompt had never been entered. LIVE-OBSERVED
   // 2026-09-06 (real origin, fact-only): the broad candidates match
   // ZERO elements on the live surface — they were never
-  // live-observed acceptance surfaces at all. Acceptance evidence is
-  // MESSAGE-EXCLUSIVE ONLY: an exact user-message row, or containment
-  // in the `[role="log"]` message region. The broad candidates are
-  // REMOVED (not merely demoted): a region that can match non-message
-  // text is never evidence.
-  conversation: Object.freeze(['[role="log"]']),
+  // live-observed acceptance surfaces at all.
+  //
+  // THE CONTINUATION-9 ELIMINATION (PR #6 review 5123260890,
+  // requirement 2 — "exact prompt observed in message-exclusive
+  // user-message evidence"): the `[role="log"]` REGION-containment
+  // path is REMOVED as an acceptance surface (not merely demoted).
+  // The region carries assistant text as well as user text — an
+  // assistant echo of the exact prompt with a decisively-empty
+  // composer would confirm a submission that never happened. The
+  // region also matched ZERO elements on the LIVE-OBSERVED
+  // authenticated surface (the operator's captured run,
+  // 2026-09-06: `role="log"` count 0), while the user-message row's
+  // trimmed text IS the exact submitted prompt byte-for-byte (the
+  // captured row reads "ispatch APP-001 ..." for the submitted
+  // "ispatch APP-001 ..." — the row is the verbatim submission; the
+  // intended prompt's leading "D" loss is caught by the EXACT-row
+  // equality). A region that can match non-user text is never
+  // user-message evidence; acceptance is the EXACT USER-MESSAGE ROW
+  // ONLY, and the broad candidates stay REMOVED.
   userMessage: Object.freeze([
     '[class*="user"][class*="message"]',
     '[data-role="user"]',
@@ -317,11 +341,6 @@ export function createZaiAdapter({
   const EVIDENCE_PROBES = [
     { name: "dialogText", selector: ZAI_LOCATORS.dialog, mode: "text" },
     { name: "alertText", selector: ZAI_LOCATORS.alert, mode: "text" },
-    ...ZAI_LOCATORS.conversation.map((selector, i) => ({
-      name: `conversationCandidate${i}`,
-      selector,
-      mode: "text",
-    })),
     ...ZAI_LOCATORS.userMessage.map((selector, i) => ({
       name: `userMessageCandidate${i}`,
       selector,
@@ -408,28 +427,30 @@ export function createZaiAdapter({
   }
 
   /**
-   * The MESSAGE-EXCLUSIVE acceptance evidence (continuation 6): an
-   * exact user-message row, else exact containment in the
-   * `[role="log"]` message region — the strongest provider-state
-   * proof available, and the ONLY acceptance surfaces. Broad region
-   * matches (the eliminated candidates) are never evidence: a
-   * non-message surface whose text contains the prompt (a sidebar or
-   * history region) proved nothing while producing a live
-   * false-positive `submitted` — never a guessed success.
+   * The MESSAGE-EXCLUSIVE USER-message acceptance evidence
+   * (continuation 6; tightened continuation 9, PR #6 review
+   * 5123260890, requirement 2): the exact prompt observed as an
+   * EXACT user-message row — the strongest provider-state proof
+   * available, and the ONLY acceptance surface. LIVE-OBSERVED
+   * 2026-09-06 (the operator's captured run): the user-message
+   * row's trimmed text is the exact submitted prompt byte-for-byte,
+   * and `[role="log"]` matched ZERO elements on the live surface.
+   * Broad region matches (the eliminated candidates) are never
+   * evidence: a non-message surface whose text contains the prompt
+   * (a sidebar or history region) proved nothing while producing a
+   * live false-positive `submitted` — never a guessed success. A
+   * mixed message REGION (user + assistant text) is equally never
+   * evidence: an assistant echo of the exact prompt with an empty
+   * composer is not a submission. The near-miss row (the operator's
+   * captured `ispatch ...` row for the intended `Dispatch ...`
+   * prompt — the leading character lost) fails the exact-row
+   * equality and never confirms.
    */
   function messageEvidenceContains(facts, text) {
     for (const probe of EVIDENCE_PROBES) {
       if (probe.name.startsWith("userMessageCandidate")) {
         const texts = facts[probe.name]?.texts;
         if (Array.isArray(texts) && texts.includes(text)) {
-          return true;
-        }
-      }
-    }
-    for (const probe of EVIDENCE_PROBES) {
-      if (probe.name.startsWith("conversationCandidate")) {
-        const conversation = facts[probe.name]?.text;
-        if (typeof conversation === "string" && conversation.includes(text)) {
           return true;
         }
       }
@@ -1090,12 +1111,17 @@ export function createZaiAdapter({
     }
 
     // 3-7. bounded preparation/send/verification attempts. The first
-    // attempt runs the full preparation (Agent -> model -> prompt);
-    // a resend (after the known-popup Enter, or an unconfirmed send)
-    // re-uses the established preparation and RESENDS the exact
-    // prompt — the operator's recovery loop: Enter once, then
-    // resend; never a full preparation restart, and never a resend
-    // of an already-confirmed submission.
+    // attempt runs the full preparation (Agent -> model -> prompt).
+    // CONTINUATION 9 (PR #6 review 5123260890, requirement 3):
+    // after the known-popup Enter and its VERIFIED dismissal, the
+    // next attempt RESTARTS THE FULL PREPARATION SEQUENCE — the
+    // popup interaction can disturb the governed surface state, and
+    // the idempotent re-selection (Agent, model) re-establishes
+    // every governed ground truth before the prompt is (re)entered
+    // and (re)sent. An unconfirmed send whose composer still holds
+    // the exact prompt resends as-is (the pre-send gate re-verifies
+    // it byte-for-byte); an already-confirmed submission is never
+    // resent.
     let attempts = 0;
     let popupDismissals = 0;
     let composeReestablishments = 0;
@@ -1240,9 +1266,17 @@ export function createZaiAdapter({
             `the known submission-blocking popup persisted beyond the bounded attempt budget (${maxSubmissionAttempts} attempts, ${popupDismissals} dismissals)`
           );
         }
-        // The ONE bounded Enter press for this attempt; the next
-        // attempt RESENDS the exact prompt (the preparation stays
-        // established — no restart).
+        // The ONE bounded Enter press for this attempt. CONTINUATION 9
+        // (PR #6 review 5123260890, requirement 3): after the VERIFIED
+        // dismissal, the next attempt RESTARTS THE FULL PREPARATION
+        // SEQUENCE (Agent -> model -> prompt) — the popup interaction
+        // can disturb the governed surface state (mode, model, input),
+        // and the idempotent re-selection re-establishes every
+        // governed ground truth before the resend. The dismissal
+        // itself is NEVER success ("never treat popup absence as
+        // success"); only the decisive submission acceptance of step
+        // 7 can confirm, and an already-confirmed submission (the
+        // popup let it land) is still never resent.
         popupDismissals += 1;
         const pressed = await pressEnter(tabId);
         if (!pressed.ok) {
@@ -1258,7 +1292,8 @@ export function createZaiAdapter({
           lastRefusal = failure("UNKNOWN_DIALOG", "the known popup did not dismiss after the Enter press");
           continue;
         }
-        continue; // resend the exact prompt
+        prepared = false; // the next attempt restarts the FULL preparation sequence
+        continue;
       }
       const composerValue = composerValueOf(facts);
       if (composerValue === "" && messageEvidenceContains(facts, prompt)) {
@@ -1423,9 +1458,10 @@ export function createZaiAdapter({
       }
 
       // 4. verify acceptance: the EXACT fixed message `continue`
-      // must be confirmed present in the MESSAGE-EXCLUSIVE evidence
-      // (an exact user-message row or the [role="log"] message
-      // region) with a DECISIVELY cleared composer — an
+      // must be confirmed present in the MESSAGE-EXCLUSIVE
+      // USER-message evidence (an exact user-message row — the
+      // continuation-9 tightened surface; a mixed message region is
+      // never evidence) with a DECISIVELY cleared composer — an
       // absent/ambiguous composer read is never "cleared" (the
       // message left the composer and landed in the conversation). A
       // resumed generation state — the Stop control returning, the
