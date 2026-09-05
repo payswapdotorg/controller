@@ -61,7 +61,7 @@ The Controller safely carries a repository-authorized READY Work Item through di
 
 The accepted CTRL-010 dogfood record demonstrates this composed capability, including deliberate lost-state-write recovery, zero second merge mutation, deterministic reconciliation and fail-closed contradiction probes.
 
-Stage 7 is active as the terminal stage of the current roadmap. There is no successor Work Item or further stage currently defined. Any future expansion requires an explicit roadmap/architecture change and Architect-governed transition.
+Stage 7 is the active governance stage. CTRL-011 is the production-runtime implementation layer that packages these accepted capabilities into a continuously usable process without redefining governance semantics.
 
 ## Normative transition report
 
@@ -106,9 +106,9 @@ Runtime state must be reconstructible from repository/GitHub evidence. No hidden
 
 ## Current operating position
 
-CTRL-001 through CTRL-010 are accepted, merged and reconciled. The authoritative machine state is `STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP` with all ten Work Items in `completed` and no successor Work Item defined.
+CTRL-001 through CTRL-010 are accepted, merged and reconciled. CTRL-011 — Production Controller Runtime is now the sole active READY Work Item under Stage 7.
 
 Stage 7 active.
 You still perform: product/architecture authority; policy definition/change; semantic Architect review where required; contradiction, safety and exception handling; and any future roadmap extension.
 You no longer need to perform: routine mechanical orchestration, mechanical merge clicking or routine post-merge bookkeeping for governed Work Items covered by the accepted Controller capabilities.
-The next automation milestone is: none defined in the current roadmap. A future capability requires an explicit roadmap/architecture extension and Architect-governed transition.
+The next automation milestone is: **CTRL-011 — Production Controller Runtime**. Its purpose is to provide the directly runnable one-shot and bounded long-running process around the already-accepted governance boundaries.

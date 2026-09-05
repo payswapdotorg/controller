@@ -4,8 +4,8 @@
   "roadmap": "spec/roadmap/roadmap.md",
   "architecture": "spec/architecture/controller-architecture.md",
   "buildProcess": "spec/operations/controller-build-process.md",
-  "activeWorkItem": "CTRL-010",
-  "status": "COMPLETE",
+  "activeWorkItem": "CTRL-011",
+  "status": "READY",
   "automationStage": "STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP",
   "completed": ["CTRL-001", "CTRL-002", "CTRL-003", "CTRL-004", "CTRL-005", "CTRL-006", "CTRL-007", "CTRL-008", "CTRL-009", "CTRL-010"],
   "rules": {
@@ -17,5 +17,5 @@
     "humanOperatorIsTemporaryMechanicalController": false,
     "architectMustAnnounceAutomationStage": true
   },
-  "nextAction": "Stage 7 — End-to-end autonomous governed loop is explicitly activated by Architect governance after accepted CTRL-009 recovery/idempotency and CTRL-010 end-to-end dogfood evidence. All ten roadmap Work Items are complete/reconciled; no successor Work Item or further stage is currently defined. Human remains the product/architecture authority and exception handler."
+  "nextAction": "Dispatch CTRL-011 — Production Controller Runtime against exact repository authority and current main base; implementation must add the runnable one-shot and bounded long-running runtime without reimplementing governance predicates or introducing authoritative controller persistence."
 }

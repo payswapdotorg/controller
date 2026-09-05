@@ -35,6 +35,9 @@ CTRL-003 GitHub adapter   CTRL-004 Z.ai adapter
                   |
                   v
            CTRL-010 End-to-end dogfood
+                  |
+                  v
+           CTRL-011 Production Controller Runtime
 ```
 
 ## Automation-stage mapping
@@ -55,23 +58,22 @@ Stage 5  CI/evidence/retry automation
 Stage 6  Merge/reconciliation automation
         ↓ CTRL-009 + CTRL-010
 Stage 7  End-to-end autonomous governed loop
+        ↓ CTRL-011 Production Controller Runtime
 ```
 
-The stage mapping is an operational interpretation of the roadmap, not permission to reorder Work Orders. The Controller may only claim a stage after the corresponding accepted work has been merged and the machine state has been reconciled.
+Stage 7 is the accepted governance capability boundary. CTRL-011 is the production-runtime packaging/integration work that makes the accepted Stage-7 boundaries directly runnable as an operator/service process; it does not redefine the Stage-7 governance semantics.
 
 ## Sequencing rule
 
-CTRL-001 through CTRL-010 are complete and reconciled: accepted and merged via PR #1, PR #4, PR #7, PR #11, PR #14, PR #17, PR #20, PR #23, PR #26, and PR #30, with reconciliation checkpoints recorded via PR #24, PR #28, and PR #31. All ten items are in machine state `completed`. No successor Work Item is currently defined. The roadmap's Stage 7 completion definition is satisfied by the accepted CTRL-009 recovery/idempotency and CTRL-010 end-to-end dogfood evidence.
+CTRL-001 through CTRL-010 are complete and reconciled. CTRL-011 is the sole current successor Work Item and is authorized for implementation under the accepted Stage-7 architecture. No later Work Item is authorized by this roadmap.
 
 ## Human-operator progression
 
-During Stage 0, the human operator performs the Controller's mechanical orchestration. As each automation stage is reached, the Architect must explicitly report what manual duties have been removed. The operator must never be expected to infer an automation transition from implementation alone.
+The human remains product/architecture authority and exception handler. The routine mechanical orchestration role is transferred to the Controller, but policy changes, semantic Architect review where required, contradiction handling, and safety intervention remain human responsibilities.
 
 ## Completion definition
 
-The Controller roadmap is complete when the automated loop can safely take a repository-authorized READY work item from dispatch through Z.ai implementation, PR/CI, Architect review/change iteration, approval, merge, post-merge reconciliation and deterministic selection of the next eligible item, including restart recovery and a successful dogfood run.
-
-That completion evidence has been accepted through CTRL-010's deterministic end-to-end dogfood record. Stage 7 is therefore the active terminal roadmap stage unless a future explicit roadmap extension is authored and accepted.
+The Controller roadmap's Stage-7 governance definition is satisfied by the accepted CTRL-009 recovery/idempotency and CTRL-010 end-to-end dogfood evidence. CTRL-011 completes the production-runtime surface needed to operate those accepted capabilities as a continuously usable Controller process.
 
 ## Explicit exclusions
 
@@ -79,4 +81,5 @@ That completion evidence has been accepted through CTRL-010's deterministic end-
 - Do not rebuild WorkflowOS's workflow engine or authoring system.
 - Do not let controller runtime state supersede the controlled repository's state.
 - Do not automate merge on insufficient evidence or unresolved architectural contradiction.
-- Do not silently transfer human responsibilities between automation stages; stage transitions require accepted repository evidence.
+- Do not silently change lifecycle, merge, review, or evidence predicates while implementing CTRL-011.
+- Do not introduce authoritative controller persistence.
