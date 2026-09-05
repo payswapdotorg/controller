@@ -390,6 +390,7 @@ test("mergePullRequest binds identity: head/base drift refusals before any POST"
     });
     const result = await client.mergePullRequest("pectoraux", "controller", {
       prNumber: 38,
+      workItem: "CTRL-013",
       baseRef: "main",
       baseSha: "b".repeat(40),
       headSha: "a".repeat(40),
@@ -412,6 +413,7 @@ test("mergePullRequest posts the frozen merge method with the exact-head pin", a
   });
   const result = await client.mergePullRequest("pectoraux", "controller", {
     prNumber: 38,
+    workItem: "CTRL-013",
     baseRef: "main",
     baseSha: "b".repeat(40),
     headSha: "a".repeat(40),
@@ -421,15 +423,41 @@ test("mergePullRequest posts the frozen merge method with the exact-head pin", a
   // runtime's predicate owns mergeability (it also surfaces in the
   // typed PR observation for the runtime to decide on).
   assert.equal(result.mergeCommitSha, "m".repeat(40));
+  // The executed mutation is returned bound to the authorization
+  // identity (the service binds the runtime authorization; the
+  // transport carries the identity through).
+  assert.equal(result.prNumber, 38);
+  assert.equal(result.workItem, "CTRL-013");
   const post = requests.find((request) => request.method === "POST" && request.url.endsWith("/merge"));
   assert.deepEqual(JSON.parse(post.body), { merge_method: POLICY_MERGE_METHOD, sha: "a".repeat(40) });
 });
 
-test("the merge surface observes NO reviews, checks, or further PRs (no predicate duplication)", async () => {
-  // The merge path must read exactly ONE PR observation and post the
-  // merge: any review/comment/status/list call here would mean the
-  // extension is evaluating governance evidence, which belongs to the
-  // Controller runtime.
+test("mergePullRequest without the work item cannot execute (the identity is not optional)", async () => {
+  const { client, requests } = buildClient((url) => {
+    if (url.endsWith("/pulls/38")) {
+      return jsonResponse(200, fakePullRequestPayload(38));
+    }
+    return jsonResponse(404, {});
+  });
+  const result = await client.mergePullRequest("pectoraux", "controller", {
+    prNumber: 38,
+    baseRef: "main",
+    baseSha: "b".repeat(40),
+    headSha: "a".repeat(40),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "INTERNAL_ERROR");
+  assert.match(result.error.message, /'workItem' is missing/);
+  assert.equal(requests.length, 0);
+});
+
+test("the CLIENT merge path observes no reviews/checks/further PRs (the binding lives one layer up)", async () => {
+  // The CLIENT's merge transport must read exactly ONE PR observation
+  // and post the merge: any review/comment/status/list call HERE would
+  // mean the transport client is evaluating governance evidence. The
+  // runtime-authorization binding (repository authority + the
+  // Architect's exact-head APPROVE) is the service's job and lives in
+  // mergeAuthorization.js — pinned by the githubService tests.
   const { client, requests } = buildClient((url) => {
     if (url.endsWith("/pulls/38")) {
       return jsonResponse(200, fakePullRequestPayload(38));
@@ -441,6 +469,7 @@ test("the merge surface observes NO reviews, checks, or further PRs (no predicat
   });
   await client.mergePullRequest("pectoraux", "controller", {
     prNumber: 38,
+    workItem: "CTRL-013",
     baseRef: "main",
     baseSha: "b".repeat(40),
     headSha: "a".repeat(40),
@@ -462,6 +491,7 @@ test("a merge response that does not report merged is MUTATION_REFUSED", async (
   });
   const result = await client.mergePullRequest("pectoraux", "controller", {
     prNumber: 38,
+    workItem: "CTRL-013",
     baseRef: "main",
     baseSha: "b".repeat(40),
     headSha: "a".repeat(40),

@@ -26,6 +26,18 @@
  *   - discovery and the three mutations require a live session token
  *     (refused locally with AUTHORIZATION_REQUIRED before any network
  *     call when absent);
+ *   - MergePullRequest is the TRANSPORT of a runtime-issued merge
+ *     authorization, never an authorization substitute: the message
+ *     PRESENTS the complete closed authorization identity (the frozen
+ *     merge method is not message-carried), and the service binds it
+ *     — before any merge POST — to what it observes itself from
+ *     sources the message caller cannot write: the repository
+ *     authority projection at the pinned default-branch SHA (the
+ *     authorization's work item must be the CURRENT active item) and
+ *     the Architect's APPROVED review on the exact PR head by the
+ *     frozen architect reviewer identity. A session plus fabricated
+ *     identity fields never reaches the POST (mergeAuthorization.js
+ *     owns the binding; githubClient.js stays predicate-free);
  *   - observations of public repositories work unauthenticated (the
  *     controlled MVP repositories are public); private repositories
  *     fail closed as REPOSITORY_INACCESSIBLE until a connection with
@@ -52,6 +64,11 @@ import {
   setGitHubConnection,
 } from "./configuration.js";
 import { projectAuthorityState } from "./authority.js";
+import {
+  bindAuthorizationToArchitectApproval,
+  bindAuthorizationToAuthority,
+  mergeAuthorizationIdentity,
+} from "./mergeAuthorization.js";
 import { validateRequest } from "./messages.js";
 import { discoverProviderTabs, openProviderTab } from "./tabDiscovery.js";
 import { createGitHubIdentity } from "./githubIdentity.js";
@@ -448,6 +465,17 @@ export function createControllerService({
         }
 
         case "MergePullRequest": {
+          // Mutation 3 — the transport of a runtime-issued merge
+          // authorization (review iteration 1). The message PRESENTS
+          // the complete closed identity; the service binds it to the
+          // repository authority and the Architect's exact-head
+          // APPROVE — observed live, never taken from the payload —
+          // and only then hands the bound authorization to the
+          // client's identity/exact-head safety checks and the single
+          // merge POST. The merge POST is unreachable without the
+          // runtime-authorized path; possession of a session plus
+          // fabricated identity fields fails closed with zero
+          // mutations.
           const connected = _requireSessionToken();
           if (!connected.ok) {
             return connected;
@@ -456,13 +484,64 @@ export function createControllerService({
           if (!identityResult.ok) {
             return identityResult;
           }
-          const merged = await github.mergePullRequest(identityResult.owner, identityResult.name, {
+          const presented = mergeAuthorizationIdentity({
             prNumber: validated.request.prNumber,
+            workItem: validated.request.workItem,
             baseRef: validated.request.baseRef,
             baseSha: validated.request.baseSha,
             headSha: validated.request.headSha,
           });
-          return merged;
+          if (!presented.ok) {
+            return presented;
+          }
+          const authorization = presented.authorization;
+          // Binding 1 — the repository authority (GET-only, pinned
+          // default-branch SHA): the work item must be the CURRENT
+          // active item. No machine state, contradiction, or drift
+          // fails closed here with zero mutations.
+          const projected = await projectAuthorityState({ client, repository: identityResult.repository });
+          if (!projected.ok) {
+            return projected;
+          }
+          const authorityBound = bindAuthorizationToAuthority(authorization, projected.state);
+          if (!authorityBound.ok) {
+            return authorityBound;
+          }
+          // Binding 2 — the Architect's exact-head APPROVE, observed
+          // live from GitHub (the unforgeable authorization root the
+          // message caller cannot fabricate).
+          const reviews = await github.getReviews(
+            identityResult.owner,
+            identityResult.name,
+            authorization.prNumber
+          );
+          if (!reviews.ok) {
+            return reviews;
+          }
+          const approvalBound = bindAuthorizationToArchitectApproval(authorization, reviews.reviews);
+          if (!approvalBound.ok) {
+            return approvalBound;
+          }
+          // Transport — the client carries the complete authorization
+          // identity (work item included; merge method frozen),
+          // applies its identity/exact-head safety checks, and posts
+          // exactly one merge.
+          const merged = await github.mergePullRequest(identityResult.owner, identityResult.name, {
+            prNumber: authorization.prNumber,
+            workItem: authorization.workItem,
+            baseRef: authorization.baseRef,
+            baseSha: authorization.baseSha,
+            headSha: authorization.headSha,
+          });
+          if (!merged.ok) {
+            return merged;
+          }
+          return {
+            ok: true,
+            merged: merged.merged,
+            mergeCommitSha: merged.mergeCommitSha,
+            authorization,
+          };
         }
 
         default:

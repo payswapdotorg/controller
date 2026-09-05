@@ -37,14 +37,19 @@
  * * **Mutation.** Exactly three, the same three the accepted Python
  *   adapter exposes: createBranch (explicit base SHA, never a default),
  *   openPullRequest (one-PR rule + base identity gates), and
- *   mergePullRequest (identity-binding transport of a runtime-issued
- *   authorization). NO governance predicate is evaluated here: no
- *   eligibility, no review/approval state, no required-checks policy,
- *   no lifecycle. The merge form's field set mirrors the core's
- *   MergeAuthorization identity; the extension binds the executed
- *   mutation to that identity (refusal on any drift) and lets GitHub's
- *   own exact-head `sha` parameter refuse a moved head. The merge
- *   method is frozen to "merge" (the core's _POLICY_MERGE_METHOD).
+ *   mergePullRequest (the transport of a runtime-issued
+ *   authorization, carrying its complete closed identity — work
+ *   item included, merge method frozen — through to the executed
+ *   mutation and its typed result). NO governance predicate is
+ *   evaluated here: no eligibility, no review/approval state, no
+ *   required-checks policy, no lifecycle. The runtime-authorization
+ *   binding (repository authority + the Architect's exact-head
+ *   APPROVE) lives one layer up in the service
+ *   (mergeAuthorization.js); this client performs only the
+ *   transport-level identity/exact-head safety checks on the bound
+ *   authorization and lets GitHub's own exact-head `sha` parameter
+ *   refuse a moved head. The merge method is frozen to "merge" (the
+ *   core's _POLICY_MERGE_METHOD).
  *
  * * **Fail-closed mapping.** 401 -> AUTHORIZATION_REQUIRED (after
  *   invalidation); repo-scoped 403/404 -> REPOSITORY_INACCESSIBLE;
@@ -444,43 +449,64 @@ export function createGitHubClient({ fetchImpl, identity = null, apiRoot = "http
 
     /**
      * Mutation 3: merge a PR as the transport of a runtime-issued
-     * authorization. This executes ONLY the identity binding — the PR
-     * must be open and unmerged, its base ref/SHA and head SHA must
-     * match the authorization exactly, and GitHub's own `sha` parameter
-     * re-pins the exact head at execution time. Everything else the
-     * frozen merge predicate requires (eligibility, approvals bound to
-     * the head, required checks, one-PR rule) is evaluated by the
-     * Controller runtime BEFORE issuing the authorization; this surface
-     * does not duplicate any of it.
+     * authorization. The CALLER is the service, which has already
+     * bound the authorization to the repository authority and the
+     * Architect's exact-head APPROVE (mergeAuthorization.js); this
+     * client executes ONLY the transport-level identity binding of
+     * the authorization it is handed: the PR must be open and
+     * unmerged, its base ref/SHA and head SHA must match the
+     * authorization exactly, GitHub's own `sha` parameter re-pins the
+     * exact head at execution time, the merge method is the frozen
+     * policy constant, and the work item is carried through so the
+     * executed mutation and its typed result stay bound to the exact
+     * authorization identity. Everything else the frozen merge
+     * predicate requires (eligibility, approvals, required checks,
+     * one-PR rule) is evaluated by the Controller runtime BEFORE
+     * issuing the authorization; this surface does not duplicate any
+     * of it.
+     *
+     * @param {string} owner
+     * @param {string} name
+     * @param {{ prNumber: number, workItem: string, baseRef: string,
+     *           baseSha: string, headSha: string }} authorization the
+     *        bound authorization identity (all six fields closed; the
+     *        merge method is frozen here, never caller-supplied)
      */
-    async mergePullRequest(owner, name, { prNumber, baseRef, baseSha, headSha }) {
+    async mergePullRequest(owner, name, { prNumber, workItem, baseRef, baseSha, headSha }) {
+      if (typeof workItem !== "string" || workItem.length === 0) {
+        return failure(
+          "INTERNAL_ERROR",
+          "the merge transport requires the complete runtime authorization identity: 'workItem' is missing " +
+            "(the merge cannot execute unbound to the authorized work item)"
+        );
+      }
       const observed = await this.getPullRequest(owner, name, prNumber);
       if (!observed.ok) {
         return observed;
       }
       const pr = observed.pullRequest;
       if (pr.merged) {
-        return failure("MUTATION_REFUSED", `PR #${prNumber} is already merged`);
+        return failure("MUTATION_REFUSED", `PR #${prNumber} (${workItem}) is already merged`);
       }
       if (pr.state !== "open") {
-        return failure("MUTATION_REFUSED", `PR #${prNumber} is ${pr.state}, not open`);
+        return failure("MUTATION_REFUSED", `PR #${prNumber} (${workItem}) is ${pr.state}, not open`);
       }
       if (pr.baseRef !== baseRef) {
         return failure(
           "STALE_REFERENCE",
-          `PR #${prNumber} targets base ref '${pr.baseRef}', not the authorized base ref '${baseRef}'`
+          `PR #${prNumber} (${workItem}) targets base ref '${pr.baseRef}', not the authorized base ref '${baseRef}'`
         );
       }
       if (pr.baseSha !== baseSha) {
         return failure(
           "STALE_REFERENCE",
-          `PR #${prNumber} base ${pr.baseSha} does not match the authorized base ${baseSha}`
+          `PR #${prNumber} (${workItem}) base ${pr.baseSha} does not match the authorized base ${baseSha}`
         );
       }
       if (pr.headSha !== headSha) {
         return failure(
           "STALE_REFERENCE",
-          `PR #${prNumber} head ${pr.headSha} does not match the authorized head ${headSha}`
+          `PR #${prNumber} (${workItem}) head ${pr.headSha} does not match the authorized head ${headSha}`
         );
       }
       const result = await _request(
@@ -488,7 +514,7 @@ export function createGitHubClient({ fetchImpl, identity = null, apiRoot = "http
         `${api}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${prNumber}/merge`,
         {
           fetchImpl, identity, timeoutMs,
-          context: `merge of PR #${prNumber}`,
+          context: `merge of PR #${prNumber} (${workItem})`,
           repositoryScoped: true,
           payload: { merge_method: POLICY_MERGE_METHOD, sha: headSha },
         }
@@ -499,13 +525,15 @@ export function createGitHubClient({ fetchImpl, identity = null, apiRoot = "http
       if (result.value.merged !== true) {
         return failure(
           "MUTATION_REFUSED",
-          `GitHub did not report PR #${prNumber} as merged (message: ${typeof result.value.message === "string" ? result.value.message.slice(0, 200) : "(none)"})`
+          `GitHub did not report PR #${prNumber} (${workItem}) as merged (message: ${typeof result.value.message === "string" ? result.value.message.slice(0, 200) : "(none)"})`
         );
       }
       return {
         ok: true,
         merged: true,
         mergeCommitSha: typeof result.value.merge_commit_sha === "string" ? result.value.merge_commit_sha : null,
+        prNumber,
+        workItem,
       };
     },
   };

@@ -8,6 +8,13 @@
  * selection, unauthenticated public observation, the authenticated
  * authority projection (token attached to GET-only content reads), and
  * the proof that no token ever reaches storage or a message payload.
+ *
+ * Review iteration 1 adds the runtime-authorized merge path proofs: a
+ * session plus fabricated identity fields cannot authorize a merge
+ * (the service binds the presented authorization to the repository
+ * authority and the Architect's exact-head APPROVE, observed live —
+ * sources the message caller cannot write), and the merge POST is
+ * unreachable without that runtime-authorized path.
  */
 
 import { test } from "node:test";
@@ -23,10 +30,12 @@ import {
   fakeAuthorityFetch,
   fixtureMachineState,
   fixtureWorkOrder,
+  FIXTURE_SHA,
   jsonResponse,
   fakeRepositoryPayload,
   fakePullRequestPayload,
 } from "./fixtures.js";
+import { ARCHITECT_REVIEWER } from "../src/mergeAuthorization.js";
 
 const CLIENT_ID = "Ov23cliEntId0123456789";
 const SESSION_TOKEN = "gho_sessiontokenAAAAAAAAAAAAAAAA";
@@ -228,6 +237,200 @@ test("mutations are refused locally without a live session token (no network)", 
     assert.match(response.error.message, /connect GitHub/i);
   }
   assert.equal(requests.filter((request) => request.method === "POST").length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// The runtime-authorized merge path (CTRL-013 review iteration 1).
+// ---------------------------------------------------------------------------
+
+const MERGE_HEAD = "a".repeat(40);
+const MERGE_BASE = "b".repeat(40);
+const OLDER_COMMIT = "c".repeat(40);
+
+/** A well-formed MergePullRequest message presenting an authorization. */
+function mergeRequest(overrides = {}) {
+  return {
+    kind: "MergePullRequest",
+    repository: REPOSITORY,
+    prNumber: 38,
+    workItem: "CTRL-012", // the fixture authority's active item
+    baseRef: "main",
+    baseSha: MERGE_BASE,
+    headSha: MERGE_HEAD,
+    ...overrides,
+  };
+}
+
+/** A synthetic review payload (the /pulls/{n}/reviews shape). */
+function reviewPayload(id, author, state, commitId) {
+  return {
+    id,
+    state,
+    user: { login: author },
+    commit_id: commitId,
+    submitted_at: "2026-09-05T00:00:00Z",
+  };
+}
+
+/** The architect's exact-head approval (the runtime-authorization root). */
+function architectApproval(commitId = MERGE_HEAD) {
+  return reviewPayload(202, ARCHITECT_REVIEWER, "APPROVED", commitId);
+}
+
+/**
+ * A merge-capable wiring: a live session token, the fixture authority
+ * projection, and an injectable review list / PR shape / merge result.
+ */
+function buildMergeService({ reviews = [architectApproval()], machineState, stateStatus, prOverrides, mergeResponse } = {}) {
+  const identityOverride = fakeIdentity({ token: SESSION_TOKEN });
+  const authorityFetch = fakeAuthorityFetch({
+    machineState: machineState ?? fixtureMachineState(),
+    workOrder: fixtureWorkOrder(),
+    ...(stateStatus !== undefined ? { stateStatus } : {}),
+  });
+  const wiring = buildService({
+    identityOverride,
+    authorityFetch,
+    apiHandler: (url) => {
+      if (url === "https://api.github.com/repos/pectoraux/controller") {
+        return jsonResponse(200, fakeRepositoryPayload("pectoraux/controller"));
+      }
+      if (url === "https://api.github.com/repos/pectoraux/controller/commits/main") {
+        return jsonResponse(200, { sha: FIXTURE_SHA });
+      }
+      if (url === "https://api.github.com/repos/pectoraux/controller/pulls/38/reviews") {
+        return jsonResponse(200, reviews);
+      }
+      if (url === "https://api.github.com/repos/pectoraux/controller/pulls/38") {
+        return jsonResponse(200, fakePullRequestPayload(38, prOverrides ?? {}));
+      }
+      if (url === "https://api.github.com/repos/pectoraux/controller/pulls/38/merge") {
+        return jsonResponse(200, mergeResponse ?? { merged: true, merge_commit_sha: "m".repeat(40) });
+      }
+      return jsonResponse(404, {});
+    },
+  });
+  return wiring;
+}
+
+function postRequests(requests) {
+  return requests.filter((request) => request.method === "POST");
+}
+
+test("MergePullRequest: a session plus fabricated identity fields cannot authorize a merge", async () => {
+  // The core REQUEST_CHANGES proof: possession of a live GitHub session
+  // and a fully-populated, well-formed authorization identity is NOT
+  // authority. Without the Architect's APPROVED review on GitHub the
+  // merge POST is unreachable — zero POSTs, typed refusal.
+  for (const [label, reviews] of [
+    ["no reviews at all", []],
+    ["another account's approval (the worker's own)", [reviewPayload(202, "worker-bot", "APPROVED", MERGE_HEAD)]],
+    ["architect comment, not an approval", [reviewPayload(202, ARCHITECT_REVIEWER, "COMMENTED", MERGE_HEAD)]],
+    ["architect changes requested", [reviewPayload(202, ARCHITECT_REVIEWER, "CHANGES_REQUESTED", MERGE_HEAD)]],
+  ]) {
+    const { service, requests } = buildMergeService({ reviews });
+    await service.start();
+    const response = await service.handleMessage(mergeRequest());
+    assert.equal(response.ok, false, label);
+    assert.equal(response.error.code, "AUTHORIZATION_REQUIRED", label);
+    assert.match(response.error.message, /no APPROVED review by the architect reviewer/, label);
+    assert.equal(postRequests(requests).length, 0, label);
+  }
+});
+
+test("MergePullRequest: an approval of an older commit is not an authorization for this head", async () => {
+  const { service, requests } = buildMergeService({ reviews: [architectApproval(OLDER_COMMIT)] });
+  await service.start();
+  const response = await service.handleMessage(mergeRequest());
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, "STALE_REFERENCE");
+  assert.match(response.error.message, /does not survive a head change/);
+  assert.equal(postRequests(requests).length, 0);
+});
+
+test("MergePullRequest: the authorization must name the authority's CURRENT active work item", async () => {
+  const { service, requests } = buildMergeService();
+  await service.start();
+  const response = await service.handleMessage(mergeRequest({ workItem: "CTRL-999" }));
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, "AUTHORITY_CONTRADICTORY");
+  assert.match(response.error.message, /repository authority identifies 'CTRL-012' as the active work item/);
+  // The refusal happens at the authority binding — before any review or
+  // PR read, and with zero mutations.
+  assert.equal(postRequests(requests).length, 0);
+  assert.equal(requests.some((request) => request.url.includes("/reviews")), false);
+});
+
+test("MergePullRequest: a repository without Controller authority cannot be merged into", async () => {
+  const { service, requests } = buildMergeService({ stateStatus: 404 });
+  await service.start();
+  const response = await service.handleMessage(mergeRequest());
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, "AUTHORITY_MISSING");
+  assert.equal(postRequests(requests).length, 0);
+});
+
+test("MergePullRequest: the client's exact-head safety gate still applies after the binding", async () => {
+  // Defense in depth: the authorization binds to the Architect's
+  // approval at the exact head, and the transport then re-observes the
+  // live PR — a head that moved between binding and execution is a
+  // typed stale refusal, zero POSTs.
+  const { service, requests } = buildMergeService({
+    prOverrides: { head: { ref: "ctrl-38", sha: "d".repeat(40) } },
+  });
+  await service.start();
+  const response = await service.handleMessage(mergeRequest());
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, "STALE_REFERENCE");
+  assert.equal(postRequests(requests).length, 0);
+});
+
+test("MergePullRequest executes exactly one merge POST on the runtime-authorized path", async () => {
+  const { service, requests, storage } = buildMergeService();
+  await service.start();
+  const before = JSON.stringify(storage._dump());
+  const response = await service.handleMessage(mergeRequest());
+  assert.equal(response.ok, true);
+  assert.equal(response.merged, true);
+  assert.equal(response.mergeCommitSha, "m".repeat(40));
+  // The executed mutation is returned bound to the complete presented
+  // authorization identity (with the frozen, non-carried merge method).
+  assert.deepEqual(
+    { ...response.authorization },
+    {
+      prNumber: 38,
+      workItem: "CTRL-012",
+      baseRef: "main",
+      baseSha: MERGE_BASE,
+      headSha: MERGE_HEAD,
+      mergeMethod: "merge",
+    }
+  );
+  // Exactly ONE mutation — the merge POST, with the frozen method and
+  // the exact-head pin.
+  const posts = postRequests(requests);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, "https://api.github.com/repos/pectoraux/controller/pulls/38/merge");
+  assert.deepEqual(JSON.parse(posts[0].body), { merge_method: "merge", sha: MERGE_HEAD });
+  // The binding chain ran in order: authority projection (repo, branch
+  // head, machine state, work order), then the Architect's reviews, then
+  // the live PR observation, then the POST.
+  const getUrls = requests.filter((request) => request.method === "GET").map((request) => request.url);
+  assert.ok(getUrls.indexOf("https://api.github.com/repos/pectoraux/controller/pulls/38/reviews") < getUrls.indexOf("https://api.github.com/repos/pectoraux/controller/pulls/38"));
+  assert.ok(getUrls.some((url) => url.startsWith("https://raw.githubusercontent.com/pectoraux/controller/")));
+  // A governed merge mutates nothing in extension configuration.
+  assert.equal(JSON.stringify(storage._dump()), before);
+});
+
+test("MergePullRequest surfaces a non-mergeable merge response as a typed refusal", async () => {
+  const { service, requests } = buildMergeService({
+    mergeResponse: { merged: false, message: "Pull Request is not mergeable" },
+  });
+  await service.start();
+  const response = await service.handleMessage(mergeRequest());
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, "MUTATION_REFUSED");
+  assert.equal(postRequests(requests).length, 1); // the one bounded attempt, refused by GitHub
 });
 
 test("DiscoverRepositories is refused locally without a session token", async () => {

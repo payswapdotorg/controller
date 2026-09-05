@@ -209,3 +209,23 @@ test("CTRL-013 kinds refuse smuggled fields exactly like CTRL-012 kinds", () => 
   assert.equal(asCookie.ok, false);
   assert.equal(asCookie.error.code, "MALFORMED_MESSAGE");
 });
+
+test("MergePullRequest cannot carry a merge method — the frozen identity element is not message-suppliable", () => {
+  // The complete closed MergeAuthorization identity includes the frozen
+  // merge method, but that field is deliberately NOT message-carried: a
+  // caller able to supply it could manufacture part of the authorization
+  // identity. The closed form refuses it like any smuggled field.
+  const smuggled = validateRequest({
+    kind: "MergePullRequest",
+    repository: "pectoraux/controller",
+    prNumber: 38,
+    workItem: "CTRL-013",
+    baseRef: "main",
+    baseSha: "b".repeat(40),
+    headSha: "a".repeat(40),
+    mergeMethod: "squash",
+  });
+  assert.equal(smuggled.ok, false);
+  assert.equal(smuggled.error.code, "MALFORMED_MESSAGE");
+  assert.match(smuggled.error.message, /mergeMethod/);
+});

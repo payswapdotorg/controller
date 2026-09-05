@@ -43,8 +43,16 @@
  *
  *   Mutations (transport surface ONLY — no popup control invokes these;
  *   each requires the exact closed form the Controller's accepted
- *   mutation surface defines; the merge form carries the runtime-issued
- *   authorization identity and is NOT a policy the extension evaluates):
+ *   mutation surface defines. The MergePullRequest form PRESENTS the
+ *   complete closed MergeAuthorization identity — prNumber, workItem,
+ *   baseRef, baseSha, headSha; the frozen merge method is deliberately
+ *   NOT a message field (a message carrying one is malformed — the
+ *   method is the frozen transport constant). The message payload is
+ *   never itself the authority: the service binds the presented
+ *   authorization, before any merge POST, to the repository authority
+ *   projection and the Architect's exact-head APPROVE observed live
+ *   (src/mergeAuthorization.js); the payload alone — even with a live
+ *   GitHub session — can never authorize a merge):
  *
  *   CreateBranch          { repository, branch, fromSha }
  *   OpenPullRequest       { repository, branch, baseBranch, baseSha, title, body }

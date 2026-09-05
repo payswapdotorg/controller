@@ -69,10 +69,34 @@ them.
   boundary carries exactly the three mutations the accepted Python
   adapter exposes — `CreateBranch` (explicit base SHA, never a
   default), `OpenPullRequest` (one-PR rule + base identity gates), and
-  `MergePullRequest` (the identity-binding transport of a
-  runtime-issued authorization: open/unmerged, exact base ref+SHA,
-  exact head, merge method frozen to `merge`). No predicate is
-evaluated here; no popup control invokes these.
+  `MergePullRequest` (the transport of a runtime-issued merge
+  authorization). The merge message PRESENTS the complete closed
+  `MergeAuthorization` identity — PR, work item, base ref+SHA, exact
+  head; the merge method is the frozen transport constant (`merge`),
+  deliberately not a message field — and the payload alone is never
+  authority: before any merge POST, the service binds the presented
+  authorization to what it observes itself, from sources a message
+  caller cannot write (`src/mergeAuthorization.js`):
+  1. the **repository authority binding** — the GET-only pinned-SHA
+     authority projection of the target repository must name the
+     authorization's work item as the CURRENT active work item (no
+     machine state, contradictory surfaces, or a non-active item fail
+     closed with zero mutations);
+  2. the **Architect authorization binding** — the PR must carry an
+     APPROVED review by the frozen architect reviewer identity whose
+     `commit_id` is exactly the authorization's head SHA (an approval
+     of an older commit does not survive a head change — the accepted
+     Python predicate's own approval-identity rule, mirrored). Only
+     the Architect's account produces that review, so a session plus
+     fabricated identity fields can never authorize a merge.
+
+  The complete frozen merge predicate (eligibility basis, required CI
+  checks, mergeability, draft state, one-PR rule, and the
+  CHANGES_REQUESTED-after-approval resolution) is NOT evaluated here —
+  it remains the Controller runtime's; the transport's client applies
+  only the open/unmerged + exact base-ref/SHA + exact-head identity
+  checks and posts the single merge with the frozen method. No popup
+control invokes any mutation.
 
 ## Prerequisites
 
@@ -251,7 +275,7 @@ mutate nothing.
 | `CorrelateWorkPullRequest` | `repository`, `branch`, `baseSha`, `headSha` (nullable) | typed outcome + evidence |
 | `CreateBranch` | `repository`, `branch`, `fromSha` | `ref` (requires live session) |
 | `OpenPullRequest` | `repository`, `branch`, `baseBranch`, `baseSha`, `title`, `body` | `pullRequest` (requires live session) |
-| `MergePullRequest` | `repository`, `prNumber`, `workItem`, `baseRef`, `baseSha`, `headSha` | `merged`, `mergeCommitSha` (requires live session + exact-identity binding) |
+| `MergePullRequest` | `repository`, `prNumber`, `workItem`, `baseRef`, `baseSha`, `headSha` | `merged`, `mergeCommitSha`, `authorization` (requires live session + the runtime-authorized path: repository authority binding + the Architect's exact-head APPROVE) |
 
 The three mutation kinds are the complete mutation vocabulary — no
 approve/comment/close/complete/advance kind exists. They are transport
@@ -291,6 +315,10 @@ extension/
     githubIdentity.js    the OAuth device-flow identity (session-only token)
     githubClient.js      the typed GitHub app API client (observations,
                          correlation outcomes, three gated mutations)
+    mergeAuthorization.js the runtime-issued merge-authorization
+                         binding (frozen reviewer identity, complete
+                         closed authorization identity, authority +
+                         Architect exact-head APPROVE bindings)
     service.js           the background service worker message router
   popup/
     popup.html/js/css    the operator UI (message-boundary only)
@@ -342,10 +370,16 @@ be an inferred fallback). To recover manually:
   inside provider adapters, not here.
 - No GitHub page-click automation where supported APIs exist; the
   github.com host permission covers exactly the two OAuth endpoints.
-- No second merge policy: the merge kind is the identity-binding
-  transport of a runtime-issued authorization and evaluates no
-  eligibility/review/check predicate. No mutation can run merely
-  because a UI control exists — no popup mutation control exists.
+- No second merge policy: `MergePullRequest` is the transport of a
+  runtime-issued authorization, never an authorization substitute —
+  the service binds the presented identity to the repository
+  authority's current active work item AND the Architect's APPROVED
+  review on the exact head (observed live from sources the message
+  caller cannot write) before the single POST, and the transport
+  client evaluates no eligibility/check/lifecycle predicate. A live
+  session plus fabricated identity fields can never authorize a
+  merge. No mutation can run merely because a UI control exists —
+  no popup mutation control exists.
 - No merge, approval, completion, roadmap advancement, or lifecycle
   transitions initiated by the extension; no authoritative extension
   state; the extension never
