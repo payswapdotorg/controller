@@ -133,7 +133,7 @@ This section is the operator documentation the CTRL-011 work order requires: exa
 The Controller is pure Python standard library (Python >= 3.10) with zero runtime dependencies. Clone the controlled repository and run from its root — there is nothing to install, build, or migrate, and no controller database exists anywhere:
 
 ```sh
-git clone https://github.com/pectoraux/controller.git
+git clone https://github.com/payswapdotorg/controller.git
 cd controller
 python -m controller validate --repo .   # offline sanity check: authority must verify
 ```
