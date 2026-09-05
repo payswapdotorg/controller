@@ -4,17 +4,17 @@ This document is authoritative only as a navigation/continuation aid. Repository
 
 ## Current position
 
-Repository: `pectoraux/controller`
+Repository: `payswapdotorg/controller` (the repository of record; identity re-pinned from the prior remote by the Architect governance dispatch, issue #1 — the fork snapshot preserves the governed history, no reset)
 
 Automation stage: `STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP`
 
-Completed and reconciled: `CTRL-001` through `CTRL-012`.
+Completed and reconciled: `CTRL-001` through `CTRL-013`.
 
 Current active Work Item: `CTRL-013 — GitHub Browser-App Integration`.
 
-Current Work Item status: `READY`.
+Current Work Item status: `COMPLETE` (post-merge reconciliation delivered on the repository of record; awaiting Architect review/merge of the reconciliation checkpoint).
 
-Only CTRL-013 is executable. CTRL-014 through CTRL-020 are planned sequencing only; they require explicit activation after the preceding Work Item is complete and reconciled.
+No Work Item is currently executable. CTRL-014 through CTRL-020 are planned sequencing only; they require explicit activation after the preceding Work Item is complete and reconciled.
 
 ## Product decision
 
