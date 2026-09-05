@@ -4,9 +4,11 @@
  * Pins the typed observation surface (normalization, sorting, malformed
  * refusal), the fail-closed error mapping (401 invalidation, 403/404
  * accessibility, rate limits, transport), the correlation outcomes, and
- * the three gated mutations — including the proof that the merge
- * surface evaluates NO governance predicate (no review/check/eligibility
- * observation is ever made by it) and that observations are GET-only.
+ * the three gated mutations — including the review-iteration-2 proofs
+ * that the merge transport performs NO governance evaluation (it reads
+ * nothing: no PR, no reviews, no checks; its only request is the single
+ * merge POST with the frozen method and the exact-head pin) and that
+ * observations are GET-only.
  */
 
 import { test } from "node:test";
@@ -373,39 +375,15 @@ test("openPullRequest posts the exact PR form after the gates pass", async () =>
   });
 });
 
-test("mergePullRequest binds identity: head/base drift refusals before any POST", async () => {
-  for (const [label, override, expectedCode] of [
-    ["merged", { merged: true }, "MUTATION_REFUSED"],
-    ["closed", { state: "closed", merged: false }, "MUTATION_REFUSED"],
-    ["base-ref drift", { base: { ref: "dev", sha: "b".repeat(40) } }, "STALE_REFERENCE"],
-    ["base-sha drift", { base: { ref: "main", sha: "c".repeat(40) } }, "STALE_REFERENCE"],
-    ["head drift", { head: { ref: "ctrl-013-x", sha: "d".repeat(40) } }, "STALE_REFERENCE"],
-  ]) {
-    const pr = fakePullRequestPayload(38, override);
-    const { client, requests } = buildClient((url) => {
-      if (url.endsWith("/pulls/38")) {
-        return jsonResponse(200, pr);
-      }
-      return jsonResponse(404, {});
-    });
-    const result = await client.mergePullRequest("pectoraux", "controller", {
-      prNumber: 38,
-      workItem: "CTRL-013",
-      baseRef: "main",
-      baseSha: "b".repeat(40),
-      headSha: "a".repeat(40),
-    });
-    assert.equal(result.ok, false, label);
-    assert.equal(result.error.code, expectedCode, label);
-    assert.equal(requests.some((request) => request.method === "POST" && request.url.endsWith("/merge")), false, label);
-  }
-});
-
-test("mergePullRequest posts the frozen merge method with the exact-head pin", async () => {
+test("mergePullRequest is a pure transport: exactly one POST, zero reads of any kind", async () => {
+  // The review-iteration-2 regression (Architect requirement 6): the
+  // transport itself performs NO governance evaluation — no PR
+  // observation, no review list, no commit status, no branch list.
+  // The ONLY request it makes is the single merge POST, carrying the
+  // frozen merge method and the exact-head `sha` pin; the complete
+  // merge predicate is the Controller runtime's
+  // (controller/github.py, _require_merge_policy).
   const { client, requests } = buildClient((url) => {
-    if (url.endsWith("/pulls/38")) {
-      return jsonResponse(200, fakePullRequestPayload(38, { mergeable_state: "dirty" }));
-    }
     if (url.endsWith("/merge")) {
       return jsonResponse(200, { merged: true, merge_commit_sha: "m".repeat(40), message: "Pull Request successfully merged" });
     }
@@ -419,71 +397,74 @@ test("mergePullRequest posts the frozen merge method with the exact-head pin", a
     headSha: "a".repeat(40),
   });
   assert.equal(result.ok, true);
-  // mergeable_state 'dirty' is deliberately NOT evaluated here — the
-  // runtime's predicate owns mergeability (it also surfaces in the
-  // typed PR observation for the runtime to decide on).
   assert.equal(result.mergeCommitSha, "m".repeat(40));
   // The executed mutation is returned bound to the authorization
-  // identity (the service binds the runtime authorization; the
-  // transport carries the identity through).
+  // identity the runtime presented (work item carried through).
   assert.equal(result.prNumber, 38);
   assert.equal(result.workItem, "CTRL-013");
-  const post = requests.find((request) => request.method === "POST" && request.url.endsWith("/merge"));
-  assert.deepEqual(JSON.parse(post.body), { merge_method: POLICY_MERGE_METHOD, sha: "a".repeat(40) });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, "POST");
+  assert.equal(requests[0].url, "https://api.github.com/repos/pectoraux/controller/pulls/38/merge");
+  assert.deepEqual(JSON.parse(requests[0].body), { merge_method: POLICY_MERGE_METHOD, sha: "a".repeat(40) });
+  // Zero reads of any governance surface.
+  assert.equal(requests.filter((request) => request.method === "GET").length, 0);
+  assert.equal(requests.some((request) => request.url.includes("/reviews")), false);
+  assert.equal(requests.some((request) => request.url.includes("/statuses")), false);
+  assert.equal(requests.some((request) => request.url.endsWith("/pulls/38")), false);
+  assert.equal(requests.some((request) => request.url.includes("/pulls?")), false);
 });
 
-test("mergePullRequest without the work item cannot execute (the identity is not optional)", async () => {
+test("a moved head or an unmergeable PR is GitHub's own refusal — surfaced typed, never re-decided locally", async () => {
+  // The exact-head safety is GitHub's own `sha` parameter (409 on a
+  // moved head) and the merge endpoint's own lifecycle refusal (405
+  // for closed/merged/non-mergeable): the transport does NOT pre-read
+  // the PR to compare SHAs or state — that comparison is the runtime
+  // predicate's. GitHub's refusal surfaces as the typed
+  // MUTATION_REFUSED with the bounded message.
   const { client, requests } = buildClient((url) => {
-    if (url.endsWith("/pulls/38")) {
-      return jsonResponse(200, fakePullRequestPayload(38));
+    if (url.endsWith("/merge")) {
+      return jsonResponse(405, { message: "Pull Request is not mergeable" });
     }
     return jsonResponse(404, {});
   });
   const result = await client.mergePullRequest("pectoraux", "controller", {
-    prNumber: 38,
-    baseRef: "main",
-    baseSha: "b".repeat(40),
-    headSha: "a".repeat(40),
-  });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "INTERNAL_ERROR");
-  assert.match(result.error.message, /'workItem' is missing/);
-  assert.equal(requests.length, 0);
-});
-
-test("the CLIENT merge path observes no reviews/checks/further PRs (the binding lives one layer up)", async () => {
-  // The CLIENT's merge transport must read exactly ONE PR observation
-  // and post the merge: any review/comment/status/list call HERE would
-  // mean the transport client is evaluating governance evidence. The
-  // runtime-authorization binding (repository authority + the
-  // Architect's exact-head APPROVE) is the service's job and lives in
-  // mergeAuthorization.js — pinned by the githubService tests.
-  const { client, requests } = buildClient((url) => {
-    if (url.endsWith("/pulls/38")) {
-      return jsonResponse(200, fakePullRequestPayload(38));
-    }
-    if (url.endsWith("/merge")) {
-      return jsonResponse(200, { merged: true, merge_commit_sha: "m".repeat(40) });
-    }
-    return jsonResponse(404, {});
-  });
-  await client.mergePullRequest("pectoraux", "controller", {
     prNumber: 38,
     workItem: "CTRL-013",
     baseRef: "main",
     baseSha: "b".repeat(40),
     headSha: "a".repeat(40),
   });
-  const observedUrls = requests.filter((request) => request.method === "GET").map((request) => request.url);
-  assert.equal(observedUrls.length, 1);
-  assert.match(observedUrls[0], /\/pulls\/38$/);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "MUTATION_REFUSED");
+  assert.match(result.error.message, /not mergeable/);
+  // The single bounded attempt — and still zero reads.
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, "POST");
+});
+
+test("mergePullRequest refuses an incomplete authorization identity before any network", async () => {
+  // Mirrors the Python boundary's `_as_merge_request` normalization:
+  // structural completeness grants NO trust, but a missing or
+  // degenerate field is an invocation error — INTERNAL_ERROR with
+  // zero requests, never a guessed default.
+  for (const [label, fields] of [
+    ["missing workItem", { prNumber: 38, baseRef: "main", baseSha: "b".repeat(40), headSha: "a".repeat(40) }],
+    ["empty workItem", { prNumber: 38, workItem: "", baseRef: "main", baseSha: "b".repeat(40), headSha: "a".repeat(40) }],
+    ["missing headSha", { prNumber: 38, workItem: "CTRL-013", baseRef: "main", baseSha: "b".repeat(40) }],
+    ["empty baseRef", { prNumber: 38, workItem: "CTRL-013", baseRef: "", baseSha: "b".repeat(40), headSha: "a".repeat(40) }],
+    ["missing baseSha", { prNumber: 38, workItem: "CTRL-013", baseRef: "main", headSha: "a".repeat(40) }],
+  ]) {
+    const { client, requests } = buildClient(() => jsonResponse(200, { merged: true }));
+    const result = await client.mergePullRequest("pectoraux", "controller", fields);
+    assert.equal(result.ok, false, label);
+    assert.equal(result.error.code, "INTERNAL_ERROR", label);
+    assert.match(result.error.message, /structurally complete/, label);
+    assert.equal(requests.length, 0, label);
+  }
 });
 
 test("a merge response that does not report merged is MUTATION_REFUSED", async () => {
   const { client } = buildClient((url) => {
-    if (url.endsWith("/pulls/38")) {
-      return jsonResponse(200, fakePullRequestPayload(38));
-    }
     if (url.endsWith("/merge")) {
       return jsonResponse(200, { merged: false, message: "Pull Request is not mergeable" });
     }

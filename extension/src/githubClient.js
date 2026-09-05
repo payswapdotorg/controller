@@ -37,19 +37,30 @@
  * * **Mutation.** Exactly three, the same three the accepted Python
  *   adapter exposes: createBranch (explicit base SHA, never a default),
  *   openPullRequest (one-PR rule + base identity gates), and
- *   mergePullRequest (the transport of a runtime-issued
- *   authorization, carrying its complete closed identity — work
- *   item included, merge method frozen — through to the executed
- *   mutation and its typed result). NO governance predicate is
- *   evaluated here: no eligibility, no review/approval state, no
- *   required-checks policy, no lifecycle. The runtime-authorization
- *   binding (repository authority + the Architect's exact-head
- *   APPROVE) lives one layer up in the service
- *   (mergeAuthorization.js); this client performs only the
- *   transport-level identity/exact-head safety checks on the bound
- *   authorization and lets GitHub's own exact-head `sha` parameter
- *   refuse a moved head. The merge method is frozen to "merge" (the
- *   core's _POLICY_MERGE_METHOD).
+ *   mergePullRequest — the TRANSPORT of an ALREADY-ISSUED runtime
+ *   authorization (review iteration 2). The transport performs ONLY
+ *   transport-level checks: the structural completeness of the
+ *   presented authorization identity (mirroring the Python
+ *   `_as_merge_request` normalization — it grants NO trust, it only
+ *   guarantees the value is well-typed so the runtime's own policy
+ *   re-proof governs), the exact target identity, the exact-head
+ *   safety (GitHub's own `sha` parameter refuses a moved head at
+ *   execution time), and the frozen merge method (`merge`, the
+ *   core's `_POLICY_MERGE_METHOD`). NO governance predicate is
+ *   evaluated here: no review or approval state, no eligibility, no
+ *   required checks, no mergeability, no draft state, no lifecycle —
+ *   the COMPLETE merge predicate is the Controller runtime's
+ *   (`controller/github.py`, `_require_merge_policy`), which obtains
+ *   and revalidates the authorization through the existing
+ *   merge-policy boundary. A moved head, a closed or already-merged
+ *   PR, or a non-mergeable PR is refused by GitHub's own merge
+ *   endpoint and surfaces here as a typed refusal — never as a
+ *   locally re-implemented policy decision. The extension's
+ *   message surface cannot reach this transport with a fabricated
+ *   authorization: the service route fails closed
+ *   RUNTIME_AUTHORIZATION_UNAVAILABLE (the runtime handoff is
+ *   CTRL-016 scope); the method exists for that future runtime
+ *   composition and is exercised offline with injected fakes.
  *
  * * **Fail-closed mapping.** 401 -> AUTHORIZATION_REQUIRED (after
  *   invalidation); repo-scoped 403/404 -> REPOSITORY_INACCESSIBLE;
@@ -448,67 +459,66 @@ export function createGitHubClient({ fetchImpl, identity = null, apiRoot = "http
     },
 
     /**
-     * Mutation 3: merge a PR as the transport of a runtime-issued
-     * authorization. The CALLER is the service, which has already
-     * bound the authorization to the repository authority and the
-     * Architect's exact-head APPROVE (mergeAuthorization.js); this
-     * client executes ONLY the transport-level identity binding of
-     * the authorization it is handed: the PR must be open and
-     * unmerged, its base ref/SHA and head SHA must match the
-     * authorization exactly, GitHub's own `sha` parameter re-pins the
-     * exact head at execution time, the merge method is the frozen
-     * policy constant, and the work item is carried through so the
-     * executed mutation and its typed result stay bound to the exact
-     * authorization identity. Everything else the frozen merge
-     * predicate requires (eligibility, approvals, required checks,
-     * one-PR rule) is evaluated by the Controller runtime BEFORE
-     * issuing the authorization; this surface does not duplicate any
-     * of it.
+     * Mutation 3: merge a PR — the TRANSPORT of an ALREADY-ISSUED
+     * runtime authorization (review iteration 2). This method is a
+     * pure transport: it validates ONLY the structural completeness
+     * of the presented authorization identity (the Python boundary's
+     * own `_as_merge_request` discipline — well-typedness, granting
+     * no trust), posts exactly ONE merge request with the frozen
+     * merge method and the exact-head `sha` pin, and maps GitHub's
+     * response into the typed result bound to the authorization
+     * identity (work item carried through). It performs ZERO reads —
+     * no PR observation, no review list, no commit status: every
+     * governance fact (PR open/unmerged/non-draft, base ref and SHA
+     * identity, exact head, mergeability, required checks, the
+     * approval identity and recency) belongs to the Controller
+     * runtime's complete merge predicate
+     * (`controller/github.py`, `_require_merge_policy`), which the
+     * runtime re-proves in full from live state when it issues — and
+     * again when it executes — the authorization. A moved head, a
+     * closed/merged PR, or a non-mergeable PR is GitHub's own
+     * refusal (405/422), surfaced here as the typed MUTATION_REFUSED
+     * — never a locally re-implemented policy decision. The
+     * extension's message surface cannot reach this method with a
+     * fabricated identity: the service route fails closed
+     * RUNTIME_AUTHORIZATION_UNAVAILABLE (the runtime handoff is
+     * CTRL-016 scope); this method exists for that future runtime
+     * composition and is exercised offline with injected fakes.
      *
      * @param {string} owner
      * @param {string} name
      * @param {{ prNumber: number, workItem: string, baseRef: string,
      *           baseSha: string, headSha: string }} authorization the
-     *        bound authorization identity (all six fields closed; the
-     *        merge method is frozen here, never caller-supplied)
+     *        presented runtime-issued authorization identity (all
+     *        fields closed; the merge method is frozen here, never
+     *        caller-supplied)
      */
     async mergePullRequest(owner, name, { prNumber, workItem, baseRef, baseSha, headSha }) {
-      if (typeof workItem !== "string" || workItem.length === 0) {
+      // Structural completeness only — the Python boundary's own
+      // `_as_merge_request` normalization: a missing or degenerate
+      // field is a programming/invocation error (INTERNAL_ERROR)
+      // before any network, never a guessed default. This grants no
+      // trust: possession of a well-formed identity is not
+      // authorization (the runtime's policy re-proof is the trust).
+      const structurallyComplete =
+        typeof prNumber === "number" && Number.isInteger(prNumber) && prNumber > 0 &&
+        typeof workItem === "string" && workItem.length > 0 &&
+        typeof baseRef === "string" && baseRef.length > 0 &&
+        typeof baseSha === "string" && baseSha.length > 0 &&
+        typeof headSha === "string" && headSha.length > 0;
+      if (!structurallyComplete) {
         return failure(
           "INTERNAL_ERROR",
-          "the merge transport requires the complete runtime authorization identity: 'workItem' is missing " +
-            "(the merge cannot execute unbound to the authorized work item)"
+          "the merge transport requires the structurally complete runtime authorization identity " +
+            "(prNumber, workItem, baseRef, baseSha, headSha); a presented value with a missing or " +
+            "degenerate field is refused before any network call"
         );
       }
-      const observed = await this.getPullRequest(owner, name, prNumber);
-      if (!observed.ok) {
-        return observed;
-      }
-      const pr = observed.pullRequest;
-      if (pr.merged) {
-        return failure("MUTATION_REFUSED", `PR #${prNumber} (${workItem}) is already merged`);
-      }
-      if (pr.state !== "open") {
-        return failure("MUTATION_REFUSED", `PR #${prNumber} (${workItem}) is ${pr.state}, not open`);
-      }
-      if (pr.baseRef !== baseRef) {
-        return failure(
-          "STALE_REFERENCE",
-          `PR #${prNumber} (${workItem}) targets base ref '${pr.baseRef}', not the authorized base ref '${baseRef}'`
-        );
-      }
-      if (pr.baseSha !== baseSha) {
-        return failure(
-          "STALE_REFERENCE",
-          `PR #${prNumber} (${workItem}) base ${pr.baseSha} does not match the authorized base ${baseSha}`
-        );
-      }
-      if (pr.headSha !== headSha) {
-        return failure(
-          "STALE_REFERENCE",
-          `PR #${prNumber} (${workItem}) head ${pr.headSha} does not match the authorized head ${headSha}`
-        );
-      }
+      // Exactly ONE POST — zero reads. GitHub's own `sha` parameter
+      // is the exact-head safety: a head that moved since the
+      // authorization was issued is refused by GitHub (409), and a
+      // closed/merged/non-mergeable PR is refused by the endpoint
+      // itself (405/422) — both surface as the typed refusal below.
       const result = await _request(
         "POST",
         `${api}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${prNumber}/merge`,

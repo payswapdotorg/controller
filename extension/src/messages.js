@@ -43,16 +43,24 @@
  *
  *   Mutations (transport surface ONLY — no popup control invokes these;
  *   each requires the exact closed form the Controller's accepted
- *   mutation surface defines. The MergePullRequest form PRESENTS the
- *   complete closed MergeAuthorization identity — prNumber, workItem,
- *   baseRef, baseSha, headSha; the frozen merge method is deliberately
- *   NOT a message field (a message carrying one is malformed — the
- *   method is the frozen transport constant). The message payload is
- *   never itself the authority: the service binds the presented
- *   authorization, before any merge POST, to the repository authority
- *   projection and the Architect's exact-head APPROVE observed live
- *   (src/mergeAuthorization.js); the payload alone — even with a live
- *   GitHub session — can never authorize a merge):
+ *   mutation surface defines. The MergePullRequest form is the CLOSED
+ *   TRANSPORT FORM of an ALREADY-ISSUED runtime authorization —
+ *   prNumber, workItem, baseRef, baseSha, headSha; the frozen merge
+ *   method is deliberately NOT a message field (a message carrying
+ *   one is malformed — the method is the frozen transport constant).
+ *   The boundary validates ONLY this closed form and fails closed on
+ *   malformed or fabricated input; it NEVER interprets a governance
+ *   fact — review state, active-work-item eligibility, required
+ *   checks, mergeability, draft state, lifecycle — and no reviewer
+ *   identity is hard-coded anywhere in the extension. The message
+ *   payload is never itself an authorization: the Controller runtime
+ *   obtains and revalidates the accepted MergeAuthorization through
+ *   its existing merge-policy boundary (controller/github.py), and
+ *   the runtime-authorization handoff that would carry one into this
+ *   extension is not composed in CTRL-013 (runtime composition is
+ *   CTRL-016 scope) — so the route fails closed
+ *   RUNTIME_AUTHORIZATION_UNAVAILABLE with zero network, and the
+ *   merge POST is unreachable from the message surface):
  *
  *   CreateBranch          { repository, branch, fromSha }
  *   OpenPullRequest       { repository, branch, baseBranch, baseSha, title, body }

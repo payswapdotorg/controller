@@ -51,6 +51,7 @@ export const ERROR_CODES = Object.freeze([
   "RATE_LIMITED", // GitHub primary/secondary rate limit
   "STALE_REFERENCE", // observed SHA/ref drifted from the expected authority-derived value
   "MUTATION_REFUSED", // a mutation was refused by its in-transport gate
+  "RUNTIME_AUTHORIZATION_UNAVAILABLE", // the runtime-issued authorization channel is not composed (CTRL-016); the merge transport cannot accept an authorization from the message surface
   "GITHUB_UNAVAILABLE", // GitHub API transport failure (5xx/timeout/network)
   "GITHUB_MALFORMED", // a GitHub API response is structurally unusable
   "GITHUB_NOT_FOUND", // a GitHub resource 404 that is not repository-scoped

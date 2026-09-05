@@ -26,18 +26,29 @@
  *   - discovery and the three mutations require a live session token
  *     (refused locally with AUTHORIZATION_REQUIRED before any network
  *     call when absent);
- *   - MergePullRequest is the TRANSPORT of a runtime-issued merge
- *     authorization, never an authorization substitute: the message
- *     PRESENTS the complete closed authorization identity (the frozen
- *     merge method is not message-carried), and the service binds it
- *     — before any merge POST — to what it observes itself from
- *     sources the message caller cannot write: the repository
- *     authority projection at the pinned default-branch SHA (the
- *     authorization's work item must be the CURRENT active item) and
- *     the Architect's APPROVED review on the exact PR head by the
- *     frozen architect reviewer identity. A session plus fabricated
- *     identity fields never reaches the POST (mergeAuthorization.js
- *     owns the binding; githubClient.js stays predicate-free);
+ *   - MergePullRequest is the TRANSPORT of an ALREADY-ISSUED runtime
+ *     merge authorization (review iteration 2) — never an authorization
+ *     substitute, and never a policy evaluator. The message boundary
+ *     validates ONLY the closed transport form (the exact field set
+ *     and types the accepted `MergeAuthorization` value defines; the
+ *     frozen merge method is not message-carried) and fails closed on
+ *     malformed or fabricated input. The extension NEVER interprets a
+ *     governance fact — review state, active-work-item eligibility,
+ *     required checks, mergeability, draft state, lifecycle: the
+ *     complete merge predicate is the Controller runtime's
+ *     (`controller/github.py`, `_require_merge_policy`), re-proven by
+ *     the runtime at execution time. The channel through which the
+ *     runtime would hand this extension an authorization it has issued
+ *     is NOT composed in CTRL-013 (runtime composition is CTRL-016
+ *     scope): there is deliberately no second authorization mechanism
+ *     here, so the message-surface route fails closed
+ *     RUNTIME_AUTHORIZATION_UNAVAILABLE with ZERO network — a live
+ *     session plus a fully-populated fabricated identity can never
+ *     make the merge POST reachable from a message;
+ *   - the transport client (`githubClient.js`) carries only the exact
+ *     target identity and exact-head safety (GitHub's own `sha`
+ *     parameter) with the frozen merge method — no
+ *     review/check/lifecycle predicate lives in it;
  *   - observations of public repositories work unauthenticated (the
  *     controlled MVP repositories are public); private repositories
  *     fail closed as REPOSITORY_INACCESSIBLE until a connection with
@@ -64,11 +75,6 @@ import {
   setGitHubConnection,
 } from "./configuration.js";
 import { projectAuthorityState } from "./authority.js";
-import {
-  bindAuthorizationToArchitectApproval,
-  bindAuthorizationToAuthority,
-  mergeAuthorizationIdentity,
-} from "./mergeAuthorization.js";
 import { validateRequest } from "./messages.js";
 import { discoverProviderTabs, openProviderTab } from "./tabDiscovery.js";
 import { createGitHubIdentity } from "./githubIdentity.js";
@@ -465,17 +471,23 @@ export function createControllerService({
         }
 
         case "MergePullRequest": {
-          // Mutation 3 — the transport of a runtime-issued merge
-          // authorization (review iteration 1). The message PRESENTS
-          // the complete closed identity; the service binds it to the
-          // repository authority and the Architect's exact-head
-          // APPROVE — observed live, never taken from the payload —
-          // and only then hands the bound authorization to the
-          // client's identity/exact-head safety checks and the single
-          // merge POST. The merge POST is unreachable without the
-          // runtime-authorized path; possession of a session plus
-          // fabricated identity fields fails closed with zero
-          // mutations.
+          // Mutation 3 — the TRANSPORT of an ALREADY-ISSUED runtime merge
+          // authorization (review iteration 2). The boundary validates
+          // ONLY the closed transport form (validateRequest above: the
+          // exact field set and types; the frozen merge method is not
+          // message-carried). This extension NEVER evaluates a
+          // governance fact — review state, active-work-item
+          // eligibility, required checks, mergeability, draft state,
+          // lifecycle: the complete merge predicate is the Controller
+          // runtime's (controller/github.py, _require_merge_policy),
+          // re-proven by the runtime at execution time. The channel
+          // through which the runtime would hand this extension an
+          // authorization it has issued is not composed in CTRL-013
+          // (runtime composition is CTRL-016 scope), and there is
+          // deliberately NO second authorization mechanism here — so
+          // the route fails closed NOW, with zero network: a live
+          // session plus a fully-populated fabricated identity can
+          // never make the merge POST reachable from a message.
           const connected = _requireSessionToken();
           if (!connected.ok) {
             return connected;
@@ -484,64 +496,15 @@ export function createControllerService({
           if (!identityResult.ok) {
             return identityResult;
           }
-          const presented = mergeAuthorizationIdentity({
-            prNumber: validated.request.prNumber,
-            workItem: validated.request.workItem,
-            baseRef: validated.request.baseRef,
-            baseSha: validated.request.baseSha,
-            headSha: validated.request.headSha,
-          });
-          if (!presented.ok) {
-            return presented;
-          }
-          const authorization = presented.authorization;
-          // Binding 1 — the repository authority (GET-only, pinned
-          // default-branch SHA): the work item must be the CURRENT
-          // active item. No machine state, contradiction, or drift
-          // fails closed here with zero mutations.
-          const projected = await projectAuthorityState({ client, repository: identityResult.repository });
-          if (!projected.ok) {
-            return projected;
-          }
-          const authorityBound = bindAuthorizationToAuthority(authorization, projected.state);
-          if (!authorityBound.ok) {
-            return authorityBound;
-          }
-          // Binding 2 — the Architect's exact-head APPROVE, observed
-          // live from GitHub (the unforgeable authorization root the
-          // message caller cannot fabricate).
-          const reviews = await github.getReviews(
-            identityResult.owner,
-            identityResult.name,
-            authorization.prNumber
+          return failure(
+            "RUNTIME_AUTHORIZATION_UNAVAILABLE",
+            "MergePullRequest is the transport of a merge authorization the Controller runtime has " +
+              "already issued through its merge-policy boundary; the runtime-authorization handoff is " +
+              "not composed yet (runtime composition is CTRL-016 scope), and this extension refuses to " +
+              "invent a second authorization mechanism: a message payload — even a well-formed one with " +
+              "a live session — is not an authorization, so the merge POST is unreachable here with zero " +
+              "network"
           );
-          if (!reviews.ok) {
-            return reviews;
-          }
-          const approvalBound = bindAuthorizationToArchitectApproval(authorization, reviews.reviews);
-          if (!approvalBound.ok) {
-            return approvalBound;
-          }
-          // Transport — the client carries the complete authorization
-          // identity (work item included; merge method frozen),
-          // applies its identity/exact-head safety checks, and posts
-          // exactly one merge.
-          const merged = await github.mergePullRequest(identityResult.owner, identityResult.name, {
-            prNumber: authorization.prNumber,
-            workItem: authorization.workItem,
-            baseRef: authorization.baseRef,
-            baseSha: authorization.baseSha,
-            headSha: authorization.headSha,
-          });
-          if (!merged.ok) {
-            return merged;
-          }
-          return {
-            ok: true,
-            merged: merged.merged,
-            mergeCommitSha: merged.mergeCommitSha,
-            authorization,
-          };
         }
 
         default:
