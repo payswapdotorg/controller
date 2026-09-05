@@ -1061,6 +1061,122 @@ test("an AMBIGUOUS compose control (two data-active buttons in the composer form
   assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 3);
 });
 
+// --------------------------------------------------------------------
+// Continuation 8 (PR #6 comment 5555093252) — the operator's cited
+// false-positive JSON re-issued as a work order: the literal live
+// capture reproduced at the corrected tip (requirements 1, 6(a), and
+// 6(b)) and the result-shape invariant that makes the cited
+// three-field record structurally unreachable at this tip.
+// --------------------------------------------------------------------
+
+test("the operator's literal capture reproduced: the prompt NEVER enters the composer (every typed input is discarded before the read-back), the send control stays disabled, and the surface is waiting-shaped — Start fails closed, never ok:true", async () => {
+  // PR #6 comment 5555093252, requirements 1, 6(a), and 6(b): the
+  // operator's captured post-run DOM — an EMPTY #chat-input with a
+  // DISABLED #send-message-button — combined with the weak sidebar
+  // surface carrying the exact prompt is the EXACT state under which
+  // the pre-correction a22febe adapter returned the cited false
+  // positive (`ok:true` with the three-field `submitted`
+  // {attempts:1, popupDismissals:0, generation:"waiting"} — zero
+  // typing accepted, zero sending). The corrected adapter refuses:
+  // every bounded attempt types the exact prompt, the decisive
+  // read-back catches the discarded input state BEFORE any send (the
+  // send control is disabled the entire run — nothing was ever
+  // sendable, and nothing is ever sent), and the budget ends in a
+  // TYPED failure. `generation:"waiting"` is reported context only —
+  // it never participates in acceptance.
+  const built = build({
+    sidebarHistory: [PROMPT], // the weak surface that produced the live false positive
+    beforeRespond: (message, state) => {
+      if (message.op === "probe") {
+        // The provider discards the typed input state before every
+        // read: the composer reads decisively EMPTY at every
+        // read-back (the prompt was never present in #chat-input).
+        state.composerValue = "";
+        // The submission never lands (no message evidence) and
+        // nothing ever generates — the "waiting" shape of the live
+        // capture, context only, never a proof.
+        state.conversation = state.conversation.filter((t) => t !== PROMPT);
+        state.stop.visible = false;
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/did not hold the exact governed prompt verbatim/.test(result.error.message));
+  // Never claimed submitted: the message evidence never carried the prompt.
+  assert.ok(!built.pages[0].state.conversation.includes(PROMPT));
+  const history = built.pages[0].history();
+  // The send control was NEVER clicked — it is disabled while the
+  // composer is empty, the composer was decisively empty at every
+  // decisive read, and the pre-send gate never admits an empty
+  // composer. Zero sends in the entire run.
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 0);
+  // The bounded budget: three attempts, each typing the exact prompt
+  // byte-identical and catching the discarded input state at the
+  // decisive read-back.
+  assert.equal(history.filter((c) => c.op === "type").length, 3);
+  const typeTexts = history.filter((c) => c.op === "type").map((c) => c.text);
+  assert.deepEqual(typeTexts, [PROMPT, PROMPT, PROMPT]);
+});
+
+test("every ok:true Start with a submission carries EXACTLY the four-field submitted record — the cited three-field legacy shape is structurally unreachable at this tip", async () => {
+  // PR #6 comment 5555093252: the operator's cited JSON carries
+  // `submitted = {attempts, popupDismissals, generation}` — exactly
+  // three fields, no `composeReestablishments`. That is the a22febe
+  // (continuation-5) result shape, git-verifiable
+  // (`git show a22febe:extension/src/zaiAdapter.js`). At the
+  // corrected tip there are exactly TWO ok:true Start shapes: the
+  // idempotent alreadyActive re-report (NO submitted record at all)
+  // and recordSubmission — the only submission path, which ALWAYS
+  // reports composeReestablishments. A Start result carrying a
+  // three-field submitted record therefore cannot have been produced
+  // by this code: it identifies a stale service worker. This
+  // regression pins the invariant on BOTH the direct-acceptance path
+  // and the compose-re-establishment path.
+  const FOUR_FIELDS = ["attempts", "composeReestablishments", "generation", "popupDismissals"];
+
+  // (1) The direct acceptance path.
+  const happy = build();
+  const okResult = await happy.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(okResult.ok, true, JSON.stringify(okResult));
+  assert.deepEqual(Object.keys(okResult.submitted).sort(), FOUR_FIELDS);
+  assert.equal(okResult.submitted.composeReestablishments, 0);
+
+  // (2) The compose-re-establishment path (the second observed
+  // failure mode recovered within the budget).
+  let sendAttempts = 0;
+  const recovered = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button") {
+        sendAttempts += 1;
+        if (sendAttempts === 1) {
+          state.__discard = true;
+        }
+      }
+      if (message.op === "probe" && state.__discard) {
+        state.__discard = false;
+        if (state.conversation[state.conversation.length - 1] === PROMPT) {
+          state.conversation.pop();
+        }
+        state.stop.visible = false;
+      }
+    },
+  });
+  const recoveredResult = await recovered.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(recoveredResult.ok, true, JSON.stringify(recoveredResult));
+  assert.deepEqual(Object.keys(recoveredResult.submitted).sort(), FOUR_FIELDS);
+  assert.equal(recoveredResult.submitted.composeReestablishments, 1);
+
+  // (3) The idempotent alreadyActive re-report carries NO submitted
+  // record at all — every result WITH a submitted record went
+  // through recordSubmission (the four-field shape).
+  const again = await happy.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.equal(again.alreadyActive, true);
+  assert.ok(!("submitted" in again), "the alreadyActive re-report never carries a submitted record");
+});
+
 test("an ambiguous composer surface (two visible #chat-input elements) fails closed before ANY action — nothing prepared, typed, or sent", async () => {
   // The pre-correction `?? \"\"` coercion treated an unreadable
   // composer as empty (cleared). The corrected adapter requires
