@@ -31,7 +31,7 @@ class ValidateCommandTests(unittest.TestCase):
         result = _run_controller("validate", "--repo", str(REPO_ROOT))
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("controller authority: OK", result.stdout)
-        self.assertIn("active work item: CTRL-011", result.stdout)
+        self.assertIn("active work item: CTRL-012", result.stdout)
         self.assertIn("lifecycle state: READY", result.stdout)
 
     def test_validate_synthetic_repository_succeeds(self) -> None:
