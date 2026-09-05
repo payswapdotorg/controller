@@ -9,11 +9,14 @@ import assert from "node:assert/strict";
 import {
   CONFIGURATION_SCHEMA_VERSION,
   ConfigurationStore,
+  clearGitHubConnection,
   emptyConfiguration,
   registerArchitect,
   registerWorker,
   selectRepository,
+  setGitHubConnection,
   validateConfiguration,
+  validateGitHubConnection,
 } from "../src/configuration.js";
 import { fakeStorage } from "./fixtures.js";
 
@@ -156,4 +159,114 @@ test("validateConfiguration accepts the empty configuration", () => {
   const result = validateConfiguration(emptyConfiguration());
   assert.equal(result.ok, true);
   assert.deepEqual(result.configuration, emptyConfiguration());
+});
+
+// ---------------------------------------------------------------------------
+// CTRL-013: the GitHub connection metadata and the 0.2 schema.
+// ---------------------------------------------------------------------------
+
+test("a 0.1 store migrates additively to the 0.2 shape in memory", () => {
+  const legacy = {
+    schemaVersion: "0.1",
+    workers: [],
+    architects: [],
+    repository: "pectoraux/controller",
+  };
+  const validated = validateConfiguration(legacy);
+  assert.equal(validated.ok, true);
+  assert.equal(validated.configuration.schemaVersion, CONFIGURATION_SCHEMA_VERSION);
+  assert.equal(validated.configuration.githubConnection, null);
+  assert.equal(validated.configuration.repository, "pectoraux/controller");
+});
+
+test("a 0.1 store carrying connection data is corrupt (never guessed past)", () => {
+  const legacy = {
+    schemaVersion: "0.1",
+    workers: [],
+    architects: [],
+    repository: null,
+    githubConnection: { login: "x", name: null, avatarUrl: null },
+  };
+  const validated = validateConfiguration(legacy);
+  assert.equal(validated.ok, false);
+  assert.equal(validated.error.code, "CONFIGURATION_CORRUPT");
+});
+
+test("a 0.2 store requires the githubConnection field exactly once", () => {
+  const missing = validateConfiguration({
+    schemaVersion: "0.2", workers: [], architects: [], repository: null,
+  });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "CONFIGURATION_CORRUPT");
+
+  const wrongType = validateConfiguration({
+    schemaVersion: "0.2", workers: [], architects: [], repository: null,
+    githubConnection: "connected",
+  });
+  assert.equal(wrongType.ok, false);
+  assert.equal(wrongType.error.code, "CONFIGURATION_CORRUPT");
+});
+
+test("a connection record carrying a token/secret/cookie field is corrupt", () => {
+  for (const extra of [
+    { login: "pectoraux", name: null, avatarUrl: null, token: "gho_x" },
+    { login: "pectoraux", name: null, avatarUrl: null, password: "hunter2" },
+    { login: "pectoraux", name: null, avatarUrl: null, cookie: "session=..." },
+    { secret: "x", login: "pectoraux", name: null, avatarUrl: null },
+  ]) {
+    const validated = validateGitHubConnection(extra);
+    assert.equal(validated.ok, false, JSON.stringify(extra));
+    assert.equal(validated.error.code, "CONFIGURATION_CORRUPT", JSON.stringify(extra));
+  }
+  // And through the full configuration validation.
+  const stored = validateConfiguration({
+    schemaVersion: "0.2",
+    workers: [],
+    architects: [],
+    repository: null,
+    githubConnection: { login: "pectoraux", name: null, avatarUrl: null, token: "gho_x" },
+  });
+  assert.equal(stored.ok, false);
+  assert.equal(stored.error.code, "CONFIGURATION_CORRUPT");
+});
+
+test("a valid connection record round-trips with nullable display fields", () => {
+  const validated = validateGitHubConnection({ login: "pectoraux", name: "Pectoraux", avatarUrl: null });
+  assert.equal(validated.ok, true);
+  assert.deepEqual(validated.connection, { login: "pectoraux", name: "Pectoraux", avatarUrl: null });
+  const viaConfiguration = validateConfiguration({
+    schemaVersion: "0.2",
+    workers: [],
+    architects: [],
+    repository: null,
+    githubConnection: { login: "pectoraux", name: null, avatarUrl: "https://avatars.example/u/1.png" },
+  });
+  assert.equal(viaConfiguration.ok, true);
+  assert.deepEqual(viaConfiguration.configuration.githubConnection, {
+    login: "pectoraux",
+    name: null,
+    avatarUrl: "https://avatars.example/u/1.png",
+  });
+});
+
+test("setGitHubConnection/clearGitHubConnection are immutable and validate", () => {
+  const base = emptyConfiguration();
+  const withWorker = registerWorker(base, { name: "Z.ai", providerKind: "zai", providerUrl: "https://chat.z.ai" });
+  assert.ok(withWorker.ok);
+  const set = setGitHubConnection(withWorker.configuration, { login: "pectoraux", name: null, avatarUrl: null });
+  assert.equal(set.ok, true);
+  assert.equal(set.configuration.githubConnection.login, "pectoraux");
+  // The source configuration is untouched (immutable update).
+  assert.equal(withWorker.configuration.githubConnection, null);
+  assert.equal(set.configuration.workers.length, 1);
+
+  const refused = setGitHubConnection(base, { login: "pectoraux", name: null, avatarUrl: null, token: "gho_x" });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error.code, "CONFIGURATION_CORRUPT");
+
+  const cleared = clearGitHubConnection(set.configuration);
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.configuration.githubConnection, null);
+  assert.equal(cleared.configuration.workers.length, 1);
+  assert.equal(set.configuration.githubConnection.login, "pectoraux");
 });

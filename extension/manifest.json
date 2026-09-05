@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pectoraux Controller",
   "version": "0.1.0",
-  "description": "Pectoraux Controller browser operator surface (non-authoritative): registers Workers/Architects, selects the controlled GitHub repository, and presents repository-derived Controller authority state.",
+  "description": "Pectoraux Controller browser operator surface (non-authoritative): registers Workers/Architects, connects GitHub (OAuth device flow), selects the controlled repository, and presents repository-derived Controller authority state and evidence.",
   "action": {
     "default_title": "Pectoraux Controller",
     "default_popup": "popup/popup.html"
@@ -17,6 +17,11 @@
   ],
   "host_permissions": [
     "https://api.github.com/*",
-    "https://raw.githubusercontent.com/*"
-  ]
+    "https://raw.githubusercontent.com/*",
+    "https://github.com/*"
+  ],
+  "oauth2": {
+    "client_id": "PASTE-YOUR-GITHUB-OAUTH-CLIENT-ID-HERE",
+    "scopes": ["public_repo"]
+  }
 }

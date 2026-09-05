@@ -49,6 +49,33 @@
       <p class="form-error hidden" id="architect-form-error"></p>
     </section>
 
+    <section id="github">
+      <h2>GitHub</h2>
+      <div id="github-connection" class="connection-panel">
+        <p id="github-connection-status" class="selected">not connected</p>
+      </div>
+      <div id="github-device-flow" class="device-flow hidden">
+        <p class="hint">Authorize at GitHub (human authentication — the extension never
+        sees your password). Enter this code on the opened github.com page:</p>
+        <p id="github-user-code" class="user-code"></p>
+        <p class="hint" id="github-verification-uri"></p>
+        <p class="hint">The connection completes in the background — refresh here.</p>
+      </div>
+      <div class="button-row">
+        <button id="connect-github" type="button">Connect GitHub</button>
+        <button id="disconnect-github" type="button">Disconnect</button>
+        <button id="refresh-connection" type="button">Refresh</button>
+      </div>
+      <p class="form-error hidden" id="github-error"></p>
+      <div class="button-row">
+        <button id="discover-repositories" type="button">Discover repositories</button>
+      </div>
+      <div id="repository-discovery" class="discovery-panel"></div>
+      <p class="hint">Discovery lists repositories the connected account can access.
+      There is no token/PAT input anywhere — authorization uses GitHub's OAuth
+      device flow and the token stays session-only.</p>
+    </section>
+
     <section id="repository">
       <h2>Controlled repository</h2>
       <p id="selected-repository" class="selected">none selected</p>
@@ -59,6 +86,8 @@
         <button type="submit">Select</button>
       </form>
       <p class="form-error hidden" id="repository-form-error"></p>
+      <p class="hint">When GitHub is connected, selection is gated on observed access;
+      inaccessible repositories are refused, never substituted.</p>
     </section>
 
     <section id="authority">
@@ -69,6 +98,18 @@
       <div id="authority-error" class="error-panel hidden">
         <p class="fail-closed" id="authority-error-text"></p>
       </div>
+    </section>
+
+    <section id="evidence">
+      <h2>Repository evidence</h2>
+      <div class="button-row">
+        <button id="observe-repository" type="button">Observe repository</button>
+        <button id="observe-pull-requests" type="button">Observe open PRs</button>
+      </div>
+      <div id="evidence-result" class="state-panel">No evidence loaded yet.</div>
+      <p class="hint">Read-only observations through supported GitHub APIs — branches,
+      pull requests, reviews, comments, checks. The extension renders evidence;
+      it never evaluates governance predicates. No mutation controls exist here.</p>
     </section>
 
     <section id="tabs">

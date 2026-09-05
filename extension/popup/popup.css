@@ -183,3 +183,48 @@ footer {
   color: var(--muted);
   font-size: 10px;
 }
+
+/* CTRL-013: GitHub connection, device flow, discovery, evidence. */
+.button-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+
+.connection-panel .selected {
+  font-weight: 600;
+}
+
+.device-flow {
+  border: 1px dashed var(--accent, #4a5568);
+  padding: 8px;
+  margin: 8px 0;
+}
+
+.device-flow .user-code {
+  font-family: ui-monospace, monospace;
+  font-size: 1.4em;
+  letter-spacing: 0.25em;
+  text-align: center;
+  margin: 8px 0;
+}
+
+.discovery-panel {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 6px 0;
+}
+
+.discovery-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.discovery-row:last-child {
+  border-bottom: none;
+}

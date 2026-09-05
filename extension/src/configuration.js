@@ -1,12 +1,23 @@
 /**
- * The extension's non-authoritative configuration model (CTRL-012).
+ * The extension's non-authoritative configuration model (CTRL-012 +
+ * CTRL-013).
  *
  * The configuration holds exactly: registered Workers, registered
- * Architects, and the selected repository identity. It persists ONLY as
- * extension-local configuration (chrome.storage.local) and confers no
- * authority: "Extension configuration is never authoritative over
- * roadmap, work-order, machine-state, lifecycle, or merge policy"
- * (work order, "GitHub repository").
+ * Architects, the selected repository identity, and (CTRL-013) the
+ * GitHub connection METADATA — the authenticated account's display
+ * identity only. It persists ONLY as extension-local configuration
+ * (chrome.storage.local) and confers no authority: "Extension
+ * configuration is never authoritative over roadmap, work-order,
+ * machine-state, lifecycle, or merge policy" (work order, "GitHub
+ * repository").
+ *
+ * The GitHub connection record is deliberately credential-free: it
+ * carries the account login/name/avatar for display. The OAuth access
+ * token NEVER lives here — it is session-only memory inside the
+ * service worker (githubIdentity.js), discarded on restart and on any
+ * 401. A store that smuggles a token/secret/cookie field into the
+ * connection record is CORRUPT and fails closed (the closed-form
+ * discipline refuses unknown fields).
  *
  * Discipline mirrored from the Controller core:
  *   - immutable updates: every mutation computes a NEW configuration
@@ -17,6 +28,11 @@
  *   - storage is re-validated on load: a malformed store is an explicit
  *     fail-closed CONFIGURATION_CORRUPT state — never silently reset,
  *     defaulted, or guessed past.
+ *
+ * Schema history: 0.1 (CTRL-012: registrations + repository), 0.2
+ * (CTRL-013: + githubConnection). A 0.1 store loads as the 0.2 shape
+ * with githubConnection null — the migration is additive and
+ * in-memory only; the next explicit update persists the 0.2 form.
  */
 
 import { failure } from "./errors.js";
@@ -28,10 +44,14 @@ import {
 import { validateRepositoryIdentity } from "./repository.js";
 
 /** The configuration store's schema version. */
-export const CONFIGURATION_SCHEMA_VERSION = "0.1";
+export const CONFIGURATION_SCHEMA_VERSION = "0.2";
+
+/** Schema versions a stored configuration may carry (legacy accepted). */
+const ACCEPTED_SCHEMA_VERSIONS = Object.freeze(["0.1", "0.2"]);
 
 /**
- * The empty configuration (no registrations, no selected repository).
+ * The empty configuration (no registrations, no selected repository, no
+ * GitHub connection).
  *
  * @returns {object} a fresh frozen configuration record
  */
@@ -41,7 +61,51 @@ export function emptyConfiguration() {
     workers: Object.freeze([]),
     architects: Object.freeze([]),
     repository: null,
+    githubConnection: null,
   });
+}
+
+/**
+ * Validate a stored GitHub connection record (closed form).
+ *
+ * Exactly { login, name, avatarUrl }: login a non-empty string (the
+ * account identity for display), name/avatarUrl a string or null.
+ * Unknown fields are refused — a record carrying `token`, `password`,
+ * `secret`, `cookie`, or anything else fails closed as CORRUPT.
+ *
+ * @param {unknown} value
+ * @returns {{ ok: true, connection: object } |
+ *           { ok: false, error: { code: string, message: string } }}
+ */
+export function validateGitHubConnection(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return failure("CONFIGURATION_CORRUPT", "stored GitHub connection is not an object");
+  }
+  const present = Object.keys(value);
+  const expected = ["login", "name", "avatarUrl"];
+  const extra = present.filter((field) => !expected.includes(field));
+  if (extra.length > 0) {
+    return failure(
+      "CONFIGURATION_CORRUPT",
+      `stored GitHub connection has unknown field(s): ${extra.join(", ")} (closed form — credential material must never live in the store)`
+    );
+  }
+  if (typeof value.login !== "string" || value.login.length === 0) {
+    return failure("CONFIGURATION_CORRUPT", "stored GitHub connection 'login' must be a non-empty string");
+  }
+  for (const field of ["name", "avatarUrl"]) {
+    if (value[field] !== null && (typeof value[field] !== "string" || value[field].length === 0)) {
+      return failure("CONFIGURATION_CORRUPT", `stored GitHub connection '${field}' must be a non-empty string or null`);
+    }
+  }
+  return {
+    ok: true,
+    connection: Object.freeze({
+      login: value.login,
+      name: value.name === undefined ? null : value.name,
+      avatarUrl: value.avatarUrl === undefined ? null : value.avatarUrl,
+    }),
+  };
 }
 
 /**
@@ -55,10 +119,10 @@ export function validateConfiguration(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return failure("CONFIGURATION_CORRUPT", "stored configuration is not an object");
   }
-  if (value.schemaVersion !== CONFIGURATION_SCHEMA_VERSION) {
+  if (!ACCEPTED_SCHEMA_VERSIONS.includes(value.schemaVersion)) {
     return failure(
       "CONFIGURATION_CORRUPT",
-      `stored configuration schemaVersion '${String(value.schemaVersion)}' is not '${CONFIGURATION_SCHEMA_VERSION}'`
+      `stored configuration schemaVersion '${String(value.schemaVersion)}' is not one of ${ACCEPTED_SCHEMA_VERSIONS.join(", ")}`
     );
   }
   for (const field of ["workers", "architects"]) {
@@ -109,6 +173,26 @@ export function validateConfiguration(value) {
   } else if (value.repository !== null) {
     return failure("CONFIGURATION_CORRUPT", "stored 'repository' must be null or a canonical identity");
   }
+  let githubConnection = null;
+  if (value.schemaVersion === "0.2") {
+    if (value.githubConnection !== null && value.githubConnection !== undefined) {
+      const validated = validateGitHubConnection(value.githubConnection);
+      if (!validated.ok) {
+        return validated;
+      }
+      githubConnection = validated.connection;
+    } else if (!("githubConnection" in value)) {
+      return failure("CONFIGURATION_CORRUPT", "stored configuration omits 'githubConnection'");
+    } else if (value.githubConnection !== null) {
+      return failure("CONFIGURATION_CORRUPT", "stored 'githubConnection' must be null or a connection record");
+    }
+  } else if (value.githubConnection !== undefined) {
+    // A 0.1 store must not carry connection data it never had.
+    return failure(
+      "CONFIGURATION_CORRUPT",
+      "stored configuration declares schema 0.1 but carries 'githubConnection' data"
+    );
+  }
   return {
     ok: true,
     configuration: Object.freeze({
@@ -116,6 +200,7 @@ export function validateConfiguration(value) {
       workers: Object.freeze(workers),
       architects: Object.freeze(architects),
       repository,
+      githubConnection,
     }),
   };
 }
@@ -167,10 +252,11 @@ function _register(configuration, role, input) {
   return {
     ok: true,
     configuration: Object.freeze({
-      schemaVersion: configuration.schemaVersion,
+      schemaVersion: CONFIGURATION_SCHEMA_VERSION,
       workers: Object.freeze(role === "worker" ? next : [...configuration.workers]),
       architects: Object.freeze(role === "architect" ? next : [...configuration.architects]),
       repository: configuration.repository,
+      githubConnection: configuration.githubConnection,
     }),
   };
 }
@@ -189,10 +275,57 @@ export function selectRepository(configuration, repository) {
   return {
     ok: true,
     configuration: Object.freeze({
-      schemaVersion: configuration.schemaVersion,
+      schemaVersion: CONFIGURATION_SCHEMA_VERSION,
       workers: Object.freeze([...configuration.workers]),
       architects: Object.freeze([...configuration.architects]),
       repository: identity.repository,
+      githubConnection: configuration.githubConnection,
+    }),
+  };
+}
+
+/**
+ * Record the GitHub connection metadata (immutable update). The record
+ * is the closed connection form — display identity only, never a
+ * credential (validateGitHubConnection refuses unknown fields).
+ *
+ * @returns {{ ok: true, configuration: object } |
+ *           { ok: false, error: { code: string, message: string } }}
+ */
+export function setGitHubConnection(configuration, connection) {
+  const validated = validateGitHubConnection(connection);
+  if (!validated.ok) {
+    // A connection record that fails the closed form is corrupt-shaped
+    // input, not configuration corruption: surface it as the same
+    // typed refusal class so nothing malformed is ever persisted.
+    return validated;
+  }
+  return {
+    ok: true,
+    configuration: Object.freeze({
+      schemaVersion: CONFIGURATION_SCHEMA_VERSION,
+      workers: Object.freeze([...configuration.workers]),
+      architects: Object.freeze([...configuration.architects]),
+      repository: configuration.repository,
+      githubConnection: validated.connection,
+    }),
+  };
+}
+
+/**
+ * Clear the GitHub connection metadata (immutable update).
+ *
+ * @returns {{ ok: true, configuration: object }}
+ */
+export function clearGitHubConnection(configuration) {
+  return {
+    ok: true,
+    configuration: Object.freeze({
+      schemaVersion: CONFIGURATION_SCHEMA_VERSION,
+      workers: Object.freeze([...configuration.workers]),
+      architects: Object.freeze([...configuration.architects]),
+      repository: configuration.repository,
+      githubConnection: null,
     }),
   };
 }
