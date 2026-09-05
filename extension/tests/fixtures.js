@@ -200,3 +200,132 @@ export function loadManifest() {
 export function readExtensionFile(relativePath) {
   return readFileSync(join(EXTENSION_ROOT, relativePath), "utf-8");
 }
+
+// ---------------------------------------------------------------------------
+// CTRL-013 fixtures: the GitHub OAuth device flow and the app API client.
+// ---------------------------------------------------------------------------
+
+/**
+ * A deterministic fake of the two GitHub device-flow endpoints.
+ * Implements exactly the documented wire behavior: /login/device/code
+ * returns the device code; /login/oauth/access_token answers
+ * authorization_pending / slow_down (retryable) and then the terminal
+ * sequence configured by `tokenOutcome`. Records every request body
+ * (they contain only the public client id and codes — never secrets).
+ */
+export function fakeDeviceFlowEndpoints({
+  clientId = "Ov23cliEntId0123456789",
+  scopes = ["public_repo"],
+  userCode = "ABCD-1234",
+  deviceCode = "d3v1c3c0d3",
+  verificationUri = "https://github.com/login/device",
+  expiresIn = 900,
+  interval = 1,
+  tokenOutcome = "token", // token | expired_token | access_denied | device_flow_disabled
+  pendingRounds = 2,
+  slowDownRounds = 0,
+  codeStatus = 200,
+  codeBody = null,
+} = {}) {
+  const requests = [];
+  let polls = 0;
+  const fetchImpl = async (url, options = {}) => {
+    const body = options.body ?? "";
+    const params = Object.fromEntries(new URLSearchParams(body).entries());
+    requests.push({ url: String(url), params });
+    if (String(url) === "https://github.com/login/device/code") {
+      if (codeStatus !== 200) {
+        return fakeResponse(codeStatus, codeBody ?? "");
+      }
+      return fakeResponse(
+        200,
+        JSON.stringify({
+          device_code: deviceCode,
+          user_code: userCode,
+          verification_uri: verificationUri,
+          expires_in: expiresIn,
+          interval,
+        })
+      );
+    }
+    if (String(url) === "https://github.com/login/oauth/access_token") {
+      polls += 1;
+      if (polls <= pendingRounds) {
+        return fakeResponse(200, JSON.stringify({ error: "authorization_pending" }));
+      }
+      if (polls <= pendingRounds + slowDownRounds) {
+        return fakeResponse(200, JSON.stringify({ error: "slow_down" }));
+      }
+      if (tokenOutcome === "token") {
+        return fakeResponse(
+          200,
+          JSON.stringify({ access_token: "gho_testtokenvalue111111111111111111", token_type: "bearer", scope: scopes.join(" ") })
+        );
+      }
+      return fakeResponse(200, JSON.stringify({ error: tokenOutcome }));
+    }
+    return fakeResponse(404);
+  };
+  return { fetchImpl, requests, _polls: () => polls };
+}
+
+/**
+ * A deterministic fake identity for service/client tests: holds a
+ * session token exactly like the real closure does.
+ */
+export function fakeIdentity({ token = null } = {}) {
+  let current = token;
+  const invalidated = [];
+  return {
+    currentToken: () => current,
+    invalidate() {
+      invalidated.push(current);
+      current = null;
+    },
+    _setToken(value) {
+      current = value;
+    },
+    _invalidated: () => invalidated,
+  };
+}
+
+/** A GitHub app-API JSON response shape helper. */
+export function jsonResponse(status, value, headers = {}) {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: new Map(Object.entries(headers)),
+    text: async () => (value === undefined ? "" : JSON.stringify(value)),
+  };
+}
+
+/** A synthetic repository summary (the /repos and /user/repos shape). */
+export function fakeRepositoryPayload(fullName, overrides = {}) {
+  const [owner, name] = fullName.split("/");
+  return {
+    full_name: fullName,
+    name,
+    owner: { login: owner },
+    default_branch: "main",
+    description: `synthetic ${fullName}`,
+    private: false,
+    pushed_at: "2026-09-05T00:00:00Z",
+    ...overrides,
+  };
+}
+
+/** A synthetic pull-request payload (the /pulls shape). */
+export function fakePullRequestPayload(number, overrides = {}) {
+  return {
+    number,
+    state: "open",
+    title: `PR #${number}`,
+    head: { ref: `ctrl-${number}`, sha: "a".repeat(40) },
+    base: { ref: "main", sha: "b".repeat(40) },
+    draft: false,
+    merged: false,
+    mergeable_state: "clean",
+    merge_commit_sha: null,
+    ...overrides,
+  };
+}
