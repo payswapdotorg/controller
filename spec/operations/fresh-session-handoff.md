@@ -10,11 +10,11 @@ Automation stage: `STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP`
 
 Completed and reconciled: `CTRL-001` through `CTRL-013`.
 
-Current active Work Item: `CTRL-013 — GitHub Browser-App Integration`.
+Current active Work Item: `CTRL-014 — Z.ai Browser Worker Adapter`.
 
-Current Work Item status: `COMPLETE` (post-merge reconciliation delivered on the repository of record; awaiting Architect review/merge of the reconciliation checkpoint).
+Current Work Item status: `READY`.
 
-No Work Item is currently executable. CTRL-014 through CTRL-020 are planned sequencing only; they require explicit activation after the preceding Work Item is complete and reconciled.
+CTRL-014 is the sole executable Work Item. CTRL-015 through CTRL-020 are planned sequencing only; they require explicit activation after the preceding Work Item is complete and reconciled.
 
 ## Product decision
 
@@ -56,11 +56,13 @@ Do not invent alternate recovery prose. Recovery is bounded and preserves worker
 
 Human authentication is out of band. The Architect adapter will later deliver the Controller-generated review packet into the selected ChatGPT conversation and normalize explicit `APPROVE` / `REQUEST_CHANGES` decisions. Exact UI selectors and observation strategy are intentionally deferred to CTRL-015 and must be based on the live supported UI rather than guessed selectors.
 
-## CTRL-013 handoff
+## CTRL-014 handoff
 
-CTRL-013 owns the GitHub browser-app integration foundation for the extension. It must provide supported GitHub authorization, accessible repository discovery/selection, canonical `owner/name` identity, observation of the GitHub evidence required by the existing Controller boundaries, and only the existing Controller-authorized mutation surface. It must not duplicate lifecycle/merge/review predicates, introduce PAT entry, store raw credentials, use GitHub page-click automation for API-available operations, or activate provider-specific Worker/Architect UI automation.
+CTRL-014 owns the Z.ai browser Worker adapter only. It must provide supported browser interaction and typed provider observations for authenticated-session discovery, Agent/model selection, exact-prompt submission confirmation, bounded known-popup retry, bounded hung-worker Stop + fixed `continue` recovery, and fail-closed unknown/contradictory states.
 
-The concrete MVP repository is `pectoraux/smallapp`. The extension must support selecting it, but repository authority is always read from the controlled repository itself.
+It must preserve Worker / Work Item / browser-session identity, keep provider-specific selectors inside the adapter boundary, and leave repository authority, lifecycle predicates and merge/review policy in the existing Controller/repository layers.
+
+The concrete controlled-product repository for MVP dogfood remains `pectoraux/smallapp`; repository authority is always read from the controlled repository itself.
 
 ## Governance invariants
 
@@ -88,4 +90,4 @@ The concrete MVP repository is `pectoraux/smallapp`. The extension must support 
 
 ## Current next action
 
-Dispatch `CTRL-013` from the exact current `main` SHA after its governance activation is merged. The worker owns only the GitHub Browser-App Integration scope defined in `spec/work-items/CTRL-013.md`. Do not pre-implement CTRL-014 through CTRL-020.
+Dispatch `CTRL-014` from the exact current `main` SHA produced by the Architect-governed activation merge. The worker owns only the Z.ai Browser Worker Adapter scope defined in `spec/work-items/CTRL-014.md`. Do not pre-implement CTRL-015 through CTRL-020.
