@@ -25,7 +25,7 @@ The Controller reconstructs repository authority and executes deterministic loca
 
 ### Stage 2 — GitHub observation automation
 
-The Controller observes branches, PRs, commits, reviews and CI and correlates them to the active Work Item.
+The Controller observes branches, commits, PRs, reviews and CI and correlates them to the active Work Item.
 
 Human duty removed: routine PR/CI observation and transcription.
 
@@ -61,7 +61,19 @@ The Controller safely carries a repository-authorized READY Work Item through di
 
 The accepted CTRL-010 dogfood record demonstrates this composed capability, including deliberate lost-state-write recovery, zero second merge mutation, deterministic reconciliation and fail-closed contradiction probes.
 
-Stage 7 is the active governance stage. CTRL-011 was the production-runtime implementation layer that packaged these accepted capabilities into a continuously usable process without redefining governance semantics.
+Stage 7 remains the active governance stage. CTRL-011 completed the production runtime packaging. CTRL-012 through CTRL-020 are the authorized product-surface sequence that adds browser-mediated provider execution while preserving the frozen Stage-7 lifecycle and merge semantics.
+
+## Browser MVP operating model
+
+The MVP is a browser extension. It does not require a local product checkout, VS Code extension, desktop agent, or hosted web application.
+
+GitHub is the controlled-repository execution/evidence surface. The extension should use supported GitHub authorization/API mechanisms rather than clicking through github.com pages for ordinary repository operations.
+
+Worker and Architect provider UIs are operated through provider-specific browser adapters after human authentication. Provider-specific selectors, interaction sequences, prompt-submission confirmation, hang recovery, and ambiguous-state handling live inside those adapters rather than in the Controller core.
+
+For the MVP Z.ai Worker adapter, the required live interaction is: open/focus `chat.z.ai` → ensure authenticated → select `Agent` → select `GLM-5.3` / model `5.3` → enter the exact governed prompt → send → verify actual submission. If the known submission popup appears, press `Enter` and repeat from Agent/model/prompt/send/verification. For a hung worker, press `Stop`, verify it stopped, send `continue`, and verify acceptance. All retries are bounded; unknown UI state fails closed.
+
+For the MVP ChatGPT Architect adapter, authentication is human-managed and the adapter later delivers Controller-generated review packets to `chatgpt.com`, normalizing only explicit approval/change decisions or an exception/unknown outcome.
 
 ## Normative transition report
 
@@ -106,9 +118,11 @@ Runtime state must be reconstructible from repository/GitHub evidence. No hidden
 
 ## Current operating position
 
-CTRL-001 through CTRL-011 are accepted, merged and reconciled. CTRL-011 — Production Controller Runtime is complete, and no later Work Item is authorized by the current roadmap.
+CTRL-001 through CTRL-011 are accepted, merged and reconciled. CTRL-012 — Browser Control Surface Foundation is now the sole active and authorized Work Item and is `READY`.
 
 Stage 7 active.
-You still perform: product/architecture authority; policy definition/change; semantic Architect review where required; contradiction, safety and exception handling; and any future roadmap extension.
-You no longer need to perform: routine mechanical orchestration, mechanical merge clicking or routine post-merge bookkeeping for governed Work Items covered by the accepted Controller capabilities.
-The next automation milestone is: **none currently authorized**. CTRL-011 completed the production-runtime surface under the accepted Stage-7 governance boundary. Any future capability requires an explicit roadmap/architecture extension and Architect-governed activation.
+You still perform: product/architecture authority; policy definition/change; semantic Architect review where required; contradiction, safety and exception handling; human authentication at provider sites; and future roadmap/work-order activation.
+You no longer need to perform: routine mechanical orchestration already covered by the accepted Controller capabilities, and, after CTRL-014/016, routine supported browser interaction with configured providers.
+The next automation milestone is: **CTRL-012 — Browser Control Surface Foundation**.
+
+A fresh session continues by reading, in order: `spec/state/controller-program-state.json`, `spec/roadmap/roadmap.md`, `spec/architecture/controller-architecture.md`, this document, `spec/work-items/CTRL-012.md`, and `spec/operations/fresh-session-handoff.md`. The exact current `main` SHA must be observed before dispatch. No conversation history is required.
