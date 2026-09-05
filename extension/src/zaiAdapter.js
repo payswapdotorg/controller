@@ -20,9 +20,12 @@
  *   adapter never blindly presses keys.
  *
  *   hung worker: `Stop` -> verified stopped -> the FIXED message
- *   `continue` -> verified acceptance. No alternate recovery wording.
- *   Bounded attempts; failure to confirm a required transition is a
- *   typed governance-hold outcome.
+ *   `continue` -> verified acceptance (the exact message confirmed
+ *   present in the conversation/user-message evidence with the
+ *   composer cleared — a resumed generation state alone is NEVER
+ *   acceptance evidence). No alternate recovery wording. Bounded
+ *   attempts; failure to confirm a required transition is a typed
+ *   governance-hold outcome.
  *
  * Layering:
  *   - every provider locator lives in ZAI_LOCATORS below (with its
@@ -681,10 +684,22 @@ export function createZaiAdapter({
     const existing = sessions.get(worker);
     if (existing) {
       if (existing.workItem === workItem) {
+        // A stale correlated reference is a typed failure, NEVER a
+        // successful Start: a registry entry whose tab is gone, or
+        // whose tab navigated away from the provider origin, fails
+        // closed STALE_REFERENCE — the dead session is never
+        // re-reported as `alreadyActive` and never silently
+        // re-established (the in-memory registry is lost on
+        // service-worker restart, after which Start re-runs the full
+        // governed sequence for a fresh correlation).
         const still = await tabStillAtOrigin(existing.tabId);
-        const observation = still.ok
-          ? await observePage(existing.tabId, existing)
-          : { state: "session-missing", detail: still.error.message };
+        if (!still.ok) {
+          return failure(
+            "STALE_REFERENCE",
+            `the active session correlation for worker '${worker}' (work item '${workItem}', tab ${existing.tabId}) is stale — ${still.error.message}. The stale session cannot be re-reported or re-established by Start; the in-memory registry is lost on service-worker restart, after which StartZaiWorkerSession re-runs the full governed sequence`
+          );
+        }
+        const observation = await observePage(existing.tabId, existing);
         return {
           ok: true,
           alreadyActive: true,
@@ -970,18 +985,31 @@ export function createZaiAdapter({
         continue;
       }
 
-      // 4. verify acceptance: generation resumed (the Stop control
-      // returns) with the composer cleared, or the exact fixed
-      // message visible as a user message — the post-action evidence
-      // that `continue` was accepted.
+      // 4. verify acceptance: the EXACT fixed message `continue`
+      // must be confirmed present in the conversation/user-message
+      // evidence with the composer cleared (the message left the
+      // composer and landed in the conversation). A resumed
+      // generation state — the Stop control returning, the composer
+      // clearing — is observed context, NEVER acceptance evidence:
+      // it does not identify the recovery message.
       const accepted = await settle(tabId, [], (f) => {
         const composerValue = typeof f.composerValue?.value === "string" ? f.composerValue.value : "";
         const cleared = composerValue.length === 0;
-        const resumed = stopVisible(f);
-        if (resumed && cleared) {
-          return true;
+        if (cleared && conversationContains(f, ZAI_RECOVERY_MESSAGE)) {
+          return true; // acceptance confirmed by post-action evidence
         }
-        return cleared && conversationContains(f, ZAI_RECOVERY_MESSAGE);
+        // Decisive contradictions end the wait early (classified
+        // below): authentication dropping, a dialog surface, an
+        // error alert, an ambiguous surface. Anything else keeps
+        // waiting within the bounded budget.
+        const verdict = classifySession(f, session, "recovery-acceptance");
+        return [
+          "authentication-required",
+          "provider-error",
+          "unexpected-dialog",
+          "expected-blocking-dialog",
+          "ambiguous",
+        ].includes(verdict.state);
       });
       if (!accepted.ok) {
         lastRefusal = accepted;
@@ -990,19 +1018,53 @@ export function createZaiAdapter({
       const f = accepted.facts;
       const composerValue = typeof f.composerValue?.value === "string" ? f.composerValue.value : "";
       const cleared = composerValue.length === 0;
-      const acceptedEvidence = (stopVisible(f) && cleared) || (cleared && conversationContains(f, ZAI_RECOVERY_MESSAGE));
-      if (!acceptedEvidence) {
+      const confirmed = conversationContains(f, ZAI_RECOVERY_MESSAGE);
+      if (!(cleared && confirmed)) {
+        // Classify a decisive contradiction if one ended the wait.
+        const verdict = classifySession(f, session, "recovery-acceptance");
+        if (verdict.state === "authentication-required") {
+          return failure(
+            "AUTHENTICATION_INTERRUPTED",
+            `authentication was required while verifying recovery-message acceptance: ${verdict.detail}`
+          );
+        }
+        if (verdict.state === "provider-error") {
+          return failure(
+            "PROVIDER_ERROR",
+            `the provider surfaced an error while verifying recovery-message acceptance: ${verdict.detail}`
+          );
+        }
+        if (
+          verdict.state === "unexpected-dialog" ||
+          verdict.state === "expected-blocking-dialog" ||
+          verdict.state === "ambiguous"
+        ) {
+          return failure(
+            "UNKNOWN_DIALOG",
+            `a dialog or ambiguous surface is visible while verifying recovery-message acceptance: ${verdict.detail}`
+          );
+        }
         lastRefusal = failure(
           "AMBIGUOUS_STATE",
-          "the recovery message acceptance could not be verified (generation did not resume and the fixed message is not confirmed present)"
+          "the fixed recovery message 'continue' was not confirmed accepted: the exact message is not present in the conversation evidence (a resumed generation state is not acceptance evidence)"
         );
         continue;
       }
-      session.wasWorking = true;
+      // Acceptance CONFIRMED by post-action evidence: the exact
+      // fixed message landed in the conversation with the composer
+      // cleared. Generation state is reported as observed context,
+      // never as the acceptance proof.
+      const resumed = stopVisible(f);
+      session.wasWorking = resumed;
       session.recoveries = (session.recoveries ?? 0) + 1;
       return {
         ok: true,
-        recovered: { attempts, message: ZAI_RECOVERY_MESSAGE, generation: "working" },
+        recovered: {
+          attempts,
+          message: ZAI_RECOVERY_MESSAGE,
+          acceptance: "conversation-evidence",
+          generation: resumed ? "working" : "waiting",
+        },
         session: { worker, workItem, tabId },
       };
     }

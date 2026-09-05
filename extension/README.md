@@ -326,8 +326,14 @@ composition is CTRL-016 scope).
 - **Hung worker** (`RecoverZaiHungWorker { worker, workItem, tabId }`):
   verify generation is in progress, activate the provider `Stop`
   control, VERIFY generation stopped, submit the FIXED message
-  `continue` (no alternate wording exists), and verify acceptance
-  (generation resumed with the composer cleared). Default budget: 2
+  `continue` (no alternate wording exists), and verify acceptance:
+  the exact fixed message must be CONFIRMED PRESENT in the
+  conversation/user-message evidence with the composer cleared.
+  A resumed generation state (the Stop control returning, the
+  composer clearing) is observed context only — it is NEVER
+  acceptance evidence, because it does not identify the recovery
+  message; a recovery whose message never lands fails closed even
+  when generation visibly resumes. Default budget: 2
   attempts. Any unverified transition is a typed governance hold.
 
 ### Typed observations
@@ -372,7 +378,14 @@ refusal, never an incorrect action):
   service-worker restart loses it; later `RecoverZaiHungWorker`
   references fail closed `SESSION_UNKNOWN` (restart the session with
   `StartZaiWorkerSession`; the browser tab's conversation is
-  unaffected — it is the human/provider's state, never ours).
+  unaffected — it is the human/provider's state, never ours). A
+  registry entry whose correlated tab has closed, or whose tab
+  navigated away from the provider origin, is a STALE reference:
+  a same-correlation `StartZaiWorkerSession` fails closed
+  `STALE_REFERENCE` (never `ok:true alreadyActive`) — the dead
+  session is never re-reported as active and never silently
+  re-established; the full governed sequence re-runs only after the
+  in-memory registry is lost on service-worker restart.
 - The authenticated-surface locators (Agent, Stop, conversation,
   user messages) were declared, not live-observed (human
   authentication is out of band for the worker). They are verified

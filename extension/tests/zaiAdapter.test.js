@@ -4,8 +4,11 @@
  * new-session sequence, submission confirmation-before-success, the
  * bounded known-popup Enter recovery with full preparation restart,
  * unknown-dialog/auth-interrupt/budget fail-closed behavior, the
- * fixed Stop -> continue hung-worker recovery, identity preservation
- * and stale/contradictory reference refusal.
+ * fixed Stop -> continue hung-worker recovery (acceptance proven by
+ * conversation evidence — a resumed generation state alone never
+ * succeeds), identity preservation, and stale/contradictory
+ * reference refusal (including the stale correlated Start
+ * fail-closed regression).
  */
 
 import { test } from "node:test";
@@ -424,6 +427,39 @@ test("a different work item for the same worker is a contradictory session refer
   assert.ok(/contradictory/.test(result.error.message));
 });
 
+test("a registry entry whose correlated tab has closed fails the correlated Start closed (STALE_REFERENCE, never alreadyActive)", async () => {
+  // Regression (Architect review, finding 2): a stale correlated
+  // reference must NEVER be returned as a successful Start. The
+  // registry entry survives, the tab does not — the same-correlation
+  // Start must fail closed with the typed stale-reference failure,
+  // with no ok:true / alreadyActive / session result of any kind.
+  const { adapter, tabsApi } = build();
+  const first = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(first.ok, true);
+  tabsApi._tabs.length = 0; // the correlated browser-session tab closes
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.alreadyActive, undefined);
+  assert.equal(result.session, undefined);
+  assert.equal(result.error.code, "STALE_REFERENCE");
+  assert.ok(/gone/.test(result.error.message));
+});
+
+test("a registry entry whose tab navigated away from the provider origin fails the correlated Start closed (STALE_REFERENCE)", async () => {
+  // The tab still exists but is no longer a chat.z.ai session: the
+  // correlation is stale exactly the same way.
+  const { adapter, tabsApi } = build();
+  const first = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(first.ok, true);
+  tabsApi._tabs[0].url = "https://example.com/"; // navigated away mid-session
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.alreadyActive, undefined);
+  assert.equal(result.session, undefined);
+  assert.equal(result.error.code, "STALE_REFERENCE");
+  assert.ok(/no longer a/.test(result.error.message));
+});
+
 // --------------------------------------------------------------------
 // The governed hung-worker recovery.
 // --------------------------------------------------------------------
@@ -446,14 +482,53 @@ test("hung-worker recovery performs Stop -> verified stopped -> fixed continue -
   const result = await adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.recovered.message, "continue");
+  assert.equal(result.recovered.acceptance, "conversation-evidence");
   assert.equal(result.recovered.generation, "working");
   assert.deepEqual(result.session, { worker: "w1", workItem: "CTRL-014", tabId: 7 });
-  // The exact recovery wording was submitted — never an alternative.
+  // The acceptance evidence: the exact recovery wording landed in
+  // the conversation — never an alternative, never merely a resumed
+  // generation state.
   assert.ok(pages[0].state.conversation.includes("continue"));
   const history = pages[0].history().slice(-4).filter((c) => c.op !== "probe");
   const types = history.filter((c) => c.op === "type");
   assert.equal(types.length, 1);
   assert.equal(types[0].text, "continue");
+});
+
+test("recovery where generation resumes and the composer clears but 'continue' never lands fails closed", async () => {
+  // Regression (Architect review, finding 3): the provider state
+  // after the recovery send looks healthy — the Stop control
+  // returns (generation resumed) and the composer is cleared — but
+  // the exact fixed message never lands in the conversation
+  // evidence. A resumed generation state is NOT acceptance: the
+  // recovery must fail closed without ever claiming recovery.
+  const built = await hungSession({
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button" && state.composerValue === "continue") {
+        state.__sentRecovery = true;
+      }
+      if (message.op === "probe" && state.__sentRecovery) {
+        state.__sentRecovery = false;
+        // The provider dropped the recovery message from the
+        // conversation surface: it never landed as a user message
+        // even though generation resumed and the composer cleared.
+        if (state.conversation[state.conversation.length - 1] === "continue") {
+          state.conversation.pop();
+        }
+      }
+    },
+  });
+  const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/not confirmed/.test(result.error.message));
+  assert.ok(/resumed generation state is not acceptance/.test(result.error.message));
+  // The exact fixed message never landed in the conversation evidence.
+  assert.ok(!built.pages[0].state.conversation.includes("continue"));
+  // Bounded: the fixed message was submitted at most the recovery
+  // attempt budget times (2 by default).
+  const recoveriesTyped = built.pages[0].history().filter((c) => c.op === "type" && c.text === "continue").length;
+  assert.ok(recoveriesTyped <= 2, `expected at most 2 recovery submissions, saw ${recoveriesTyped}`);
 });
 
 test("recovery of an unknown session fails closed SESSION_UNKNOWN", async () => {
