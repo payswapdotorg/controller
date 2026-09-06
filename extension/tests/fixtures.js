@@ -413,15 +413,18 @@ export function fakeMessagingTabsApi({ tabs = [] } = {}) {
  * pressEnter), including the null-fact degradation for absent
  * surfaces and the refusal semantics for ambiguous actions.
  *
- * CONTINUATION 13 (PR #6 review 5124488246): the dialog modeling
- * stays SURFACE-FAITHFUL (the real provider renders dialogs — the
- * fixtures keep the dialog state, the popupOnSend blocking modality,
- * and the popupAfterSend async materialization with optional prompt
- * restore, plus the pressEnter page primitive) so the dialog-blind
- * regressions can place a visible dialog on the surface and prove
- * the adapter never probes, classifies, or dismisses it. The
- * adapter's probe vocabulary carries NO dialog probe — the dialog
- * is invisible to every fact read, by construction.
+ * CONTINUATION 22 (PR #6 review 5125571572, path (b) — the frozen
+ * Work Order's dialog law RESTORED): the dialog modeling stays
+ * SURFACE-FAITHFUL and is now OBSERVED again — the adapter's probe
+ * vocabulary carries the dialogCount/dialogText probes, the
+ * popupOnSend blocking modality, the popupAfterSend async
+ * materialization with optional prompt restore, and the pressEnter
+ * page primitive — so the known-popup regressions can place the
+ * REAL "Currently in peak hours" capacity dialog on the surface
+ * and prove the adapter presses Enter ONLY on the observed,
+ * classified known popup (once per retry attempt, dismissal
+ * verified, full preparation restart), and fails closed
+ * UNKNOWN_DIALOG on every other dialog shape.
  *
  * CONTINUATION 14 (PR #6 review 5124542353 / the work order
  * 5557596159 — "REPLACE POPUP DETECTION WITH SEND-CONTROL STATE
@@ -569,12 +572,15 @@ export function fakeZaiPage({
   // `{ probes: N, text: "...", restore: true }` customizes it. This
   // is the modality the operator's continuation-10 run reproduced:
   // Start returned ok:true / popupDismissals:0 while the popup was
-  // visibly present. CONTINUATION 13: the async-outcome hold that
-  // watched for this modality is REMOVED — the dialog now lands
-  // wherever it lands and the adapter stays blind to it (the
-  // dialog-blind regressions pin exactly that), while the prompt
-  // restore (when it precedes the verification read) flows through
-  // the ordinary unconfirmed-retry path.
+  // visibly present. CONTINUATION 22 (PR #6 review 5125571572,
+  // path (b)): the ASYNC-OUTCOME HOLD that watches for this modality
+  // is RESTORED (after the start signal, gated by the dialog
+  // dispatch), and the dialog landing inside the watch is dispatched
+  // by the frozen Work Order's dialog law (the known popup receives
+  // the ONE bounded Enter with the verified dismissal and the full
+  // preparation restart; every other shape fails closed), while the
+  // prompt restore (when it survives the watch) flows through the
+  // ordinary unconfirmed-retry path.
   popupAfterSend = null,
   // The composer Agent/compose control (LIVE-OBSERVED 2026-09-06,
   // real origin: the composer FORM containing #chat-input renders
@@ -904,8 +910,8 @@ export function fakeZaiPage({
       return { ok: true, typed: true, value: state.composerValue };
     }
     if (message.op === "pressEnter") {
-      // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305 — the
-      // timed Enter recovery nudge): the Enter primitive's
+      // CONTINUATION 22 (PR #6 review 5125571572, path (b) — the
+      // frozen Work Order's dialog law): the Enter primitive's
       // surface-faithful semantics. The real page script dispatches
       // the Enter key sequence on the FOCUSED element (the composer —
       // focused by the type op). A dialog open on the surface
@@ -917,7 +923,10 @@ export function fakeZaiPage({
       // Stop control is rendered — a second prompt while a
       // generation runs is never accepted); an empty composer makes
       // the Enter a pure no-op. The adapter issues the Enter ONLY on
-      // the agent-start watch's clock, never as a submission
+      // the OBSERVED, classified known submission-blocking popup
+      // (the frozen Work Order's bounded recovery — once per retry
+      // attempt, the dismissal verified, the full preparation
+      // restart), never on a timer and never as a submission
       // mechanism.
       if (state.dialog) {
         state.dialog = null; // the dialog captured the key

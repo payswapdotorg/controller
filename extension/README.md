@@ -46,9 +46,13 @@ them.
   its exact `GLM-5.3` text token and its `data-value`), verbatim
   governed-prompt entry, send, and OBSERVED
   submission confirmation — performs only the bounded known-popup
-  `Enter` recovery and then RESENDS the exact prompt (the
-  operator's recovery loop: Enter once, then resend; the
-  preparation is never restarted, and an already-confirmed
+  `Enter` recovery (pressed ONLY when the known submission-blocking
+  popup is OBSERVED, exactly once per retry attempt, with the
+  dismissal verified by post-action observation) and then RESTARTS
+  the full preparation sequence and re-sends the exact prompt
+  (the frozen Work Order: after dismissal, restart from Agent
+  selection, model selection, exact prompt entry, send and
+  submission verification; an already-confirmed
   submission is never resent), and recovers a
   hung worker only through `Stop` -> verified stopped -> the fixed
   message `continue` -> verified acceptance. Every step is verified by
@@ -371,37 +375,56 @@ composition is CTRL-016 scope).
 - **Known submission-blocking popup** (a modal dialog observed while
   verifying a submission, matching the known shape and carrying no
   auth/error text): the adapter presses `Enter` once for the current
-  attempt, verifies dismissal, and then RESENDS the exact prompt —
-  the operator's recovery loop: Enter once, then resend. The
-  preparation (Agent + model) stays established — it is never
-  restarted for a resend; when the composer still holds the exact
-  prompt (the popup blocked the submission) it is sent as-is, and
-  when the popup consumed it the prompt is re-typed with the
-  byte-identical read-back re-verified before the resend. When the
+  attempt, verifies dismissal, and then RESTARTS THE FULL
+  PREPARATION SEQUENCE — the frozen Work Order's explicit recovery:
+  "After dismissal it must restart from Agent selection, model
+  selection, exact prompt entry, send and submission verification."
+  The idempotent re-selection re-establishes every governed ground
+  truth the popup interaction may have disturbed; when the composer
+  still holds the exact prompt (the popup blocked the submission) it
+  is sent as-is, and when the popup consumed it the prompt is
+  re-typed with the byte-identical read-back re-verified before the
+  resend. When the
   dismissed popup reveals the submission already landed (the
   conversation holds the exact prompt, the composer is cleared)
   NO resend happens — the governed prompt is never submitted twice.
+  The REAL known popup (the provider's "Currently in peak hours"
+  capacity modal, LIVE-OBSERVED in the operator's captured run)
+  materializes only when the ASYNCHRONOUS chat-completion error
+  arrives — after the optimistic landing — so the acceptance is
+  additionally held through a bounded async-outcome window (a popup
+  or the provider's prompt-restore observed in the window re-opens
+  the bounded recovery; a quiet window records the acceptance).
   Default budget: 3 attempts. Auth-shaped or error-shaped dialogs,
-  dialogs at any other time, multiple simultaneous dialogs, or an
+  dialogs at any other time (including hung-worker recovery),
+  multiple simultaneous dialogs, or an
   exhausted budget fail closed (`AUTHENTICATION_INTERRUPTED` /
   `PROVIDER_ERROR` / `UNKNOWN_DIALOG` / `RETRY_EXHAUSTED`) — the
-  adapter never blindly presses keys and never pretends submission
+  adapter never blindly presses keys (no key is ever issued on a
+  timer) and never pretends submission
   succeeded. The absence of a popup is NEVER acceptance evidence:
   acceptance is always the verified provider-state confirmation
-  (message-exclusive evidence holds the exact prompt and the
-  composer is decisively cleared).
+  (the conversation state advancing past the dispatch baseline with
+  the exact prompt landed as a user-message row, the Send->Stop
+  action-control transition corroborating, the composer decisively
+  cleared — and, on a fresh session, the chat object created).
 - **Hung worker** (`RecoverZaiHungWorker { worker, workItem, tabId }`):
   verify generation is in progress, activate the provider `Stop`
   control, VERIFY generation stopped, submit the FIXED message
   `continue` (no alternate wording exists), and verify acceptance:
-  the exact fixed message must be CONFIRMED PRESENT in the
-  message-exclusive evidence (an exact user-message row or the
-  `[role="log"]` region) with a DECISIVELY cleared composer.
-  A resumed generation state (the Stop control returning, the
-  composer clearing) is observed context only — it is NEVER
-  acceptance evidence, because it does not identify the recovery
-  message; a recovery whose message never lands fails closed even
-  when generation visibly resumes. Default budget: 2
+  the acceptance signal is the conversation state advancing past the
+  continue-dispatch baseline with the exact fixed `continue` landed
+  as a user-message row AND the provider's working state
+  corroborating (the Stop control returning with the composer
+  decisively cleared — the agent resumed working on the fixed
+  message). A generation that visibly resumes while the `continue`
+  row never lands fails closed (a foreign generation is not our
+  recovery); a recovery whose message lands without the resumed
+  working state is held to the bounded observation window and fails
+  closed at its exhaustion. No key is ever pressed in this flow (a
+  dialog visible during recovery fails closed
+  `UNKNOWN_DIALOG` — the bounded popup recovery applies only to
+  submission). Default budget: 2
   attempts. Any unverified transition is a typed governance hold.
 
 ### Typed observations

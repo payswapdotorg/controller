@@ -22,19 +22,20 @@
  *         FRESH decisive composer read immediately before the send —
  *         the exact prompt must STILL be present, verbatim; an
  *         unreadable, empty, or rewritten composer is NEVER sent;
- *     6. send attempt — CONTINUATION 15 (PR #6 review 5124990727,
- *        "ARCHITECT DIRECTIVE — IMPLEMENT THE NEW Z.AI SUBMISSION
- *        FLOW NOW", superseding the continuation-14 Send-control
- *        state machine and the work order 5557596159): the exact
- *        governed prompt is sent ONCE per bounded attempt — the send
+ *     6. send attempt — the exact governed prompt is sent ONCE per
+ *        bounded attempt through the real send control (the send
  *        control is clicked when the composer action slot renders
- *        it. There is NO immediate Enter fallback at the send step
- *        anymore (the review explicitly removes "the old
- *        single-Enter-once fallback model"): an inaccessible Send
- *        control, a slot rendering the Stop control, a contradictory
- *        or unresolvable slot, or a send click that fails, all route
- *        into the AGENT-START WATCH, whose timed Enter cadence is
- *        the recovery;
+ *        it). There is NO Enter fallback at the send step: the ONLY
+ *        Enter the frozen Work Order ever permits is the
+ *        known-submission-popup recovery of the section below
+ *        ("When and only when the adapter observes the known
+ *        submission-blocking popup, it may press `Enter` once for
+ *        the current retry attempt") — the adapter never blindly
+ *        presses keys. An inaccessible Send control, a slot
+ *        rendering the Stop control, a contradictory or unresolvable
+ *        slot, or a failed send click are unresolved send states:
+ *        the submission-verification watch observes and the bounded
+ *        attempt budget fails closed;
  *     6b. THE PROVISIONING WAIT (CONTINUATION 16, PR #6 review
  *         5125198728 — "IMPLEMENT THE DIRECT Z.AI CHAT-STATE
  *         WORKFLOW NOW", requirement 1): the creation of the fresh
@@ -47,16 +48,18 @@
  *         a surface that never readies fails closed with the typed
  *         provisioning refusal (the exact prompt is never typed into
  *         an unprovisioned surface);
- *     7. THE AGENT-START WATCH — the governed acceptance, REVISED by
- *        CONTINUATION 16 (PR #6 review 5125198728, requirements
- *        4-6), REVISED AGAIN by CONTINUATION 20 (PR #6 comment
- *        5559533083, the superseding execution directive, restated
- *        by comment 5559702905 — the prior popup/Send-reappearance
- *        acceptance process superseded; the strongest reliable
- *        runtime signal required): a bounded watch for the reliable
- *        provider signal that the Z.ai Agent has ACTUALLY STARTED
- *        WORKING. THE DETECTOR (startSignalOf) — the directive's
- *        hierarchy, signals combined for confidence:
+ *     7. THE SUBMISSION VERIFICATION — the frozen Work Order's step
+ *        7 ("verify that the prompt was actually accepted/submitted
+ *        by observing the resulting provider state. A send/click
+ *        event alone is never sufficient evidence of submission."),
+ *        carried by the BOUNDED WATCH (watchRounds observation
+ *        rounds paced by watchRoundIntervalMs — PURE OBSERVATION, no
+ *        key is ever pressed on a timer) whose acceptance detector
+ *        is the provider-state composition the day's live evidence
+ *        established (CONTINUATION 16/20 — the strongest "resulting
+ *        provider state" reading, retained under the frozen Work
+ *        Order). THE DETECTOR (startSignalOf) — signals combined for
+ *        confidence:
  *          (i) THE PROMPT-ACCEPTANCE LEG, PRIMARY: THE
  *              CONVERSATION-STATE ADVANCEMENT — the user-message
  *              turn count ADVANCED past the dispatch baseline AND
@@ -108,25 +111,15 @@
  *              form (the (iii) conjunct); assistant-generated text
  *              is contract-forbidden; network/SSE events are not
  *              observable through the closed page vocabulary.
- *        THE WATCH LOOP: while the start signal is absent and no
- *        decisive failure surface appears, press Enter ONCE EVERY
- *        agentStartEnterIntervalMs (5 seconds) — Enter is ONLY a
- *        recovery/dismissal nudge, never an intentional second
- *        submit (the provider's key routing decides: the focused
- *        composer may submit it — the provider's own
- *        single-generation constraint is the duplicate guard, no
- *        artificial client-side race prohibition is invented; an
- *        obstruction-holding dialog may capture it; an empty
- *        composer makes it a no-op) — then RE-CHECK the real
- *        provider state. The watch stops pressing Enter IMMEDIATELY
- *        when the start signal is observed (requirement 5: the
- *        control returns for Architect review — the final model
- *        output is NEVER waited for), records the session
+ *        THE WATCH LOOP: observation rounds for the start signal, a
+ *        DIALOG (dispatched by the dialog law below), or a decisive
+ *        failure surface. The start signal records the session
  *        (generation:"working" — the Stop control visible at the
- *        recording read), and returns. A decisive failure surface
- *        (authentication required, a provider error) ends the watch
- *        with the typed refusal. The TOTAL retry window is bounded
- *        (agentStartEnters x agentStartEnterIntervalMs); when the
+ *        recording read) and returns control for Architect review —
+ *        the final model output is NEVER waited for. A decisive
+ *        failure surface (authentication required, a provider error)
+ *        ends the watch with the typed refusal. The TOTAL window is
+ *        bounded (watchRounds x watchRoundIntervalMs); when the
  *        start signal never appears the watch FAILS CLOSED with the
  *        typed agent-start-timeout diagnosis ROUTED THROUGH THE CHAT
  *        STATE (the provider's own accepted/refused computation):
@@ -141,26 +134,45 @@
  *        chat object created it stays fail-closed (never a re-typed
  *        resend that could duplicate an accepted submission).
  *
- *   provider dialogs are NOT a governed signal (continuation 13, PR
- *   #6 review 5124488246 — the ARCHITECT work order "REMOVE POPUP
- *   DETECTION/RECOVERY PATH"): the adapter performs NO dialog
- *   recognition, NO provider-specific popup shape matching, NO
- *   submission hold watching for a delayed/async popup, NO popup
- *   resend path, and NO popupDismissals accounting. A visible dialog
- *   is never used as a positive or negative signal on the normal
- *   CTRL-014 path — the governed Start and Recover flows proceed on
- *   the control-state facts alone (a dialog that physically blocks
- *   the surface expresses itself through those facts: an unreadable
- *   composer, a send that does not take, a bounded budget exhaustion
- *   — every one of them fails closed through the ordinary bounded
- *   paths). CONTINUATION 15 (PR #6 review 5124990727): the ONLY
- *   Enter the adapter ever issues is the AGENT-START WATCH's timed
- *   recovery nudge (once every 5 seconds while the start signal is
- *   absent — never popup recognition, never dialog inspection: the
- *   Enter is issued on the clock, not on any dialog observation, and
- *   whatever the provider's key routing does with it — dismissing a
- *   dialog, submitting the focused composer, or nothing — is the
- *   provider's own behavior, re-checked by the next fact read).
+ *   known submission-popup recovery (the frozen Work Order's "Known
+ *   submission-popup recovery" section, RESTORED by CONTINUATION 22 —
+ *   PR #6 review 5125571572, resolution path (b) "implementing the
+ *   frozen Work Order semantics"): "When and only when the adapter
+ *   observes the known submission-blocking popup, it may press
+ *   `Enter` once for the current retry attempt. After dismissal it
+ *   must restart from Agent selection, model selection, exact prompt
+ *   entry, send and submission verification. Retries are
+ *   bounded/configurable. Unknown or differently-shaped dialogs must
+ *   fail closed; the adapter must not blindly press keys or infer
+ *   that a popup is harmless." The KNOWN popup is the LIVE-OBSERVED
+ *   provider capacity modal ("Currently in peak hours" — the
+ *   operator's captured run, repository of record, main 5d14d90: a
+ *   bits-ui modal carrying role="dialog", aria-modal="true" and
+ *   data-state="open", matched by the `[role="dialog"], dialog`
+ *   observation channel; an in-page accessible DOM dialog, never a
+ *   native or browser-level modal). The provider's own bundle (the
+ *   MODEL_CONCURRENCY_LIMIT error handler) proves the TIMING: the
+ *   prompt lands optimistically and the popup materializes only
+ *   when the asynchronous chat-completion error arrives — the same
+ *   handler may RESTORE the submitted prompt into the composer. The
+ *   adapter therefore (a) classifies dialogs ONLY through the closed
+ *   observation channel (count + text), (b) presses Enter ONLY on
+ *   the classified known popup and exactly once per retry attempt,
+ *   (c) VERIFIES the dismissal by post-action observation
+ *   (popupDismissals counts only actually-issued presses on
+ *   actually-observed popups), (d) RESTARTS the full preparation
+ *   sequence (Agent -> model -> provisioning -> prompt -> send ->
+ *   verification) after every verified dismissal — the idempotent
+ *   re-selection re-establishes every governed ground truth the
+ *   popup interaction may have disturbed, (e) fails closed
+ *   UNKNOWN_DIALOG on every other dialog shape at every phase
+ *   (preparation, recovery, standalone observation outside the
+ *   submission-verification window, multiple simultaneous dialogs),
+ *   and (f) never treats popup ABSENCE as success — only the
+ *   acceptance detector confirms a submission. An auth-shaped dialog
+ *   fails closed AUTHENTICATION_INTERRUPTED / AUTHORIZATION_REQUIRED
+ *   (never Enter); an error-shaped dialog fails closed
+ *   PROVIDER_ERROR (never Enter).
  *
  *   the second observed failure mode (continuation 6, PR #6 review
  *   5123047551): the input state can be discarded around a send
@@ -177,22 +189,24 @@
  *   never a duplicate of an already-confirmed submission.
  *
  *   hung worker: `Stop` -> verified stopped -> the FIXED message
- *   `continue` -> the same AGENT-START WATCH (CONTINUATION 15, PR #6
- *   review 5124990727): the continue is typed and read back
- *   byte-identically, the send control is clicked when the action
- *   slot renders it, and the watch then waits for the SAME start
- *   signal — the Stop control REAPPEARING (the agent resumed
- *   working) — with the SAME timed Enter recovery and the SAME
- *   bounded fail-closed window. The acceptance is the start signal
- *   itself, never message-row evidence (the review supersedes the
- *   message-evidence acceptance predicate; the `continue` row
- *   landing is context). No alternate recovery wording. Bounded
- *   attempts; failure to confirm a required transition is a typed
- *   governance-hold outcome. The recovery NO LONGER requires a
- *   persistent in-memory session (PR #6 review 5124829301,
- *   requirement 6 — the operator's SESSION_UNKNOWN run): the request
- *   itself carries the Worker/Work-Item/tab correlation, and the
- *   governed sequence runs from it; a registry entry that
+ *   `continue` -> the SAME acceptance watch (PURE OBSERVATION): the
+ *   continue is typed and read back byte-identically, the send
+ *   control is clicked when the action slot renders it, and the
+ *   watch then waits for the SAME acceptance signal — the new
+ *   `continue` turn landing (the conversation state advancing past
+ *   the continue-dispatch baseline with the exact text) and the
+ *   Stop control corroborating (the agent resumed working) with the
+ *   composer decisively empty. The acceptance is the signal itself
+ *   (the landed exact `continue` row is a leg of it). No alternate
+ *   recovery wording. Bounded attempts; failure to confirm a
+ *   required transition is a typed governance-hold outcome. A
+ *   dialog visible at any point of the recovery fails closed
+ *   UNKNOWN_DIALOG (the bounded popup recovery applies only to
+ *   submission — never a blind keypress). The recovery NO LONGER
+ *   requires a persistent in-memory session (PR #6 review
+ *   5124829301, requirement 6 — the operator's SESSION_UNKNOWN run):
+ *   the request itself carries the Worker/Work-Item/tab correlation,
+ *   and the governed sequence runs from it; a registry entry that
  *   CONTRADICTS the request still fails closed STALE_REFERENCE, but
  *   a lost registry (a service-worker restart) no longer refuses.
  *
@@ -228,13 +242,12 @@ import { failure } from "./errors.js";
 /**
  * The frozen typed observation vocabulary — exactly the states the
  * work order requires the Controller to be able to distinguish.
- * The two dialog-shaped states ("expected-blocking-dialog",
- * "unexpected-dialog") are part of the spec-pinned vocabulary and
- * remain DECLARED, but since continuation 13 (PR #6 review
- * 5124488246) removed dialog recognition they are no longer
- * PRODUCED: no classification path observes dialogs, so a visible
- * provider dialog can never surface as (or influence) a session
- * observation.
+ * CONTINUATION 22 (PR #6 review 5125571572, path (b)): dialog
+ * recognition is RESTORED — the two dialog-shaped states
+ * ("expected-blocking-dialog", "unexpected-dialog") are PRODUCED
+ * again by classifySession's dialog branches (the frozen Work
+ * Order's "detection and typed reporting of ... expected
+ * blocking-dialog, unexpected-dialog ..." scope).
  */
 export const ZAI_SESSION_OBSERVATIONS = Object.freeze([
   "authentication-required",
@@ -319,10 +332,17 @@ const ZAI_LOCATORS = Object.freeze({
   modelOption: 'button[aria-label="model-item"]',
   modelOptionExact: 'button[aria-label="model-item"][data-value="glm-5.3"]',
   modelTriggerSelected: "#model-selector-glm-5_3-button",
-  // CONTINUATION 13 (PR #6 review 5124488246): the dialog locator is
-  // REMOVED — the adapter performs no dialog recognition at all; a
-  // visible provider dialog is never probed, never classified, and
-  // never a signal on the governed paths.
+  // The provider dialog surface (RESTORED by CONTINUATION 22, PR
+  // #6 review 5125571572, path (b) — the frozen Work Order's dialog
+  // law): the in-page accessible DOM dialog channel. LIVE-OBSERVED
+  // (the operator's captured run, repository of record, main
+  // 5d14d90): the real "Currently in peak hours" capacity modal is
+  // a bits-ui modal carrying role="dialog", aria-modal="true" and
+  // data-state="open" — matched by this channel (never a native or
+  // browser-level modal). The dialog is probed (count + text) and
+  // classified (classifyDialog); only the classified KNOWN
+  // submission-blocking popup ever receives the Enter action.
+  dialog: '[role="dialog"], dialog',
   alert: '[role="alert"]',
   allButtons: "button",
   authButtonTexts: Object.freeze(["Sign in", "Log in", "Sign up"]),
@@ -445,29 +465,31 @@ const ZAI_MODEL = Object.freeze({
 /** The FIXED hung-worker recovery message — no alternate wording. */
 const ZAI_RECOVERY_MESSAGE = "continue";
 
+/** Dialog text patterns that reclassify a dialog as auth or error. */
+const AUTH_DIALOG_PATTERN = /sign\s*in|log\s*in|sign\s*up|authenticate|login/i;
+const ERROR_DIALOG_PATTERN = /error|went\s*wrong|rate\s*limit|too\s*many|unavailable|failed|forbidden/i;
+
 /** The alert-surface text pattern that classifies a provider error. */
 const PROVIDER_ALERT_PATTERN = /error|went\s*wrong|rate\s*limit|too\s*many|unavailable|failed|forbidden|denied/i;
-
-/**
- * CONTINUATION 15 (PR #6 review 5124990727): the frozen default
- * agent-start watch budgets — the timed Enter recovery cadence (one
- * Enter every 5 seconds, exactly the contract's interval) and the
- * bounded total retry window (12 Enter opportunities = 60 seconds;
- * the window fails closed with the typed agent-start-timeout
- * diagnosis when the start signal never appears).
- */
-const AGENT_START_DEFAULTS = Object.freeze({
-  agentStartEnters: 12, // bounded Enter recovery opportunities
-  agentStartEnterIntervalMs: 5000, // the contract's exact 5-second interval
-});
 
 /** Frozen default budgets (all constructor-injectable for tests). */
 const DEFAULTS = Object.freeze({
   settlePolls: 8, // post-action observation polls per step
   settleIntervalMs: 400, // delay between polls
+  // CONTINUATION 22 (PR #6 review 5125571572, path (b)): the bounded
+  // SUBMISSION-VERIFICATION window — pure observation (no key is ever
+  // pressed on a timer; the ONLY Enter is the observed-known-popup
+  // recovery). 12 rounds paced 5 seconds apart (the same 60-second
+  // bounded window the day's live evidence sized).
+  watchRounds: 12, // bounded verification-watch observation rounds
+  watchRoundIntervalMs: 5000, // the round pacing (the bounded window)
+  // The post-acceptance ASYNC-OUTCOME hold (the known popup's
+  // observed asynchronous timing — the provider's capacity handler
+  // lands the prompt optimistically and the popup materializes only
+  // when the async error arrives).
+  confirmationHoldPolls: 10, // the bounded async-outcome window
   maxSubmissionAttempts: 3, // bounded preparation/send/verify attempts
   maxRecoveryAttempts: 2, // bounded Stop/continue recovery attempts
-  ...AGENT_START_DEFAULTS,
 });
 
 /**
@@ -475,13 +497,14 @@ const DEFAULTS = Object.freeze({
  *
  * @param {{ tabsApi: object, pageBridge: object, providerUrl?: string,
  *           sleep?: Function, now?: Function, settlePolls?: number,
- *           settleIntervalMs?: number,
- *           maxSubmissionAttempts?: number, maxRecoveryAttempts?: number,
- *           agentStartEnters?: number, agentStartEnterIntervalMs?: number }} wiring
+ *           settleIntervalMs?: number, watchRounds?: number,
+ *           watchRoundIntervalMs?: number, confirmationHoldPolls?: number,
+ *           maxSubmissionAttempts?: number, maxRecoveryAttempts?: number }} wiring
  *        `pageBridge` is the typed channel to the content script
  *        (createZaiPageBridge); tests inject a scriptable fake. The
- *        agent-start budgets size the timed Enter recovery window
- *        (continuation 15).
+ *        watch budgets size the bounded pure-observation verification
+ *        window and the post-acceptance async-outcome hold
+ *        (continuation 22 — the frozen Work Order semantics).
  */
 export function createZaiAdapter({
   tabsApi,
@@ -491,10 +514,11 @@ export function createZaiAdapter({
   now = () => Date.now(),
   settlePolls = DEFAULTS.settlePolls,
   settleIntervalMs = DEFAULTS.settleIntervalMs,
+  watchRounds = DEFAULTS.watchRounds,
+  watchRoundIntervalMs = DEFAULTS.watchRoundIntervalMs,
+  confirmationHoldPolls = DEFAULTS.confirmationHoldPolls,
   maxSubmissionAttempts = DEFAULTS.maxSubmissionAttempts,
   maxRecoveryAttempts = DEFAULTS.maxRecoveryAttempts,
-  agentStartEnters = DEFAULTS.agentStartEnters,
-  agentStartEnterIntervalMs = DEFAULTS.agentStartEnterIntervalMs,
 } = {}) {
   if (typeof tabsApi?.query !== "function" || typeof tabsApi?.update !== "function") {
     throw new Error("createZaiAdapter requires a tabsApi with query/create/update/get");
@@ -541,6 +565,12 @@ export function createZaiAdapter({
     // "enabled" probe mode reads exactly this (disabled property +
     // aria-disabled), degrading to a null fact on a zero/many match.
     { name: "sendEnabled", selector: ZAI_LOCATORS.send, mode: "enabled" },
+    // The provider dialog surface (RESTORED by CONTINUATION 22, PR
+    // #6 review 5125571572, path (b)): the closed-vocabulary dialog
+    // observation channel (count) — the known submission-blocking
+    // popup is classified from it (classifyDialog); only the
+    // classified known popup ever receives the Enter action.
+    { name: "dialogCount", selector: ZAI_LOCATORS.dialog, mode: "count" },
     { name: "alertVisible", selector: ZAI_LOCATORS.alert, mode: "visible" },
   ];
 
@@ -561,6 +591,10 @@ export function createZaiAdapter({
   ];
 
   const EVIDENCE_PROBES = [
+    // The dialog text (RESTORED by CONTINUATION 22): the closed
+    // classification channel for auth-shaped / error-shaped dialog
+    // surfaces (the unknown-dialog fail-closed law).
+    { name: "dialogText", selector: ZAI_LOCATORS.dialog, mode: "text" },
     { name: "alertText", selector: ZAI_LOCATORS.alert, mode: "text" },
     ...ZAI_LOCATORS.userMessage.map((selector, i) => ({
       name: `userMessageCandidate${i}`,
@@ -609,13 +643,13 @@ export function createZaiAdapter({
     return last;
   }
 
-  // CONTINUATION 13 (PR #6 review 5124488246): the async
-  // submission-outcome hold (continuation 10) is REMOVED together
-  // with the whole popup recognition mechanism — no submission
-  // window watches for a delayed/async dialog or the provider's
-  // prompt restore. The acceptance is the agent-start signal itself
-  // (CONTINUATION 20: the conversation-state advancement conjunct
-  // with the provider's working state — the agent-start watch below).
+  // CONTINUATION 22 (PR #6 review 5125571572, path (b)): the
+  // ASYNC-OUTCOME HOLD is restored (continuation 10, PR #6 review
+  // 5123872434 — the known popup's observed asynchronous timing:
+  // the prompt lands optimistically and the "Currently in peak
+  // hours" capacity dialog materializes only when the asynchronous
+  // chat-completion error arrives). The hold runs AFTER the start
+  // signal, inside watchSubmissionOutcome below.
 
   // ------------------------------------------------------------------
   // Fact interpretation (all provider semantics live below this line).
@@ -633,6 +667,17 @@ export function createZaiAdapter({
   /** @private */
   function stopVisible(facts) {
     return STOP_PROBES.some((probe) => facts[probe.name]?.visible === true);
+  }
+
+  /**
+   * @private — RESTORED by CONTINUATION 22 (PR #6 review 5125571572,
+   * path (b)): the count of dialogs visible on the provider surface,
+   * read from the closed `[role="dialog"], dialog` observation
+   * channel (the in-page accessible DOM dialogs).
+   */
+  function dialogCount(facts) {
+    const count = facts.dialogCount?.count;
+    return typeof count === "number" ? count : 0;
   }
 
   /**
@@ -881,21 +926,71 @@ export function createZaiAdapter({
   }
 
   /**
+   * Classify the dialog surface (exactly one dialog) during a given
+   * phase. RESTORED by CONTINUATION 22 (PR #6 review 5125571572,
+   * path (b) — the frozen Work Order's dialog law). The KNOWN
+   * submission-blocking popup is the modal dialog observed while
+   * verifying a submission: not an auth surface, not an error
+   * surface. Anything else — a dialog during preparation or
+   * recovery, multiple simultaneous dialogs, auth-shaped or
+   * error-shaped dialogs — is NOT the known popup and fails closed
+   * (never a blind keypress).
+   */
+  function classifyDialog(facts, phase) {
+    const count = dialogCount(facts);
+    if (count === 0) {
+      return { kind: "none" };
+    }
+    if (count > 1) {
+      return { kind: "unknown", reason: `${count} dialogs are visible simultaneously — an ambiguous dialog surface` };
+    }
+    // Auth/error-shaped dialogs are classified by their CONTENT at any
+    // phase: they are never the known popup and never press Enter.
+    const text = facts.dialogText?.text ?? "";
+    if (AUTH_DIALOG_PATTERN.test(text)) {
+      return { kind: "auth", reason: "the dialog is an authentication surface" };
+    }
+    if (ERROR_DIALOG_PATTERN.test(text)) {
+      return { kind: "error", reason: "the dialog is an error surface" };
+    }
+    if (phase !== "verifying-submission") {
+      return { kind: "unknown", reason: "a dialog is visible outside the submission-verification window" };
+    }
+    return { kind: "known-popup" };
+  }
+
+  /**
    * The typed session-state classifier. `session` is the registry
    * record when the observation belongs to an active worker session
-   * (null for a standalone observation). CONTINUATION 13 (PR #6
-   * review 5124488246): dialogs are NEVER classified — a visible
-   * provider dialog is not a signal; the classifier reads only the
-   * alert surface, the auth markers, and the composer/control/message
-   * facts.
+   * (null for a standalone observation). CONTINUATION 22 (PR #6
+   * review 5125571572, path (b)): the dialog branches are RESTORED —
+   * the classifier produces "expected-blocking-dialog" /
+   * "unexpected-dialog" again (the frozen Work Order's typed
+   * reporting), alongside the alert/auth-marker/composer/control/
+   * message facts.
    */
-  function classifySession(facts, session) {
+  function classifySession(facts, session, phase = "idle") {
     const composerVisible = facts.composerVisible?.visible === true;
     const composerEnabled = facts.composerEnabled?.enabled === true;
     const composerValue = typeof facts.composerValue?.value === "string" ? facts.composerValue.value : null;
     const alertVisible = facts.alertVisible?.visible === true;
     const alertText = String(facts.alertText?.text ?? "");
 
+    const dialog = classifyDialog(facts, phase);
+    if (dialog.kind === "auth") {
+      return { state: "authentication-required", detail: dialog.reason };
+    }
+    if (dialog.kind === "error") {
+      return { state: "provider-error", detail: dialog.reason };
+    }
+    if (dialog.kind === "unknown") {
+      return dialog.reason.includes("ambiguous dialog")
+        ? { state: "ambiguous", detail: dialog.reason }
+        : { state: "unexpected-dialog", detail: dialog.reason };
+    }
+    if (dialog.kind === "known-popup") {
+      return { state: "expected-blocking-dialog", detail: "the known submission-blocking popup is visible" };
+    }
     if (alertVisible && PROVIDER_ALERT_PATTERN.test(alertText)) {
       return { state: "provider-error", detail: "an alerting error surface is visible" };
     }
@@ -1046,8 +1141,10 @@ export function createZaiAdapter({
    * Verification: the Agent pill carries data-active="true" after
    * the action — a click is never evidence of the mode switch; a
    * marker that never appears fails closed (no weak acceptance).
-   * CONTINUATION 13: a visible dialog is not consulted here — the
-   * preparation proceeds on the control facts alone.
+   * CONTINUATION 22 (PR #6 review 5125571572, path (b)): a dialog
+   * visible during preparation fails closed UNKNOWN_DIALOG — the
+   * adapter never prepares through a modal ("Unknown or
+   * differently-shaped dialogs must fail closed").
    */
   async function selectAgent(tabId) {
     const agentProbes = ZAI_LOCATORS.agentControl.map((selector, i) => ({
@@ -1072,6 +1169,13 @@ export function createZaiAdapter({
     ]);
     if (!facts.ok) {
       return facts;
+    }
+    // CONTINUATION 22: no dialog is expected while preparing — any
+    // dialog at this point fails closed UNKNOWN_DIALOG (never a
+    // preparation through a modal).
+    const preparingDialog = classifyDialog(facts.facts, "preparing");
+    if (preparingDialog.kind !== "none") {
+      return failure("UNKNOWN_DIALOG", `no dialog is expected during preparation: ${preparingDialog.reason}`);
     }
     // Idempotence: the Agent pill is already the active mode pill —
     // clicking it would navigate the provider app to a fresh
@@ -1147,9 +1251,9 @@ export function createZaiAdapter({
    * NO trigger click is issued (re-clicking would toggle the option
    * menu open for nothing). A disabled option row (the live
    * unauthenticated surface keeps GLM-5.3 disabled) refuses the click
-   * and fails closed. CONTINUATION 13: a visible dialog is not
-   * consulted here — the preparation proceeds on the control facts
-   * alone.
+   * and fails closed. CONTINUATION 22 (PR #6 review 5125571572,
+   * path (b)): a dialog visible during preparation fails closed
+   * UNKNOWN_DIALOG — the adapter never prepares through a modal.
    */
   async function selectModel(tabId) {
     const triggerCountProbes = ZAI_LOCATORS.modelTrigger.map((selector, i) => ({
@@ -1180,6 +1284,12 @@ export function createZaiAdapter({
     const facts = await readFacts(tabId, [...triggerCountProbes, ...triggerTextProbes, selectedIdProbe]);
     if (!facts.ok) {
       return facts;
+    }
+    // CONTINUATION 22: no dialog is expected while preparing — any
+    // dialog at this point fails closed UNKNOWN_DIALOG.
+    const preparingDialog = classifyDialog(facts.facts, "preparing");
+    if (preparingDialog.kind !== "none") {
+      return failure("UNKNOWN_DIALOG", `no dialog is expected during preparation: ${preparingDialog.reason}`);
     }
     // Idempotence: both ground truths already hold — the model is
     // already the frozen model; no trigger click (re-clicking would
@@ -1292,13 +1402,21 @@ export function createZaiAdapter({
    *     truncated prompt is never submitted).
    * An ABSENT or AMBIGUOUS composer read is never "empty" and never
    * "present" — it fails closed (an unreadable input state is never
-   * sent). CONTINUATION 13: a visible dialog is not consulted here —
-   * the decision is made on the composer/message facts alone.
+   * sent). CONTINUATION 22 (PR #6 review 5125571572, path (b)): a
+   * dialog visible at this point fails closed UNKNOWN_DIALOG — never
+   * a type through a modal.
    */
   async function ensurePrompt(tabId, prompt) {
     const facts = await readFacts(tabId);
     if (!facts.ok) {
       return facts;
+    }
+    const ensuringDialog = classifyDialog(facts.facts, "preparing");
+    if (ensuringDialog.kind !== "none") {
+      return failure(
+        "UNKNOWN_DIALOG",
+        `a dialog is visible while preparing the prompt submission: ${ensuringDialog.reason}`
+      );
     }
     const composerValue = composerValueOf(facts.facts);
     if (composerValue === null) {
@@ -1342,23 +1460,19 @@ export function createZaiAdapter({
   }
 
   /**
-   * CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
-   * timed Enter recovery primitive — the ONLY Enter the governed
-   * flows ever issue. Invokes the EXISTING page primitive
-   * (page/zaiPage.js pressEnter: the closed-vocabulary Enter key
-   * dispatch on the focused element) on the AGENT-START WATCH's
-   * clock — exactly ONE Enter per agentStartEnterIntervalMs (the
-   * contract's 5-second cadence) while the start signal is absent,
-   * NEVER at the send step (the old single-Enter-once fallback model
-   * is explicitly superseded by the review). Enter is ONLY a
-   * recovery/dismissal nudge, never an intentional submission
-   * mechanism: whatever the provider's key routing does with it —
-   * dismissing a dialog, submitting the focused eligible composer,
-   * or nothing at all (its own concurrency gate refuses a second
-   * prompt while a generation runs) — is the provider's own
-   * behavior, re-checked by the watch's next observation. This is
-   * NEVER popup recognition or handling: no dialog is inspected,
-   * classified, or targeted by it.
+   * The KNOWN-POPUP recovery Enter (the frozen Work Order, RESTORED
+   * by CONTINUATION 22 — PR #6 review 5125571572, path (b)): the ONLY
+   * Enter the governed flows ever issue. "When and only when the
+   * adapter observes the known submission-blocking popup, it may
+   * press `Enter` once for the current retry attempt" — the press
+   * is issued ONLY on the classified known popup (never on a timer,
+   * never on an unclassified dialog, never at the send step), the
+   * dismissal is VERIFIED by post-action observation, and the next
+   * attempt RESTARTS the full preparation sequence. Whatever the
+   * provider's key routing does with the key on the real surface
+   * (dismissing the modal) is re-checked by the dismissal
+   * verification: a popup that does not verifiably dismiss fails
+   * closed UNKNOWN_DIALOG.
    */
   async function pressEnter(tabId) {
     return pageBridge.send(tabId, { zaiPage: true, op: "pressEnter" });
@@ -1470,22 +1584,18 @@ export function createZaiAdapter({
      * dispatch) the chat-state conjunct is vacuous — the
      * conversation-advancement + Stop-slot + empty-composer reading
      * carries the signal.
-     * THE WATCH LOOP: rounds of bounded observation (the settle budget
-     * per round) for the start signal or a decisive failure surface;
-     * while the round is unresolved, ONE Enter is issued per
-     * agentStartEnterIntervalMs (the contract's exact 5-second cadence —
-     * the timed recovery nudge, never a submission mechanism: whatever
-     * the provider's key routing does with it is the provider's own
-     * behavior, re-checked by the next observation), for at most
-     * agentStartEnters rounds. THE WATCH STOPS PRESSING ENTER
-     * IMMEDIATELY when the start signal is observed (the round's
-     * observation ends the watch before the next Enter; review
-     * requirement 5 — the control returns for Architect review, never
-     * waiting for the final model output). One final observation round
-     * runs after the last Enter (the signal may follow it); the
-     * exhaustion then FAILS CLOSED with the typed agent-start-timeout
-     * diagnosis, routing the final facts THROUGH THE CHAT STATE (the
-     * provider's own accepted/refused computation):
+     * THE WATCH LOOP (CONTINUATION 22 — PR #6 review 5125571572,
+     * path (b), the frozen Work Order semantics): rounds of bounded
+     * observation (the settle budget per round) for the start signal,
+     * a DIALOG, or a decisive failure surface — PURE OBSERVATION, no
+     * key is ever pressed on a timer (the ONLY Enter the contract
+     * permits is the observed-known-popup recovery the CALLER
+     * dispatches when this watch returns the observed popup). The
+     * inter-round pacing (watchRoundIntervalMs) bounds the total
+     * window. One final observation round runs after the last paced
+     * round; the exhaustion then FAILS CLOSED with the typed
+     * agent-start-timeout diagnosis, routing the final facts THROUGH
+     * THE CHAT STATE (the provider's own accepted/refused computation):
      *   - a decisive failure surface (authentication required / a
      *     provider error) -> the typed refusal;
      *   - a contradictory or unresolvable action slot -> the
@@ -1535,10 +1645,21 @@ export function createZaiAdapter({
      *        new turn": a turn count that never advances past the
      *        baseline never carries the new turn, so a STALE exact
      *        row from a prior run is never the acceptance)
+     * @param {{ popupRecovery?: boolean }} [options] CONTINUATION 22:
+     *        `popupRecovery: true` (the Start flow) classifies dialogs
+     *        in the "verifying-submission" phase and returns the
+     *        OBSERVED KNOWN POPUP to the caller for the bounded
+     *        Enter/dismiss/full-restart path; `false` (the Recover
+     *        flow) fails closed on every dialog (the bounded popup
+     *        recovery applies only to submission).
      * @returns {Promise<{ started?: object, refusal: object,
-     *                    reestablished?: boolean }>}
+     *                    popup?: object, reestablished?: boolean }>}
+     *         `popup` is the facts reading the observed known
+     *         submission-blocking popup (popupRecovery only) — the
+     *         caller owns the Enter, the dismissal verification, and
+     *         the full preparation restart.
      */
-    const watchAgentStart = async (tabId, correlate, chatExistedAtDispatch, baselineUserTurns) => {
+    const watchAgentStart = async (tabId, correlate, chatExistedAtDispatch, baselineUserTurns, { popupRecovery = false } = {}) => {
       /**
        * The start signal: the combined provider-state detector.
        * CONTINUATION 20 (PR #6 comment 5559533083, the superseding
@@ -1565,26 +1686,146 @@ export function createZaiAdapter({
         userTurnCountOf(f) !== null &&
         userTurnCountOf(f) > baselineUserTurns &&
         messageEvidenceContains(f, correlate);
-      /** One observation round: decisive on the start signal or a failure surface. */
+      /**
+       * The watch's dialog classification phase: the Start flow
+       * verifies a submission (the known popup is classifiable); the
+       * Recover flow fails closed on every dialog.
+       */
+      const phase = popupRecovery ? "verifying-submission" : "recovery";
+      /**
+       * THE DIALOG DISPATCH (CONTINUATION 22 — the frozen Work
+       * Order's dialog law): auth-shaped -> AUTHENTICATION_INTERRUPTED
+       * (never Enter); error-shaped -> PROVIDER_ERROR (never Enter);
+       * the KNOWN submission-blocking popup, Start flow only -> the
+       * observed-popup return (the CALLER's bounded Enter/dismiss/
+       * full-restart path); everything else (a dialog outside the
+       * submission-verification window, multiple simultaneous
+       * dialogs, the recovery flow) -> UNKNOWN_DIALOG. The adapter
+       * never blindly presses keys.
+       */
+      const dispatchDialog = (f) => {
+        const dialog = classifyDialog(f, phase);
+        if (dialog.kind === "none") {
+          return null;
+        }
+        if (dialog.kind === "auth") {
+          return {
+            refusal: failure("AUTHENTICATION_INTERRUPTED", `authentication was required while observing the submission outcome: ${dialog.reason}`),
+          };
+        }
+        if (dialog.kind === "error") {
+          return {
+            refusal: failure("PROVIDER_ERROR", `the provider surfaced an error dialog while observing the submission outcome: ${dialog.reason}`),
+          };
+        }
+        if (popupRecovery && dialog.kind === "known-popup") {
+          return { popup: f };
+        }
+        return {
+          refusal: failure(
+            "UNKNOWN_DIALOG",
+            `a differently-shaped dialog is visible while observing the submission outcome: ${dialog.reason}`
+          ),
+        };
+      };
+      /**
+       * THE ASYNC-OUTCOME HOLD (RESTORED by CONTINUATION 22 —
+       * continuation 10, PR #6 review 5123872434: the real known
+       * popup materializes only when the ASYNCHRONOUS chat-completion
+       * error arrives, AFTER the optimistic landing the start signal
+       * just read). The hold is a pure GATE on the acceptance: after
+       * the start signal, the outcome is held through the bounded
+       * confirmationHoldPolls window for exactly the late observables:
+       * a dialog (dispatched by the same dialog law — the known popup
+       * reaches the caller's Enter path; everything else fails
+       * closed), and the provider's prompt RESTORE (a refilled
+       * composer, or the send control recomputed ENABLED — the
+       * provider's own "a prompt is (back) present" computation, the
+       * reactive companion of the restore even while the raw value
+       * read lags). A QUIET window passes the SIGNAL facts through as
+       * the acceptance (the recording describes the acceptance
+       * moment; later provider transitions — the completion slot
+       * swap-back — are CONTEXT ONLY, exactly the c14/c15 boundary
+       * law); an unwatchable window (every read failed) also passes
+       * the signal through — the acceptance is never asserted beyond
+       * the bounded window either way (a popup beyond it is a
+       * live-evidence matter).
+       */
+      const holdForAsyncOutcome = async (signalFacts) => {
+        for (let i = 0; i < confirmationHoldPolls; i += 1) {
+          await sleep(settleIntervalMs);
+          const read = await readFacts(tabId);
+          if (!read.ok) {
+            continue; // a transport failure is not a submission outcome
+          }
+          const quiet = read.facts;
+          const dialog = dispatchDialog(quiet);
+          if (dialog) {
+            return dialog;
+          }
+          // A COMPLETED generation resolves the async outcome: the
+          // capacity refusal arrives on the chat-completion error, so
+          // a generation that ran to completion was accepted — no
+          // late popup can follow it. The completion is CONTEXT ONLY
+          // (the recording still describes the signal moment).
+          if (postResponseRegenerateVisible(quiet) && !stopVisible(quiet)) {
+            return { accepted: signalFacts };
+          }
+          const value = composerValueOf(quiet);
+          if (value !== null && value.length > 0) {
+            return {
+              refusal: failure(
+                "PAGE_MALFORMED",
+                "the provider returned the exact text to the composer after the accepted-shaped reading (the observed capacity-rejection restore — the submission was not accepted after all). The bounded retry re-verifies the exact text byte-identically and re-sends through the send control"
+              ),
+            };
+          }
+          if (sendEnabledOf(quiet) === true) {
+            return {
+              refusal: failure(
+                "PAGE_MALFORMED",
+                "the provider recomputed the send control enabled after the accepted-shaped reading (its own prompt-present computation — the capacity-rejection restore in flight). The bounded retry re-verifies the exact text byte-identically and re-sends through the send control"
+              ),
+            };
+          }
+        }
+        return { accepted: signalFacts };
+      };
+      /** One observation round: decisive on the start signal, a dialog, or a failure surface. */
       const observeRound = async () => {
         const decisive = (f) => {
           if (startSignalOf(f)) {
             return true; // THE START SIGNAL (the provider's own computed proof)
           }
-          const verdict = classifySession(f, null);
+          if (classifyDialog(f, phase).kind !== "none") {
+            return true; // a visible dialog is dispatched (never ignored)
+          }
+          const verdict = classifySession(f, null, phase);
           return verdict.state === "authentication-required" || verdict.state === "provider-error";
         };
         return settle(tabId, [], decisive);
       };
-      let lastRead = null;
-      for (let round = 0; round < agentStartEnters; round += 1) {
+      for (let round = 0; round < watchRounds; round += 1) {
         const observed = await observeRound();
-        lastRead = observed;
         if (observed.ok && startSignalOf(observed.facts)) {
-          return { started: observed.facts, refusal: null };
+          // The signal is observed — the ASYNC-OUTCOME HOLD gates the
+          // acceptance (a late popup or the provider's restore
+          // re-opens the bounded recovery; a quiet window records).
+          const held = await holdForAsyncOutcome(observed.facts);
+          if (held.accepted) {
+            return { started: held.accepted, refusal: null };
+          }
+          return { started: null, refusal: held.refusal ?? null, popup: held.popup ?? null };
         }
         if (observed.ok) {
-          const verdict = classifySession(observed.facts, null);
+          const dialog = dispatchDialog(observed.facts);
+          if (dialog) {
+            if (dialog.refusal) {
+              return { started: null, refusal: dialog.refusal };
+            }
+            return { started: null, refusal: null, popup: dialog.popup };
+          }
+          const verdict = classifySession(observed.facts, null, phase);
           if (verdict.state === "authentication-required") {
             return {
               started: null,
@@ -1601,27 +1842,26 @@ export function createZaiAdapter({
             };
           }
         }
-        // The round is unresolved: the timed Enter cadence. The
-        // inter-round wait keeps the Enter on the contract's
-        // interval (the observation phase already consumed the
-        // settle budget; the remainder of the interval is slept
-        // here, clamped at zero when the settle budget exceeds it).
+        // The round is unresolved: the inter-round pacing (PURE
+        // OBSERVATION — no key is ever pressed on a timer). The
+        // observation phase already consumed the settle budget; the
+        // remainder of the round interval is slept here, clamped at
+        // zero when the settle budget exceeds it.
         const settleWindowMs = settlePolls * settleIntervalMs;
-        const waitMs = Math.max(0, agentStartEnterIntervalMs - settleWindowMs);
+        const waitMs = Math.max(0, watchRoundIntervalMs - settleWindowMs);
         if (waitMs > 0) {
           await sleep(waitMs);
         }
-        const enter = await pressEnter(tabId);
-        if (!enter.ok) {
-          return { started: null, refusal: enter };
-        }
       }
-      // The FINAL observation round (no Enter follows it): the signal
-      // may have followed the last Enter.
+      // The FINAL observation round (paced by the interval): the
+      // signal may have followed the last round.
       const final = await observeRound();
-      lastRead = final;
       if (final.ok && startSignalOf(final.facts)) {
-        return { started: final.facts, refusal: null };
+        const held = await holdForAsyncOutcome(final.facts);
+        if (held.accepted) {
+          return { started: held.accepted, refusal: null };
+        }
+        return { started: null, refusal: held.refusal ?? null, popup: held.popup ?? null };
       }
       // EXHAUSTION: the typed agent-start-timeout diagnosis, routed by
       // the final facts.
@@ -1629,7 +1869,16 @@ export function createZaiAdapter({
         return { started: null, refusal: final };
       }
       const f = final.facts;
-      const verdict = classifySession(f, null);
+      // CONTINUATION 22: a dialog on the exhausted surface is
+      // dispatched by the same dialog law (never ignored).
+      const exhaustedDialog = dispatchDialog(f);
+      if (exhaustedDialog) {
+        if (exhaustedDialog.refusal) {
+          return { started: null, refusal: exhaustedDialog.refusal };
+        }
+        return { started: null, refusal: null, popup: exhaustedDialog.popup };
+      }
+      const verdict = classifySession(f, null, phase);
       if (verdict.state === "authentication-required") {
         return {
           started: null,
@@ -1657,17 +1906,18 @@ export function createZaiAdapter({
       const chatCreated = chatObjectCreatedOf(f);
       if (composerValue === correlate) {
         // The correlated text is STILL in the composer: the submission
-        // was not consumed (the provider returned it, or the Enter
-        // nudges never submitted it — the provider's own key routing
-        // decides, and its concurrency gate refuses a second prompt
+        // was not consumed (the provider returned it, or the send
+        // never took — its concurrency gate refuses a second prompt
         // while a generation runs). The bounded re-send attempt: the
         // next outer attempt re-verifies the byte-identical text and
-        // re-sends through the send control. Never a blind re-type.
+        // re-sends through the send control. Never a blind re-type,
+        // never a keypress (the Enter is reserved for the observed
+        // known popup alone).
         return {
           started: null,
           refusal: failure(
             "PAGE_MALFORMED",
-            "the agent-start watch exhausted its bounded window without the start signal — the exact text remains in the composer (the submission was not consumed; the provider's own concurrency gate refuses a second prompt while a generation runs, and the Enter nudges did not submit it). The bounded retry re-verifies the exact text byte-identically and re-sends through the send control"
+            "the agent-start watch exhausted its bounded window without the start signal — the exact text remains in the composer (the submission was not consumed; the provider's own concurrency gate refuses a second prompt while a generation runs). The bounded retry re-verifies the exact text byte-identically and re-sends through the send control"
           ),
         };
       }
@@ -1832,17 +2082,19 @@ export function createZaiAdapter({
     }
 
     // 2. verify the authenticated state (and that the surface is
-    // ready for the preparation sequence). CONTINUATION 13: a visible
-    // dialog is never consulted — the precheck reads the
-    // alert/auth-marker/composer facts only.
+    // ready for the preparation sequence). CONTINUATION 22 (PR #6
+    // review 5125571572, path (b)): a dialog visible on the target
+    // session before preparation fails closed UNKNOWN_DIALOG (the
+    // frozen Work Order's dialog law — never a preparation through
+    // a modal); auth-shaped dialogs read authentication-required.
     const settled = await settle(tabId, [], (f) => {
-      const c = classifySession(f, null);
+      const c = classifySession(f, null, "preparing");
       return c.state !== "ambiguous";
     });
     if (!settled.ok) {
       return settled;
     }
-    const precheck = classifySession(settled.facts, null);
+    const precheck = classifySession(settled.facts, null, "preparing");
     if (precheck.state === "authentication-required") {
       return failure(
         "AUTHORIZATION_REQUIRED",
@@ -1851,6 +2103,9 @@ export function createZaiAdapter({
     }
     if (precheck.state === "provider-error") {
       return failure("PROVIDER_ERROR", `the target session is presenting an error surface: ${precheck.detail}`);
+    }
+    if (precheck.state === "unexpected-dialog" || precheck.state === "expected-blocking-dialog") {
+      return failure("UNKNOWN_DIALOG", `a dialog is visible on the target session before preparation: ${precheck.detail}`);
     }
     if (precheck.state !== "ready-for-input") {
       return failure(
@@ -1861,32 +2116,42 @@ export function createZaiAdapter({
 
     // 3-7. bounded preparation/send/verification attempts. The first
     // attempt runs the full preparation (Agent -> model -> prompt).
-    // CONTINUATION 13 (PR #6 review 5124488246): the popup recovery
-    // branch is REMOVED — an unconfirmed send whose composer still
-    // holds the exact prompt resends as-is (the pre-send gate
-    // re-verifies it byte-for-byte); an already-confirmed submission
-    // is never resent; a send that appears not to take (or a surface
-    // a dialog renders unreadable) exhausts the bounded budget and
-    // fails closed through the ordinary paths.
+    // CONTINUATION 22 (PR #6 review 5125571572, path (b) — the
+    // frozen Work Order semantics): the KNOWN-POPUP recovery is
+    // RESTORED — when the verification watch returns the OBSERVED
+    // known submission-blocking popup, the adapter presses Enter
+    // exactly once for the current retry attempt, VERIFIES the
+    // dismissal by post-action observation, and the next attempt
+    // RESTARTS THE FULL PREPARATION SEQUENCE (Agent -> model ->
+    // provisioning -> prompt -> send -> verification). An unconfirmed
+    // send whose composer still holds the exact prompt resends
+    // as-is (the pre-send gate re-verifies it byte-for-byte); an
+    // already-confirmed submission is never resent; unknown dialogs
+    // fail closed at every step.
     let attempts = 0;
+    let popupDismissals = 0;
     let composeReestablishments = 0;
     let lastRefusal = null;
     let prepared = false;
 
     /**
      * Record the CONFIRMED submission (the shared acceptance path).
-     * CONTINUATION 15 (PR #6 review 5124990727 — the superseded
-     * message-evidence predicate): the acceptance is the AGENT-START
-     * SIGNAL itself, observed by watchAgentStart — the recording is
-     * entered ONLY from the started reading (the Stop control visible
-     * with the composer decisively empty), so `generation` is ALWAYS
-     * "working" at the recording read. The recording is GATED on the
-     * trustworthiness of the recording facts (the continuation-12
-     * contradictions — a contradictory composer action-slot state, the
-     * provider's computed prompt-present signal contradicting the
-     * decisively-empty composer read): an untrustworthy surface never
-     * records. The `submitted` record keeps exactly the three frozen
-     * popup-free fields (attempts, composeReestablishments, generation).
+     * The acceptance is the AGENT-START SIGNAL itself, observed by
+     * watchAgentStart and gated by the ASYNC-OUTCOME HOLD — the
+     * recording is entered ONLY from the started reading (the Stop
+     * control visible with the composer decisively empty, held
+     * through the bounded async-outcome window), so `generation` is
+     * ALWAYS "working" at the recording read. The recording is GATED
+     * on the trustworthiness of the recording facts (the
+     * continuation-12 contradictions — a contradictory composer
+     * action-slot state, the provider's computed prompt-present
+     * signal contradicting the decisively-empty composer read): an
+     * untrustworthy surface never records. CONTINUATION 22: the
+     * `submitted` record carries the frozen FOUR-FIELD shape
+     * (attempts, popupDismissals, composeReestablishments,
+     * generation — the pre-c13 invariant, review 5123260890
+     * requirement 2 "the existing four-field submission result
+     * invariant").
      */
     const recordSubmission = (facts) => {
       const surfaceRefusal = untrustworthySurfaceRefusal(facts);
@@ -1900,6 +2165,7 @@ export function createZaiAdapter({
         tabId,
         prompt,
         attempts,
+        popupDismissals,
         composeReestablishments,
         submittedAt: now(),
         wasWorking: generation === "working",
@@ -1909,9 +2175,71 @@ export function createZaiAdapter({
       return {
         ok: true,
         session: { worker, workItem, tabId },
-        submitted: { attempts, composeReestablishments, generation },
+        submitted: { attempts, popupDismissals, composeReestablishments, generation },
       };
     };
+
+    /**
+     * THE KNOWN-POPUP RECOVERY PATH (CONTINUATION 22 — the frozen
+     * Work Order: "When and only when the adapter observes the known
+     * submission-blocking popup, it may press `Enter` once for the
+     * current retry attempt. After dismissal it must restart from
+     * Agent selection, model selection, exact prompt entry, send and
+     * submission verification. Retries are bounded/configurable.").
+     * Called ONLY with the observed popup in hand (the verification
+     * watch's popup return — Enter is never issued on a timer or on
+     * an unclassified dialog). The dismissal is VERIFIED by
+     * post-action observation (a keypress is never evidence by
+     * itself); popupDismissals counts only actually-issued presses;
+     * the restart is signaled by resetting `prepared` (the next
+     * attempt re-runs the idempotent full preparation — the
+     * re-selection re-establishes every governed ground truth the
+     * popup interaction may have disturbed). The dismissal itself is
+     * NEVER success; an already-confirmed submission is still never
+     * resent.
+     * Returns null on a VERIFIED dismissal (the restart follows), or
+     * the typed refusal.
+     */
+    const dismissKnownPopup = async () => {
+      if (attempts >= maxSubmissionAttempts) {
+        return failure(
+          "RETRY_EXHAUSTED",
+          `the known submission-blocking popup persisted beyond the bounded attempt budget (${maxSubmissionAttempts} attempts, ${popupDismissals} dismissals)`
+        );
+      }
+      // The ONE bounded Enter press for this attempt.
+      const pressed = await pressEnter(tabId);
+      if (!pressed.ok) {
+        return pressed;
+      }
+      popupDismissals += 1; // counted only AFTER the press was actually issued
+      const dismissed = await settle(tabId, [], (f) => dialogCount(f) === 0);
+      if (!dismissed.ok) {
+        return dismissed;
+      }
+      if (dialogCount(dismissed.facts) !== 0) {
+        return failure("UNKNOWN_DIALOG", "the known submission-blocking popup did not dismiss after the Enter press");
+      }
+      prepared = false; // the next attempt RESTARTS the full preparation sequence
+      return null;
+    };
+
+    /**
+     * A dialog/failure refusal that is TERMINAL for Start — the
+     * c12-era dialog branches (and the frozen Work Order's
+     * fail-closed dialog law) return these directly, never retried:
+     * authentication is out of band (the operator authenticates and
+     * re-invokes), a provider-error surface is not transient, and an
+     * unknown dialog is a typed contract violation (retrying it
+     * would burn the budget on the same surface).
+     */
+    const terminalForStart = (refusal) =>
+      refusal !== null &&
+      refusal !== undefined &&
+      !refusal.ok &&
+      ["AUTHENTICATION_INTERRUPTED", "AUTHORIZATION_REQUIRED", "PROVIDER_ERROR", "UNKNOWN_DIALOG"].includes(
+        refusal.error?.code
+      );
 
     while (attempts < maxSubmissionAttempts) {
       attempts += 1;
@@ -1973,20 +2301,20 @@ export function createZaiAdapter({
       if (entered.confirmed) {
         // The submission already landed by MESSAGE-EXCLUSIVE provider
         // evidence (e.g. the send landed while the verification was
-        // reading). CONTINUATION 15: the message evidence is CONTEXT
-        // ONLY under this contract — the landed prompt is NEVER resent,
-        // and the AGENT-START WATCH observes for the start signal
-        // (queued, active, or unobserved) with the same timed Enter
-        // recovery and the same bounded fail-closed window. CONTINUATION
-        // 16: the watch's chat-state conjunct uses the chat state at
-        // THIS read (a landed accepted submission has created the chat
+        // reading). The landed prompt is NEVER resent, and the
+        // verification watch observes for the acceptance signal
+        // (queued, active, or unobserved) with the same bounded
+        // fail-closed window and the same dialog dispatch. The
+        // watch's chat-state conjunct uses the chat state at THIS
+        // read (a landed accepted submission has created the chat
         // object — the URL advanced; a locally-echoed refused one has
         // not, and the watch's exhaustion diagnoses exactly that).
         const outcome = await watchAgentStart(
           tabId,
           prompt,
           chatObjectCreatedOf(entered.facts) === true,
-          userTurnCountOf(entered.facts) ?? 0
+          userTurnCountOf(entered.facts) ?? 0,
+          { popupRecovery: true }
         );
         if (outcome.started) {
           const recorded = recordSubmission(outcome.started);
@@ -1998,6 +2326,23 @@ export function createZaiAdapter({
         }
         if (outcome.reestablished) {
           composeReestablishments += 1;
+        }
+        if (outcome.popup) {
+          // The OBSERVED KNOWN POPUP on the already-landed surface: the
+          // bounded Enter path (below) — the dismissal and restart
+          // re-observe the never-resent landed row.
+          const dispatched = await dismissKnownPopup();
+          if (dispatched) {
+            if (terminalForStart(dispatched)) {
+              return dispatched;
+            }
+            lastRefusal = dispatched;
+            continue;
+          }
+          continue; // the dismissal succeeded — the restart follows
+        }
+        if (terminalForStart(outcome.refusal)) {
+          return outcome.refusal; // the dialog/failure refusals are terminal — never retried
         }
         lastRefusal = outcome.refusal;
         continue;
@@ -2016,6 +2361,17 @@ export function createZaiAdapter({
         lastRefusal = gate;
         continue;
       }
+      // CONTINUATION 22: no dialog is expected at the send gate — any
+      // dialog at this point fails closed UNKNOWN_DIALOG (never a
+      // send through a modal).
+      const gateDialog = classifyDialog(gate.facts, "preparing");
+      if (gateDialog.kind !== "none") {
+        lastRefusal = failure(
+          "UNKNOWN_DIALOG",
+          `a dialog is visible at the send gate: ${gateDialog.reason}`
+        );
+        continue;
+      }
       if (composerValueOf(gate.facts) !== prompt) {
         const reestablished = await reestablishComposer(tabId);
         if (reestablished.ok) {
@@ -2029,57 +2385,52 @@ export function createZaiAdapter({
         }
         continue;
       }
-      // 6. SEND (CONTINUATION 15, PR #6 review 5124990727 + review
-      //    5125102305): the exact governed prompt is sent ONCE per
-      //    bounded attempt — the send control is clicked when the
-      //    composer action slot renders it. There is NO immediate
-      //    Enter fallback at the send step (the review explicitly
-      //    removes the old single-Enter-once fallback model): an
-      //    inaccessible Send control, a slot rendering the Stop
-      //    control, a contradictory or unresolvable slot, or a send
-      //    click that fails, all route into the AGENT-START WATCH,
-      //    whose timed Enter cadence is the recovery. When the slot
-      //    renders the Stop control the provider itself is mid-
-      //    generation and will not accept a second prompt — the watch
-      //    observes for the start signal with the provider's own
-      //    concurrency gate as the duplicate guard, never an
-      //    artificial one.
+      // 6. SEND: the exact governed prompt is sent ONCE per bounded
+      //    attempt — the send control is clicked when the composer
+      //    action slot renders it. There is NO Enter fallback at the
+      //    send step (the frozen Work Order reserves Enter for the
+      //    OBSERVED known popup alone — the adapter never blindly
+      //    presses keys): an inaccessible Send control, a slot
+      //    rendering the Stop control, a contradictory or unresolvable
+      //    slot, or a send click that fails are unresolved send states
+      //    — the verification watch observes and the bounded attempt
+      //    budget fails closed. When the slot renders the Stop control
+      //    the provider itself is mid-generation and will not accept a
+      //    second prompt — the provider's own concurrency gate is the
+      //    duplicate guard, never an artificial one.
       if (controlStateOf(gate.facts) === "send") {
         const clicked = await send(tabId);
         if (!clicked.ok) {
-          // The click itself failed: the watch's Enter cadence is the
-          // recovery (the prompt is verified present; the provider's
-          // own key routing decides what the Enter does).
+          // The click itself failed: the watch observes (never an
+          // Enter — the bounded attempts re-verify and re-attempt
+          // the send through the real control, or fail closed).
           lastRefusal = clicked;
         }
       }
-      // 7. THE AGENT-START WATCH: the bounded watch for the reliable
-      //    provider signal that the Agent has ACTUALLY STARTED
-      //    WORKING — THE CONVERSATION-STATE ADVANCEMENT (the
-      //    user-turn count advanced past the DISPATCH BASELINE — the
-      //    pre-send gate read above — AND the exact prompt landed as
-      //    a user-message row; CONTINUATION 20, the prompt-acceptance
-      //    leg) with the Send->Stop action-control transition
-      //    corroborating (the Stop control rendered with the send
-      //    control absent, the composer decisively empty) and, on a
-      //    fresh session, the chat-object creation (the session URL
-      //    advanced to /c/... — the provider's own proof the
-      //    submission was ACCEPTED; CONTINUATION 16), with the timed
-      //    Enter recovery (one Enter every 5 seconds while the signal
-      //    is absent) and the bounded fail-closed window.
-      //    CONTINUATION 13/15/16: a
-      //    visible dialog is never a signal here — the watch reads
-      //    only the control-state, composer, chat-state, alert, and
-      //    auth-marker facts; whatever the provider's key routing
-      //    does with the Enter is re-checked by the next observation.
-      //    The chat state at DISPATCH (the pre-send gate read) makes
-      //    the conjunct vacuous on an existing chat and strict on a
-      //    fresh one.
+      // 7. THE SUBMISSION VERIFICATION (the frozen Work Order's step
+      //    7 — "verify that the prompt was actually accepted/submitted
+      //    by observing the resulting provider state"): the bounded
+      //    watch for THE CONVERSATION-STATE ADVANCEMENT (the user-turn
+      //    count advanced past the DISPATCH BASELINE — the pre-send
+      //    gate read above — AND the exact prompt landed as a
+      //    user-message row) with the Send->Stop action-control
+      //    transition corroborating (the Stop control rendered with
+      //    the send control absent, the composer decisively empty)
+      //    and, on a fresh session, the chat-object creation (the
+      //    session URL advanced to /c/... — the provider's own proof
+      //    the submission was ACCEPTED), with PURE OBSERVATION (no
+      //    keypress on a timer), the DIALOG DISPATCH (the observed
+      //    known popup reaches dismissKnownPopup below; every other
+      //    dialog fails closed), the ASYNC-OUTCOME HOLD after the
+      //    signal, and the bounded fail-closed window. The chat state
+      //    at DISPATCH (the pre-send gate read) makes the conjunct
+      //    vacuous on an existing chat and strict on a fresh one.
       const outcome = await watchAgentStart(
         tabId,
         prompt,
         chatObjectCreatedOf(gate.facts) === true,
-        userTurnCountOf(gate.facts) ?? 0
+        userTurnCountOf(gate.facts) ?? 0,
+        { popupRecovery: true }
       );
       if (outcome.started) {
         const recorded = recordSubmission(outcome.started);
@@ -2091,6 +2442,23 @@ export function createZaiAdapter({
       }
       if (outcome.reestablished) {
         composeReestablishments += 1;
+      }
+      if (outcome.popup) {
+        // THE OBSERVED KNOWN SUBMISSION-BLOCKING POPUP (the frozen
+        // Work Order's recovery path — the ONLY Enter): the bounded
+        // press, the verified dismissal, and the FULL preparation
+        // restart on the next attempt.
+        const dispatched = await dismissKnownPopup();
+        if (dispatched) {
+          if (terminalForStart(dispatched)) {
+            return dispatched;
+          }
+          lastRefusal = dispatched;
+        }
+        continue;
+      }
+      if (terminalForStart(outcome.refusal)) {
+        return outcome.refusal; // the dialog/failure refusals are terminal — never retried
       }
       lastRefusal = outcome.refusal;
     }
@@ -2106,9 +2474,9 @@ export function createZaiAdapter({
 
   /**
    * Recover a hung worker session: Stop -> verified stopped -> the
-   * FIXED message `continue` -> the AGENT-START WATCH (CONTINUATION
-   * 15, PR #6 review 5124990727 + review 5124829301 requirement 6: the
-   * recovery does NOT require a persistent in-memory session across
+   * FIXED message `continue` -> the SAME acceptance watch (PURE
+   * OBSERVATION — PR #6 review 5124829301 requirement 6: the recovery
+   * does NOT require a persistent in-memory session across
    * service-worker restarts — the request itself carries the
    * Worker/Work-Item/tab correlation and the governed sequence runs
    * from it; a registry entry that CONTRADICTS the request still
@@ -2116,10 +2484,12 @@ export function createZaiAdapter({
    * refuses — the operator's SESSION_UNKNOWN run is the motivating
    * evidence). Bounded; every required transition is verified or the
    * recovery fails closed as a governance hold. The acceptance is
-   * the SAME start signal as Start (the Stop control reappearing
-   * with the composer decisively empty — the agent resumed working),
-   * never message-row evidence (superseded); the timed Enter cadence
-   * is the same recovery.
+   * the SAME start signal as Start (the new `continue` turn landing
+   * with the Stop control corroborating — the agent resumed working).
+   * CONTINUATION 22 (the frozen Work Order's dialog law): a dialog
+   * visible at ANY point of the recovery fails closed UNKNOWN_DIALOG
+   * (the bounded popup recovery applies only to submission — never
+   * a blind keypress, never an Enter).
    */
   async function recoverHungWorker({ worker, workItem, tabId }) {
     const registered = sessions.get(worker) ?? null;
@@ -2158,17 +2528,22 @@ export function createZaiAdapter({
       // holding text, or a decisive failure surface) within the same
       // bounded settle budget.
       const observed = await settle(tabId, [], (f) => {
-        const c = classifySession(f, registered);
-        if (["authentication-required", "provider-error"].includes(c.state)) {
-          return true; // a decisive failure surface ends the wait immediately
+        const c = classifySession(f, registered, "recovery");
+        if (
+          ["authentication-required", "provider-error", "unexpected-dialog", "expected-blocking-dialog", "ambiguous"].includes(
+            c.state
+          )
+        ) {
+          return true; // a decisive failure or dialog surface ends the wait immediately
         }
         // The precondition's decidable outcomes: the generation ACTIVE
         // (Stop visible — both computed label states), the
         // post-response surface (the Regenerate control — the
         // generation already ended), or the composer holding text (the
         // prompt present — no active generation to recover).
-        // CONTINUATION 13: a visible dialog is never a failure surface
-        // here — the wait reads the control/message facts only.
+        // CONTINUATION 22: a visible dialog is a decisive failure
+        // surface here (the bounded popup recovery applies only to
+        // submission).
         return (
           stopVisible(f) ||
           postResponseRegenerateVisible(f) ||
@@ -2179,18 +2554,24 @@ export function createZaiAdapter({
         lastRefusal = observed;
         continue;
       }
-      const precheck = classifySession(observed.facts, registered);
+      const precheck = classifySession(observed.facts, registered, "recovery");
       if (precheck.state === "authentication-required") {
         return failure("AUTHENTICATION_INTERRUPTED", `authentication was required during recovery: ${precheck.detail}`);
       }
       if (precheck.state === "provider-error") {
         return failure("PROVIDER_ERROR", `the provider surfaced an error during recovery: ${precheck.detail}`);
       }
+      if (precheck.state === "unexpected-dialog" || precheck.state === "expected-blocking-dialog") {
+        // CONTINUATION 22 (the frozen Work Order's dialog law): the
+        // bounded popup recovery applies ONLY to submission — a
+        // dialog during recovery fails closed UNKNOWN_DIALOG (never
+        // a blind keypress, never an Enter).
+        return failure(
+          "UNKNOWN_DIALOG",
+          `a dialog or ambiguous surface is visible during recovery — the bounded popup recovery applies only to submission: ${precheck.detail}`
+        );
+      }
       if (precheck.state === "ambiguous") {
-        // CONTINUATION 13: the dialog-driven UNKNOWN_DIALOG refusal is
-        // removed (a visible dialog is never a signal in this flow —
-        // PR #6 review 5124488246, requirement 6); only the genuinely
-        // ambiguous CONTROL surface still fails closed.
         return failure(
           "AMBIGUOUS_STATE",
           `an ambiguous control surface is visible during recovery (the composer is not a decidable input surface): ${precheck.detail}`
@@ -2291,15 +2672,16 @@ export function createZaiAdapter({
         lastRefusal = failure("AMBIGUOUS_STATE", "the composer did not hold the fixed recovery message verbatim");
         continue;
       }
-      // 4. The continue-send (CONTINUATION 15): the Send control is
-      //    clicked when the composer action slot renders it — there
-      //    is NO Enter fallback at the send step. When the slot
-      //    renders the Stop control the generation is already (re)
-      //    active — the watch's start signal decides. A send click
-      //    that fails routes into the watch, whose timed Enter cadence
-      //    is the recovery (the fixed message is verified present;
-      //    the provider's own key routing decides what the Enter
-      //    does). Never popup recognition, never dialog inspection.
+      // 4. The continue-send: the Send control is clicked when the
+      //    composer action slot renders it — there is NO Enter
+      //    fallback at the send step (the frozen Work Order reserves
+      //    Enter for the OBSERVED known popup during submission alone).
+      //    When the slot renders the Stop control the generation is
+      //    already (re) active — the watch's acceptance signal decides.
+      //    A send click that fails leaves the fixed message verified
+      //    present; the watch observes (pure observation) and the
+      //    bounded budget fails closed. Never popup recognition, never
+      //    dialog inspection, never a blind keypress.
       if (controlStateOf(readBack.facts) === "send") {
         const clicked = await send(tabId);
         if (!clicked.ok) {
@@ -2307,22 +2689,21 @@ export function createZaiAdapter({
         }
       }
 
-      // 5. THE AGENT-START WATCH — the SAME start signal as Start
-      //    (CONTINUATION 15, PR #6 review 5124990727 + CONTINUATION 16,
-      //    review 5125198728): the bounded watch for the Stop control
-      //    REAPPEARING with the composer decisively empty (the agent
-      //    resumed working on the fixed message), combined with the
-      //    chat state at the continue-dispatch (an existing chat — the
-      //    recovery's session — is already at a chat route, so the
-      //    conjunct is vacuous; a fresh surface requires the chat
-      //    object), with the SAME timed Enter recovery and the SAME
-      //    bounded fail-closed window. CONTINUATION 20 (PR #6 comment
-      //    5559533083): the acceptance is the CONJUNCT — the
-      //    conversation-state advancement (the new `continue` turn
-      //    landed: the count advanced past this readBack's baseline
-      //    AND the exact text present) with the provider-owned working
-      //    state (the Stop control) corroborating; a dropped row
-      //    never advances the count and fails the recovery closed.
+      // 5. THE ACCEPTANCE WATCH — the SAME start signal as Start (PURE
+      //    OBSERVATION): the bounded watch for the new `continue` turn
+      //    landing (the conversation state advancing past this
+      //    readBack's baseline with the exact text) with the Stop
+      //    control corroborating (the agent resumed working on the
+      //    fixed message) and the composer decisively empty, combined
+      //    with the chat state at the continue-dispatch (an existing
+      //    chat — the recovery's session — is already at a chat route,
+      //    so the conjunct is vacuous; a fresh surface requires the
+      //    chat object), with the SAME bounded fail-closed window.
+      //    A dropped row never advances the count and fails the
+      //    recovery closed. CONTINUATION 22: the recovery's watch
+      //    passes NO popupRecovery — every dialog in this flow fails
+      //    closed UNKNOWN_DIALOG (the bounded popup recovery applies
+      //    only to submission).
       //
       //    The watch's EXHAUSTION deliberately does NOT loop into a
       //    fresh recovery attempt: a retry would re-Stop a RESUMED
@@ -2377,7 +2758,8 @@ export function createZaiAdapter({
       if (
         !outcome.refusal.ok &&
         outcome.refusal.error?.code === "PAGE_MALFORMED" &&
-        outcome.refusal.error?.message?.includes("the exact text remains in the composer")
+        (outcome.refusal.error?.message?.includes("the exact text remains in the composer") ||
+          outcome.refusal.error?.message?.includes("returned the exact text to the composer"))
       ) {
         return failure(
           "PAGE_MALFORMED",

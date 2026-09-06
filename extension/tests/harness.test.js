@@ -175,9 +175,10 @@ test("startResultCorrelation extracts the exact session a successful start repor
   const correlation = startResultCorrelation({
     ok: true,
     session: { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 },
-    // CONTINUATION 14: the Start record's generation is the Send-reappearance
-    // boundary read ("waiting" — never recorded while the Stop control is visible).
-    submitted: { attempts: 1, composeReestablishments: 0, generation: "waiting" },
+    // CONTINUATION 22: the frozen FOUR-FIELD submitted record (attempts,
+    // popupDismissals, composeReestablishments, generation — the pre-c13
+    // invariant restored with the known-popup recovery).
+    submitted: { attempts: 1, popupDismissals: 0, composeReestablishments: 0, generation: "working" },
   });
   assert.deepEqual(correlation, { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 });
 });
@@ -218,7 +219,7 @@ test("buildEvidenceRecord produces the deterministic record with fixed key order
   const response = {
     ok: true,
     session: { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 },
-    submitted: { attempts: 2, composeReestablishments: 1, generation: "waiting" },
+    submitted: { attempts: 2, popupDismissals: 1, composeReestablishments: 1, generation: "working" },
   };
   const built = buildEvidenceRecord({
     sequence: 1,

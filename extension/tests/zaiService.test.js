@@ -93,9 +93,10 @@ test("StartZaiWorkerSession carries the exact worker/workItem/prompt and maps th
     startWorkerSession: (arg) => ({
       ok: true,
       session: { worker: arg.worker, workItem: arg.workItem, tabId: 7 },
-      // CONTINUATION 14: the Start record's generation is the Send-reappearance
-      // boundary read ("waiting" — never recorded while the Stop control is visible).
-      submitted: { attempts: 1, composeReestablishments: 0, generation: "waiting" },
+      // CONTINUATION 22: the frozen FOUR-FIELD submitted record (attempts,
+      // popupDismissals, composeReestablishments, generation — the pre-c13
+      // invariant restored with the known-popup recovery).
+      submitted: { attempts: 1, popupDismissals: 0, composeReestablishments: 0, generation: "working" },
     }),
   });
   const { service } = await startedService({ adapter });
@@ -108,7 +109,7 @@ test("StartZaiWorkerSession carries the exact worker/workItem/prompt and maps th
   });
   assert.equal(result.ok, true);
   assert.deepEqual(result.session, { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 });
-  assert.deepEqual(result.submitted, { attempts: 1, composeReestablishments: 0, generation: "waiting" });
+  assert.deepEqual(result.submitted, { attempts: 1, popupDismissals: 0, composeReestablishments: 0, generation: "working" });
   assert.equal(adapter.calls[0].arg.prompt, prompt);
   assert.equal(adapter.calls[0].arg.workItem, "CTRL-014");
 });
