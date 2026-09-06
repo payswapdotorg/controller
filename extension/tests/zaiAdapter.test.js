@@ -3,20 +3,27 @@
  * matrix over the deterministic page simulator. The CONTINUATION-15
  * regressions (PR #6 review 5124990727 + review 5125102305 — "IMPLEMENT
  * THE NEW Z.AI SUBMISSION FLOW NOW" / "IMPLEMENT THE ADAPTER CHANGE
- * NOW") pin the AGENT-START WATCH contract: the acceptance is the
- * provider-owned START SIGNAL — the composer action slot's
- * Send->Stop transition (the Stop control rendered with the send
- * control absent, the composer decisively empty: the draft consumed
- * — a prompt still held in the composer is the provider's own proof
- * the submission was NOT consumed, so a Stop control over a
- * text-holding composer is a foreign generation, never the signal);
- * Enter is ONLY the timed recovery nudge (one every 5 seconds while
- * the signal is absent, at most 12, stopping IMMEDIATELY at the
- * signal — the provider's own concurrency gate is the duplicate
- * guard); the superseded Send-reappearance boundary,
+ * NOW"), REVISED by CONTINUATION 20 (PR #6 comment 5559533083, the
+ * superseding execution directive, restated by comment 5559702905),
+ * pin the AGENT-START WATCH contract: the acceptance is the
+ * provider-owned START SIGNAL — THE CONVERSATION-STATE ADVANCEMENT
+ * (the user-turn count advanced past the dispatch baseline AND the
+ * exact correlated text landed as a user-message row — the new turn
+ * is OURS) with the composer action slot's Send->Stop transition
+ * corroborating (the Stop control rendered with the send control
+ * absent, the composer decisively empty: the draft consumed — a
+ * prompt still held in the composer is the provider's own proof the
+ * submission was NOT consumed, so a Stop control over a
+ * text-holding composer is a foreign generation, never the signal)
+ * and, on a fresh session, the chat-object creation; Enter is ONLY
+ * the timed recovery nudge (one every 5 seconds while the signal is
+ * absent, at most 12, stopping IMMEDIATELY at the signal — the
+ * provider's own concurrency gate is the duplicate guard); the
+ * superseded Send-reappearance boundary, standalone
  * message-evidence acceptance predicate, and single-Enter-once
- * fallback are removed; the message evidence is CONTEXT ONLY. The
- * pinned laws: the provisioning wait; the successful submission
+ * fallback are removed; the message evidence is never a STANDALONE
+ * acceptance (the exact row is the signal's ours-proof conjunct).
+ * The pinned laws: the provisioning wait; the successful submission
  * (zero Enters); the signal only after retries (the queued
  * generation) with the cessation law; the Enter when the Send
  * control is unavailable; the blocked/persistent-dialog recovery
@@ -752,8 +759,10 @@ test("the collapsed icon-only sidebar resolves the Agent pill structurally (no t
   // collapsed sidebar): the mode pills carry icons only (empty text)
   // — the structural candidate, never a text scan, must resolve the
   // Agent pill.
-  // CONTINUATION 14: generationCompletes opens the Send-reappearance
-  // boundary at which the Start's acceptance is recorded.
+  // CONTINUATION-14 lineage: under the current contract the Start
+  // records at the FIRST post-send observation of the start signal
+  // (the landed exact turn + the Stop control) — no Send-reappearance
+  // boundary is ever waited for.
   const { adapter, pages } = build({ sidebar: "collapsed" });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -1986,12 +1995,13 @@ test("a registry entry whose tab navigated away from the provider origin fails t
 // --------------------------------------------------------------------
 
 async function hungSession(options = {}) {
-  // CONTINUATION 14: the generation's COMPLETION opens the
-  // Send-reappearance boundary at which the Start's acceptance is
-  // recorded (the fixture's default successful send renders the Stop
-  // control immediately — the generation-in-flight surface — so the
-  // Start needs the completion transition for the boundary). The
-  // hung state is then re-armed by the caller-facing line below.
+  // The fixture's default successful send renders the Stop control
+  // immediately (the generation-in-flight surface) with the new turn
+  // landed, so the Start records the start signal on its FIRST
+  // post-send observation (CONTINUATION 20 — no completion
+  // transition is required for the acceptance; the c14
+  // Send-reappearance boundary is superseded). The hung state is
+  // then re-armed by the caller-facing line below.
   const built = build({ ...options });
   const started = await built.adapter.startWorkerSession({
     worker: "w1",
@@ -2605,8 +2615,7 @@ test("the operator's literal timing: the recovery invoked immediately after a St
   // for the interval to open; here the Stop control appears on the
   // 2nd fact read after the recovery is invoked, and the FULL frozen
   // sequence then runs: adapter-owned Stop -> verified stopped ->
-  // exact "continue" -> message-exclusive conversation-evidence
-  // acceptance.
+  // exact "continue" -> the agent-start-signal acceptance.
   // CONTINUATION 14: generationCompletes: null overrides the helper default — the
   // queued-surface model needs NO completion transition (the Stop interval must stay
   // open for the recovery to find it).
@@ -2668,36 +2677,38 @@ test("a restored prompt sitting in the composer (no Stop control) refuses the re
 // The CONTINUATION-14 regressions (PR #6 review 5124542353 / the
 // ARCHITECT work order 5557596159 — "REPLACE POPUP DETECTION WITH
 // SEND-CONTROL STATE MACHINE"): the composer action-slot state is the
-// primary execution state machine. The laws, regression-pinned: the
-// Send control disappears (the Stop replacement while the generation
-// is in flight) and reappears on completion — the acceptance recorded
-// at the reappearance boundary; the Send control reappearing without
-// the exact user-message evidence routes the contract's unsuccessful
-// branch (the bounded exact-prompt re-establishment/resend); an
-// INACCESSIBLE Send control triggers the Enter fallback exactly once
-// per attempt (the existing page primitive, never popup handling,
-// zero dialog inspection) with the state machine continuing through
-// the re-observation; a Send control that never becomes resolvable
-// fails closed after the bounded retry budget; the click itself
-// failing routes the same fallback; and the recovery's continue-send
-// uses the same control-state rule.
+// primary execution state machine. SUPERSEDED c14 FRAMING, corrected
+// to the CURRENT law (CONTINUATION 15/20 — the assertions were always
+// updated; these comments now state the current semantics): the
+// acceptance is the agent-start signal, recorded BEFORE any
+// completion; the Send control's disappearance/reappearance is a
+// modeled provider transition, CONTEXT ONLY. The laws,
+// regression-pinned: the Send control disappears (the Stop
+// replacement while the generation is in flight) and reappears on
+// completion — context, never the acceptance; an INACCESSIBLE Send
+// control routes into the agent-start watch whose timed Enter
+// cadence is the recovery (the existing page primitive, never popup
+// handling, zero dialog inspection) with the state machine
+// continuing through the re-observation; a Send control that never
+// becomes resolvable fails closed after the bounded retry budget;
+// the click itself failing routes the same recovery; and the
+// recovery's continue-send uses the same control-state rule.
 // --------------------------------------------------------------------
 
-test("the Send-control state machine: the send control DISAPPEARS (the Stop control replacing it while the generation is in flight) and REAPPEARS on completion — the acceptance is recorded at the reappearance boundary", async () => {
+test("the Send-control state machine: the send control DISAPPEARS (the Stop control replacing it while the generation is in flight) and REAPPEARS on completion — a CONTEXT-ONLY transition, the acceptance already recorded at the start signal", async () => {
   // The work order's requirement 3, the full machine: press Send ->
   // the action slot swaps to the Stop control (the Send control
   // ABSENT — the transient missing Send the wait tolerates, never an
   // error) -> the generation completes -> the slot swaps back to the
-  // send control (the REAPPEARANCE) -> the resulting provider state
-  // is inspected and the acceptance recorded (the exact prompt in the
-  // message-exclusive evidence with the composer decisively empty).
-  // Here the completion lands on the 2nd fact read with the Stop
-  // control visible: the wait's first read observes the Stop state
-  // (not decisive — keep waiting), and the second read observes the
-  // boundary. The pre-correction adapter recorded from the FIRST
-  // confirm-shaped reading (while the Stop control was still
-  // visible); the corrected state machine records only at the
-  // boundary.
+  // send control (the REAPPEARANCE) — a CONTEXT-ONLY provider
+  // transition: the acceptance is the START SIGNAL (the landed exact
+  // turn advancing the conversation state, the Stop control
+  // corroborating), observed on the FIRST post-send read. Here the
+  // completion lands on the 2nd fact read with the Stop control
+  // visible: the watch's first read already observed the signal and
+  // the Start has returned; the completion transition is UNOBSERVED
+  // context. (The pre-correction c14 adapter recorded only at the
+  // boundary; the corrected machine records at the signal.)
   const built = build({ generationCompletes: 2 });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -2727,7 +2738,8 @@ test("the Send control INACCESSIBLE at the send step: the Enter fallback fires e
   // provider's slot re-render — the Send control becomes resolvable
   // again). The pre-send gate verified the exact prompt decisively
   // present, so the focused composer's Enter submits it; the
-  // Send-reappearance wait then finds the boundary and records the
+  // watch's next observation then reads the start signal (the
+  // landed exact turn + the Stop control) and records the
   // acceptance. The pre-correction adapter had NO fallback: the send
   // click failed on the zero-match resolution and the bounded budget
   // exhausted — this regression differentiates them.
@@ -2765,8 +2777,8 @@ test("the send click itself failing (the slot re-rendering TWO send controls —
   // send controls so the click REFUSES (the page script's
   // exactly-one rule — never a best-effort click). The fallback fires
   // (the Enter submits the verified prompt), the keypress re-render
-  // resolves the slot again, and the Send-reappearance boundary
-  // records the acceptance.
+  // resolves the slot again, and the watch's start signal records
+  // the acceptance.
   const built = build({
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button") {
@@ -2800,8 +2812,8 @@ test("the Send control never becoming resolvable after the Enter fallback: the b
   // `sendInaccessible` knob PERSISTS — the slot never re-renders the
   // Send control. The Enter (exactly one, on the first attempt)
   // submits the verified prompt — the row lands — but the
-  // Send-reappearance wait never observes a resolvable control and
-  // the analysis refuses with the unresolvable-slot diagnosis. The
+  // watch never observes a resolvable control and the exhaustion
+  // analysis refuses with the unresolvable-slot diagnosis. The
   // retries find the submission already confirmed (the evidence) and
   // re-observe through the already-confirmed path — never a second
   // Enter, never a resend — and the budget ends in the typed failure.
@@ -2827,15 +2839,16 @@ test("the Send control never becoming resolvable after the Enter fallback: the b
   assert.ok(!("submitted" in result), "an unresolvable control state never produces a submitted record");
 });
 
-test("the recovery's continue-send with an INACCESSIBLE Send control: the Enter fallback fires exactly once, the fixed `continue` lands, and the acceptance is the conversation evidence", async () => {
+test("the recovery's continue-send with an INACCESSIBLE Send control: the Enter fallback fires exactly once, the fixed `continue` lands, and the acceptance is the agent-start signal", async () => {
   // The work order's requirement 7 — the hung recovery uses the SAME
   // control-state rule at its continue-send. After the adapter's own
   // verified Stop, the post-stop re-render leaves the slot rendering
   // NEITHER control (the hook arms `sendInaccessible` on the Stop
   // click): the read-back verifies the exact fixed `continue`
   // byte-identically, the send click is impossible, and the Enter
-  // fallback submits it — the acceptance is the message-exclusive
-  // evidence (the `continue` row + the decisively cleared composer).
+  // fallback submits it — the acceptance is the agent-start signal
+  // (the new `continue` turn advancing the conversation state, the
+  // Stop control corroborating; CONTINUATION 20).
   const built = await hungSession({
     beforeRespond: (message, state) => {
       if (message.op === "click" && String(message.selector).includes('aria-label="Stop"')) {

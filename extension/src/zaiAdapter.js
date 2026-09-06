@@ -49,12 +49,26 @@
  *         an unprovisioned surface);
  *     7. THE AGENT-START WATCH — the governed acceptance, REVISED by
  *        CONTINUATION 16 (PR #6 review 5125198728, requirements
- *        4-6): a bounded watch for the reliable provider signal that
- *        the Z.ai Agent has ACTUALLY STARTED WORKING. THE DETECTOR —
- *        the review's three candidates investigated, the smallest
- *        deterministic live-observable signal chosen, signals
- *        combined for confidence:
- *          (c) THE PRIMARY: the Send->Stop ACTION-CONTROL TRANSITION
+ *        4-6), REVISED AGAIN by CONTINUATION 20 (PR #6 comment
+ *        5559533083, the superseding execution directive, restated
+ *        by comment 5559702905 — the prior popup/Send-reappearance
+ *        acceptance process superseded; the strongest reliable
+ *        runtime signal required): a bounded watch for the reliable
+ *        provider signal that the Z.ai Agent has ACTUALLY STARTED
+ *        WORKING. THE DETECTOR (startSignalOf) — the directive's
+ *        hierarchy, signals combined for confidence:
+ *          (i) THE PROMPT-ACCEPTANCE LEG, PRIMARY: THE
+ *              CONVERSATION-STATE ADVANCEMENT — the user-message
+ *              turn count ADVANCED past the dispatch baseline AND
+ *              the exact correlated text landed as an EXACT
+ *              user-message row (the new turn is OURS — a stale
+ *              exact row from a prior run never advances the count;
+ *              a foreign turn never carries the exact text; the
+ *              count is userTurnCountOf — the rendered projection
+ *              of the operator-reported chat.history.messages
+ *              user-role nodes, the object itself closure-scoped);
+ *          (ii) THE WORKING-STATE LEG, CORROBORATING: the Send->Stop
+ *              ACTION-CONTROL TRANSITION
  *              — the composer action slot swapping to the Stop
  *              control (the provider's mutually exclusive render
  *              conditional "no current message or the current
@@ -64,7 +78,7 @@
  *              with the composer DECISIVELY EMPTY (the draft
  *              consumed — a prompt still held in the composer is the
  *              provider's own proof the submission was NOT consumed);
- *          (a) THE FRESH-SESSION CONJUNCT: the CHAT OBJECT CREATED —
+ *          (iii) THE FRESH-SESSION CONJUNCT: the CHAT OBJECT CREATED —
  *              the session URL advanced to /c/<chatId>. BUNDLE-PROVEN:
  *              the provider's submission handler creates the chat
  *              server-side on the ACCEPTED first submission (the
@@ -80,15 +94,19 @@
  *              input on a fresh session has a Stop control and an
  *              empty composer but NO chat object — never our start
  *              signal;
- *          (b) INVESTIGATED, NOT USED as a predicate: the chat
- *              history/current-turn advancement (the user-message
- *              row) is a submit-time LOCAL optimistic echo the
- *              server can withdraw (the observed capacity
- *              rejection) — CONTEXT ONLY under this contract. The
+ *              THE WITHDRAWN-ECHO HAZARD (the (b) candidate of the
+ *              c16 review, resolved by the (i)+(iii) conjunction
+ *              under CONTINUATION 20): the submit-time LOCAL
+ *              optimistic echo the server can withdraw (the
+ *              observed capacity rejection) never satisfies the
+ *              FULL signal — the refused path never creates the
+ *              chat object, and a landed-but-unaccepted row is
+ *              diagnosed at the watch's exhaustion (the
+ *              refused-submission diagnosis), never accepted. The
  *              chat object's store is closure-scoped (NOT a window
  *              global), its URL reflection IS the page-observable
- *              form (the (a) conjunct); assistant-generated text is
- *              contract-forbidden; network/SSE events are not
+ *              form (the (iii) conjunct); assistant-generated text
+ *              is contract-forbidden; network/SSE events are not
  *              observable through the closed page vocabulary.
  *        THE WATCH LOOP: while the start signal is absent and no
  *        decisive failure surface appears, press Enter ONCE EVERY
@@ -595,9 +613,9 @@ export function createZaiAdapter({
   // submission-outcome hold (continuation 10) is REMOVED together
   // with the whole popup recognition mechanism — no submission
   // window watches for a delayed/async dialog or the provider's
-  // prompt restore. The acceptance follows the frozen rule directly:
-  // the message-exclusive exact-row evidence + the decisively empty
-  // composer, gated on control-state consistency.
+  // prompt restore. The acceptance is the agent-start signal itself
+  // (CONTINUATION 20: the conversation-state advancement conjunct
+  // with the provider's working state — the agent-start watch below).
 
   // ------------------------------------------------------------------
   // Fact interpretation (all provider semantics live below this line).
@@ -796,11 +814,13 @@ export function createZaiAdapter({
   }
 
   /**
-   * The MESSAGE-EXCLUSIVE USER-message acceptance evidence
-   * (continuation 6; tightened continuation 9, PR #6 review
-   * 5123260890, requirement 2): the exact prompt observed as an
-   * EXACT user-message row — the strongest provider-state proof
-   * available, and the ONLY acceptance surface. LIVE-OBSERVED
+   * The EXACT-ROW conjunct of the agent-start signal (CONTINUATION
+   * 20, the ours-proof leg — the new turn is OURS): the exact
+   * correlated text observed as an EXACT user-message row. History:
+   * the continuation-6/9 MESSAGE-EXCLUSIVE acceptance surface (a
+   * standalone predicate, superseded by the continuation-15 start
+   * signal and retained as the signal's exact-row conjunct).
+   * LIVE-OBSERVED
    * 2026-09-06 (the operator's captured run): the user-message
    * row's trimmed text is the exact submitted prompt byte-for-byte,
    * and `[role="log"]` matched ZERO elements on the live surface.
@@ -2035,14 +2055,19 @@ export function createZaiAdapter({
       }
       // 7. THE AGENT-START WATCH: the bounded watch for the reliable
       //    provider signal that the Agent has ACTUALLY STARTED
-      //    WORKING — the Send->Stop action-control transition (the
-      //    Stop control rendered with the send control absent, the
-      //    composer decisively empty) combined, on a fresh session,
-      //    with the chat-object creation (the session URL advanced to
-      //    /c/... — the provider's own proof the submission was
-      //    ACCEPTED; CONTINUATION 16), with the timed Enter recovery
-      //    (one Enter every 5 seconds while the signal is absent) and
-      //    the bounded fail-closed window. CONTINUATION 13/15/16: a
+      //    WORKING — THE CONVERSATION-STATE ADVANCEMENT (the
+      //    user-turn count advanced past the DISPATCH BASELINE — the
+      //    pre-send gate read above — AND the exact prompt landed as
+      //    a user-message row; CONTINUATION 20, the prompt-acceptance
+      //    leg) with the Send->Stop action-control transition
+      //    corroborating (the Stop control rendered with the send
+      //    control absent, the composer decisively empty) and, on a
+      //    fresh session, the chat-object creation (the session URL
+      //    advanced to /c/... — the provider's own proof the
+      //    submission was ACCEPTED; CONTINUATION 16), with the timed
+      //    Enter recovery (one Enter every 5 seconds while the signal
+      //    is absent) and the bounded fail-closed window.
+      //    CONTINUATION 13/15/16: a
       //    visible dialog is never a signal here — the watch reads
       //    only the control-state, composer, chat-state, alert, and
       //    auth-marker facts; whatever the provider's key routing
