@@ -994,9 +994,9 @@ class CliSurfaceTests(unittest.TestCase):
         result = _run_controller("status", "--repo", str(REPO_ROOT))
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("controller status: OK", result.stdout)
-        self.assertIn("active work item: CTRL-013", result.stdout)
-        self.assertIn("lifecycle state: COMPLETE", result.stdout)
-        self.assertIn("owning boundary (frozen routing): ARCHITECT_GOVERNANCE", result.stdout)
+        self.assertIn("active work item: CTRL-014", result.stdout)
+        self.assertIn("lifecycle state: READY", result.stdout)
+        self.assertIn("owning boundary (frozen routing): ORCHESTRATOR", result.stdout)
         self.assertIn("STAGE-7-END-TO-END-AUTONOMOUS-GOVERNED-LOOP", result.stdout)
 
     def test_cycle_without_external_tokens_fails_closed_before_network(self) -> None:

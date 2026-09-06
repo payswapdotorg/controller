@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 
 import { validateRequest, REQUEST_KINDS } from "../src/messages.js";
 
-test("the request vocabulary is the frozen CTRL-012 + CTRL-013 set", () => {
+test("the request vocabulary is the frozen CTRL-012 + CTRL-013 + CTRL-014 set", () => {
   assert.deepEqual([...REQUEST_KINDS], [
     "GetConfiguration",
     "RegisterWorker",
@@ -31,6 +31,9 @@ test("the request vocabulary is the frozen CTRL-012 + CTRL-013 set", () => {
     "CreateBranch",
     "OpenPullRequest",
     "MergePullRequest",
+    "ObserveZaiSession",
+    "StartZaiWorkerSession",
+    "RecoverZaiHungWorker",
   ]);
   // The mutation vocabulary is exactly the three Controller-authorized
   // mutations — nothing else. No approval, completion, comment, or
@@ -71,6 +74,9 @@ test("each happy request form validates", () => {
     { kind: "CreateBranch", repository: "pectoraux/controller", branch: "ctrl-013-x", fromSha: sha },
     { kind: "OpenPullRequest", repository: "pectoraux/controller", branch: "ctrl-013-x", baseBranch: "main", baseSha: "b".repeat(40), title: "CTRL-013", body: "the body" },
     { kind: "MergePullRequest", repository: "pectoraux/controller", prNumber: 38, workItem: "CTRL-013", baseRef: "main", baseSha: "b".repeat(40), headSha: sha },
+    { kind: "ObserveZaiSession", worker: "Z.ai" },
+    { kind: "StartZaiWorkerSession", worker: "Z.ai", workItem: "CTRL-014", prompt: "the exact governed prompt" },
+    { kind: "RecoverZaiHungWorker", worker: "Z.ai", workItem: "CTRL-014", tabId: 7 },
   ];
   for (const request of happy) {
     const result = validateRequest(request);
@@ -228,4 +234,55 @@ test("MergePullRequest cannot carry a merge method — the frozen identity eleme
   assert.equal(smuggled.ok, false);
   assert.equal(smuggled.error.code, "MALFORMED_MESSAGE");
   assert.match(smuggled.error.message, /mergeMethod/);
+});
+
+
+// --------------------------------------------------------------------
+// CTRL-014 — the Zai kinds' closed forms.
+// --------------------------------------------------------------------
+
+test("the Zai kinds refuse empty worker/workItem and non-string prompts", () => {
+  for (const bad of [
+    { kind: "ObserveZaiSession", worker: "" },
+    { kind: "StartZaiWorkerSession", worker: "Z.ai", workItem: "", prompt: "p" },
+    { kind: "StartZaiWorkerSession", worker: "Z.ai", workItem: "CTRL-014", prompt: 42 },
+    { kind: "StartZaiWorkerSession", worker: "Z.ai", workItem: "CTRL-014", prompt: "   " },
+    { kind: "RecoverZaiHungWorker", worker: "Z.ai", workItem: "CTRL-014", tabId: "7" },
+    { kind: "RecoverZaiHungWorker", worker: "Z.ai", workItem: "CTRL-014", tabId: 0 },
+    { kind: "RecoverZaiHungWorker", worker: "Z.ai", workItem: "CTRL-014" },
+  ]) {
+    const result = validateRequest(bad);
+    assert.equal(result.ok, false, JSON.stringify(bad));
+    assert.equal(result.error.code, "MALFORMED_MESSAGE", JSON.stringify(bad));
+  }
+});
+
+test("the Zai kinds refuse undeclared fields (closed forms — nothing is smuggled)", () => {
+  const smuggled = validateRequest({
+    kind: "StartZaiWorkerSession",
+    worker: "Z.ai",
+    workItem: "CTRL-014",
+    prompt: "p",
+    credentials: "never",
+  });
+  assert.equal(smuggled.ok, false);
+  assert.equal(smuggled.error.code, "MALFORMED_MESSAGE");
+  assert.match(smuggled.error.message, /credentials/);
+  const extra = validateRequest({ kind: "ObserveZaiSession", worker: "Z.ai", tabId: 7 });
+  assert.equal(extra.ok, false);
+  assert.equal(extra.error.code, "MALFORMED_MESSAGE");
+  assert.match(extra.error.message, /tabId/);
+});
+
+test("a multiline prompt with special characters validates verbatim (never rewritten by the boundary)", () => {
+  const prompt = "line one\nline two & \'quoted\' — <tag> verbatim";
+  const result = validateRequest({ kind: "StartZaiWorkerSession", worker: "Z.ai", workItem: "CTRL-014", prompt });
+  assert.equal(result.ok, true);
+  assert.equal(result.request.prompt, prompt);
+});
+
+test("no Zai governance mutation kind exists (no merge/approve/complete through the provider surface)", () => {
+  for (const absent of ["MergeZaiSession", "ApproveZaiSession", "CompleteZaiWorkItem", "ActivateZaiWorkItem"]) {
+    assert.equal(REQUEST_KINDS.includes(absent), false, absent);
+  }
 });

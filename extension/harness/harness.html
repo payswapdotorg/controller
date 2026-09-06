@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Controller live-test harness (operator only)</title>
+  <link rel="stylesheet" href="harness.css">
+</head>
+<body>
+  <header class="banner">
+    <h1>CTRL-014 — operator live-test harness</h1>
+    <p>
+      Developer/operator <strong>TEST surface only</strong>. This page is outside the popup
+      and outside any runtime composition (CTRL-016 scope): it invokes the existing frozen
+      CTRL-014 message boundary (<code>chrome.runtime.sendMessage</code>) against the real
+      installed extension and records deterministic, copyable evidence. It adds no
+      production control, no orchestration, no new recovery semantics, and no provider
+      knowledge — every provider fact stays in the adapter.
+    </p>
+  </header>
+
+  <section id="operator-gate">
+    <label class="gate">
+      <input type="checkbox" id="operator-ack">
+      I am the operator running a deliberate live test of the CTRL-014 adapter, and the
+      prompt I supply below is the <strong>exact Controller-generated governed prompt</strong>,
+      pasted verbatim.
+    </label>
+    <p id="gate-hint" class="hint">Invocations are disabled until the operator acknowledgment above is checked.</p>
+  </section>
+
+  <section id="configuration">
+    <h2>Worker</h2>
+    <p class="hint">Registered Workers are listed from the extension configuration (GetConfiguration). The service router itself gates the provider — a Worker of the wrong provider fails closed with a typed refusal.</p>
+    <select id="worker-select" aria-label="Registered Worker"></select>
+    <button type="button" id="refresh-workers">Refresh registrations</button>
+    <p id="worker-error" class="error hidden"></p>
+  </section>
+
+  <section id="observe-panel">
+    <h2>ObserveZaiSession</h2>
+    <p class="hint">Typed session observation for the selected Worker (authentication-required / session-missing / ready-for-input / working / waiting / stopped / …).</p>
+    <button type="button" id="invoke-observe" class="invoke" disabled>Invoke ObserveZaiSession</button>
+  </section>
+
+  <section id="start-panel">
+    <h2>StartZaiWorkerSession</h2>
+    <p class="hint">The governed new-session sequence. The prompt must be the exact Controller-generated governed prompt — the harness carries it verbatim and never authors, rewrites, normalizes, or substitutes it.</p>
+    <label for="start-work-item">Work Item (exact identity)</label>
+    <input type="text" id="start-work-item" autocomplete="off" spellcheck="false" placeholder="CTRL-0XX">
+    <label for="start-prompt">Exact governed prompt (paste verbatim)</label>
+    <textarea id="start-prompt" rows="6" spellcheck="false" placeholder="Paste the exact Controller-generated governed prompt here — it is carried byte-for-byte."></textarea>
+    <p id="prompt-readback" class="hint">0 characters — carried verbatim, never rewritten.</p>
+    <button type="button" id="invoke-start" class="invoke" disabled>Invoke StartZaiWorkerSession</button>
+  </section>
+
+  <section id="recover-panel">
+    <h2>RecoverZaiHungWorker</h2>
+    <p class="hint">The existing governed hang recovery: Stop → verified stopped → the fixed message <code>continue</code> → verified acceptance. The <code>tabId</code> must be the exact browser-session correlation the governed start result reported (prefilled from the last successful start; otherwise type it explicitly — it is never guessed).</p>
+    <label for="recover-work-item">Work Item (exact identity)</label>
+    <input type="text" id="recover-work-item" autocomplete="off" spellcheck="false" placeholder="CTRL-0XX">
+    <label for="recover-tab-id">tabId (the exact start-result correlation)</label>
+    <input type="number" id="recover-tab-id" min="1" step="1" placeholder="e.g. 7">
+    <button type="button" id="invoke-recover" class="invoke" disabled>Invoke RecoverZaiHungWorker</button>
+  </section>
+
+  <section id="evidence-panel">
+    <h2>Evidence log</h2>
+    <p class="hint">One deterministic JSON line per invocation: sequence, ISO-8601 timestamp, exact request kind, the request verbatim (including the exact governed prompt), the typed response verbatim, and the tab/session correlation. The log lives in this page's memory only (never persisted, never sent anywhere). No credential or provider token can appear on this surface by construction. Copy it for the Architect review.</p>
+    <pre id="evidence-log" aria-label="evidence log"></pre>
+    <div class="row">
+      <button type="button" id="copy-evidence">Copy evidence (JSONL)</button>
+      <button type="button" id="clear-evidence">Clear log</button>
+    </div>
+    <p id="copy-result" class="hint hidden"></p>
+  </section>
+
+  <script type="module" src="harness.js"></script>
+</body>
+</html>

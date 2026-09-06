@@ -37,13 +37,13 @@ DISPATCH_CMD = DomainCommand(work_item="CTRL-002", command=CommandName.DISPATCH)
 
 
 class RealRepositoryDomainTests(unittest.TestCase):
-    def test_real_repository_reconstructs_ctrl_013_complete(self) -> None:
+    def test_real_repository_reconstructs_ctrl_014_ready(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
-        self.assertEqual(item.identity.work_item, "CTRL-013")
-        self.assertEqual(item.identity.work_order_path, "spec/work-items/CTRL-013.md")
+        self.assertEqual(item.identity.work_item, "CTRL-014")
+        self.assertEqual(item.identity.work_order_path, "spec/work-items/CTRL-014.md")
         self.assertEqual(item.identity.repository, "payswapdotorg/controller")
-        self.assertIs(item.lifecycle, LifecycleState.COMPLETE)
-        self.assertFalse(item.eligibility.eligible)
+        self.assertIs(item.lifecycle, LifecycleState.READY)
+        self.assertTrue(item.eligibility.eligible)
         self.assertEqual(
             item.completed,
             (
@@ -70,12 +70,22 @@ class RealRepositoryDomainTests(unittest.TestCase):
     def test_real_repository_reconstruction_is_deterministic(self) -> None:
         self.assertEqual(reconstruct_domain(REPO_ROOT), reconstruct_domain(REPO_ROOT))
 
-    def test_real_repository_refuses_dispatch_after_completion(self) -> None:
-        """Post-reconciliation demonstration: the completed item is
-        ineligible and the domain refuses to dispatch it."""
+    def test_real_repository_refuses_commands_targeting_completed_items(self) -> None:
+        """Post-activation demonstration: commands route ONLY to the
+        active governed item — the completed predecessor (or any other
+        non-active item) is refused, never re-dispatched."""
         item = reconstruct_domain(REPO_ROOT)
-        with self.assertRaises(IneligibleDispatchError):
+        with self.assertRaises(CommandTargetError):
             item.handle(DomainCommand("CTRL-013", CommandName.DISPATCH))
+
+    def test_real_repository_active_ready_item_dispatches(self) -> None:
+        """The activated CTRL-014 item is READY and eligible: the
+        deterministic dispatch transition applies (an in-memory domain
+        event only — no repository mutation, no provider I/O)."""
+        item = reconstruct_domain(REPO_ROOT)
+        event = item.handle(DomainCommand("CTRL-014", CommandName.DISPATCH))
+        self.assertEqual(event.from_state, LifecycleState.READY)
+        self.assertEqual(event.to_state, LifecycleState.DISPATCHED)
 
     def test_real_repository_allowed_commands_delegate_to_table(self) -> None:
         item = reconstruct_domain(REPO_ROOT)
@@ -546,9 +556,9 @@ class DomainCLITests(unittest.TestCase):
         result = self._run("domain", "--repo", str(REPO_ROOT))
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("domain model: OK", result.stdout)
-        self.assertIn("active work item: CTRL-013", result.stdout)
-        self.assertIn("lifecycle state: COMPLETE", result.stdout)
-        self.assertIn("dispatch eligibility: INELIGIBLE", result.stdout)
+        self.assertIn("active work item: CTRL-014", result.stdout)
+        self.assertIn("lifecycle state: READY", result.stdout)
+        self.assertIn("dispatch eligibility: ELIGIBLE", result.stdout)
 
     def test_domain_contradictory_repository_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

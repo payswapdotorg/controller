@@ -1,0 +1,146 @@
+/* The operator live-test harness page (CTRL-014 live-evidence
+ * invocation work order). Test surface only — deliberately visually
+ * distinct from the production popup so it can never be mistaken for
+ * the runtime composition surface. */
+
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
+
+body {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 20px 48px;
+  background: #fbf7ee;
+  color: #2b2416;
+}
+
+.banner {
+  border: 2px dashed #b58a2a;
+  background: #fff6dd;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.banner h1 {
+  font-size: 18px;
+  margin: 0 0 6px;
+}
+
+.banner p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+section {
+  border: 1px solid #d8cfae;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+section h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+.gate {
+  display: block;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.hint {
+  color: #6a5f45;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 6px 0;
+}
+
+.error {
+  color: #a03030;
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.hidden {
+  display: none;
+}
+
+label {
+  display: block;
+  font-size: 12px;
+  margin: 8px 0 2px;
+  font-weight: 600;
+}
+
+input[type="text"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid #c9bfa0;
+  border-radius: 4px;
+  background: #fffdf8;
+}
+
+textarea {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid #b58a2a;
+  background: #fff;
+  cursor: pointer;
+}
+
+button.invoke {
+  background: #2b5b8a;
+  border-color: #2b5b8a;
+  color: #fff;
+  margin-top: 10px;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.invoke:disabled {
+  background: #7a92a8;
+  border-color: #7a92a8;
+}
+
+#evidence-log {
+  background: #171410;
+  color: #d9e6c8;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-height: 48px;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}

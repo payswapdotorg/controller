@@ -1,12 +1,15 @@
-# Pectoraux Controller — Browser Operator Surface (CTRL-012 + CTRL-013)
+# Pectoraux Controller — Browser Operator Surface (CTRL-012 + CTRL-013 + CTRL-014)
 
-This directory is the Browser Control Surface Foundation (CTRL-012)
-plus the GitHub browser-app integration (CTRL-013): a Chromium browser
-extension that acts as the Controller's **operator/client surface**.
-It registers Workers and Architects, connects GitHub through a
-supported OAuth authorization (no pasted tokens), selects the
-controlled GitHub repository, and presents the repository-derived
-Controller authority state and repository evidence.
+This directory is the Browser Control Surface Foundation (CTRL-012),
+the GitHub browser-app integration (CTRL-013), and the Z.ai browser
+Worker adapter (CTRL-014): a Chromium browser extension that acts as
+the Controller's **operator/client surface**. It registers Workers
+and Architects, connects GitHub through a supported OAuth
+authorization (no pasted tokens), selects the controlled GitHub
+repository, presents the repository-derived Controller authority
+state and repository evidence, and executes the governed Z.ai Worker
+session sequence against an already-authenticated human chat.z.ai
+session.
 
 The extension is **non-authoritative by construction**. Repository
 authority always wins: roadmap, work orders, machine state, lifecycle,
@@ -31,6 +34,31 @@ them.
   credentials), and discover whether provider tabs are already open
   (URL-origin matching only — no DOM access, no content scripts; the
   Z.ai/ChatGPT adapters arrive with CTRL-014/CTRL-015).
+- **Z.ai Worker adapter (CTRL-014)**: the governed provider-page
+  execution surface for the Worker role at `chat.z.ai`. The adapter
+  discovers/opens/focuses an **already-authenticated** chat.z.ai
+  session (human authentication is out of band), runs the exact
+  new-session sequence — `Agent` selection, `GLM-5.3` / model `5.3`
+  selection (the live model selector is located through its
+  live-observed generic candidates — the `Select a model`
+  aria-label, else the `model-selector-*` id family — never a
+  hardcoded model-specific id; the exact option is resolved by both
+  its exact `GLM-5.3` text token and its `data-value`), verbatim
+  governed-prompt entry, send, and OBSERVED
+  submission confirmation — performs only the bounded known-popup
+  `Enter` recovery (pressed ONLY when the known submission-blocking
+  popup is OBSERVED, exactly once per retry attempt, with the
+  dismissal verified by post-action observation) and then RESTARTS
+  the full preparation sequence and re-sends the exact prompt
+  (the frozen Work Order: after dismissal, restart from Agent
+  selection, model selection, exact prompt entry, send and
+  submission verification; an already-confirmed
+  submission is never resent), and recovers a
+  hung worker only through `Stop` -> verified stopped -> the fixed
+  message `continue` -> verified acceptance. Every step is verified by
+  post-action observation; unknown dialogs, authentication
+  interruption, ambiguous surfaces and exhausted budgets fail closed
+  typed. All Z.ai locators live in `src/zaiAdapter.js` alone.
 - **Repository selection**: canonical `owner/name` identity, strictly
   validated (ambiguous forms fail closed).
 - **Controller state display**: reads the two repository authority
@@ -223,6 +251,14 @@ a silent substitution).
 - Host `https://github.com/*` — **only** the two OAuth device-flow
   endpoints (`/login/device/code`, `/login/oauth/access_token`). No
   content scripts, no scripting API, no GitHub page automation.
+- Host `https://chat.z.ai/*` — **only** the CTRL-014 Z.ai Worker
+  adapter's page surface: exactly one declared content script
+  (`page/zaiPage.js`, `document_idle`) exposing the closed DOM
+  primitive vocabulary (probe/click/clickIndex/type/pressEnter) to
+  the adapter's typed bridge. No `scripting` API, no dynamic
+  injection, no cookies, no webRequest. ChatGPT has NO host
+  permission and NO content script until CTRL-015 is explicitly
+  activated.
 - OAuth scope `public_repo` — read/write access to public
   repositories: the minimum single scope that covers discovery,
   evidence reads, and the three authorized mutations on public
@@ -242,6 +278,351 @@ Press **Open** to open the provider site for human authentication
 (authenticate in the provider's own UI; the extension neither needs
 nor accepts your credentials). Press **Tabs** to see whether provider
 tabs are already open (display-only observation).
+
+## The Z.ai browser Worker adapter (CTRL-014)
+
+The adapter is the Worker-role execution surface at
+`https://chat.z.ai`. It is exercised through the typed message
+boundary (`ObserveZaiSession`, `StartZaiWorkerSession`,
+`RecoverZaiHungWorker`); no popup control drives it (runtime
+composition is CTRL-016 scope).
+
+### Prerequisites (human steps, out of band)
+
+1. Chromium with this extension loaded unpacked.
+2. Register a Worker with provider `Z.ai` (`zai` /
+   `https://chat.z.ai`) through the popup.
+3. Open `https://chat.z.ai` in a normal browser tab and **sign in as
+   the human operator**. The extension never sees, stores, or enters
+   credentials; authentication is entirely yours. One authenticated
+   tab is the supported configuration (zero tabs: the adapter opens
+   one and fail-closes `AUTHORIZATION_REQUIRED` until you
+   authenticate; two or more tabs without an active session: the
+   adapter fail-closes `AMBIGUOUS_STATE` — close or focus exactly one).
+4. Validate the locators for your session with
+   `ObserveZaiSession`: an authenticated session must report
+   `ready-for-input` (or `working` while generating). Any
+   `ambiguous` / `unexpected-dialog` result means the provider surface
+   differs from the adapter's declared locators — stop there and fix
+   the adapter before dispatching work (that is the documented
+   first-authenticated-use verification).
+
+### The governed sequence (exactly this order)
+
+`StartZaiWorkerSession { worker, workItem, prompt }`:
+
+1. find/open/focus the authenticated `chat.z.ai` tab;
+2. verify the authenticated state (fail-closed otherwise);
+3. select the `Agent` control — the sidebar mode-toggle Agent pill
+   (LIVE-OBSERVED structure; resolved structurally, clicked once,
+   and verified ONLY by the pill becoming the active mode pill —
+   `data-active="true"`; an already-active pill issues no click);
+4. select model `GLM-5.3` (provider model identifier `5.3`,
+   surface-encoded by the provider as the option-row `data-value`
+   `glm-5.3`): the live model selector trigger is located through
+   its live-observed generic candidates (the `aria-label="Select a
+   model"` trigger, else the `model-selector-*` id family — the
+   trigger id embeds the SELECTED model and changes with the
+   selection, so it is never hardcoded), the exact `GLM-5.3`
+   option is resolved by BOTH its exact leading text token and its
+   `data-value`, and the selection is verified ONLY by the trigger
+   displaying the `GLM-5.3` label AND carrying the selected-model
+   id (`#model-selector-glm-5_3-button`) — a click is never
+   evidence, and an already-`GLM-5.3` surface issues no trigger
+   click;
+5. enter the exact governed prompt **verbatim** (byte-identical
+   read-back before any send — a rewritten prompt is never
+   submitted);
+5b. **pre-send gate** (continuation 6): a FRESH decisive composer
+   read immediately before the send — the exact prompt must STILL be
+   present, verbatim. An unreadable, empty, or rewritten composer is
+   NEVER sent: the provider can discard the input state between the
+   read-back and the send, and a send click on an empty composer
+   (the operator-observed failure) is refused before it happens;
+6. send;
+7. verify ACTUAL submission from the resulting provider state —
+   MESSAGE-EXCLUSIVE evidence only: an exact user-message row or
+   containment in the `[role="log"]` message region, with a
+   DECISIVELY empty composer (an absent or ambiguous composer read
+   is never "cleared"). Broad region matches (`main`,
+   class-scan surfaces) are NEVER acceptance evidence — a
+   sidebar/history surface whose text contains the prompt proved
+   nothing in the live false positive this continuation corrects. A
+   send click alone is never evidence of success.
+
+### Bounded recovery
+
+- **The discarded input state** (the continuation-6 second observed
+  failure mode): after a send attempt the composer can read
+  decisively empty while the submission is NOT confirmed by message
+  evidence (the operator's captured post-run DOM: an empty
+  `#chat-input` and a disabled `#send-message-button` — the prompt
+  never entered). The adapter then re-establishes the input state
+  through the provider's Agent/compose UI control — the
+  operator-described circular control, structurally resolved as the
+  unique `data-active` button of the composer form containing
+  `#chat-input` (LIVE-OBSERVED: that form renders exactly three
+  buttons — upload, the compose toggle, and send). The control must
+  resolve to exactly one element (never a blind click); the click is
+  verified only by the composer becoming a visible enabled input.
+  The next bounded attempt re-types the exact prompt
+  byte-for-byte, re-reads it byte-for-byte, and only then resends —
+  a second bounded submission-recovery path alongside the popup
+  path, never a blind resend, and never a duplicate of an
+  already-confirmed submission (when the message evidence already
+  holds the exact prompt with a decisively-empty composer, nothing
+  is re-typed or resent).
+- **Known submission-blocking popup** (a modal dialog observed while
+  verifying a submission, matching the known shape and carrying no
+  auth/error text): the adapter presses `Enter` once for the current
+  attempt, verifies dismissal, and then RESTARTS THE FULL
+  PREPARATION SEQUENCE — the frozen Work Order's explicit recovery:
+  "After dismissal it must restart from Agent selection, model
+  selection, exact prompt entry, send and submission verification."
+  The idempotent re-selection re-establishes every governed ground
+  truth the popup interaction may have disturbed; when the composer
+  still holds the exact prompt (the popup blocked the submission) it
+  is sent as-is, and when the popup consumed it the prompt is
+  re-typed with the byte-identical read-back re-verified before the
+  resend. When the
+  dismissed popup reveals the submission already landed (the
+  conversation holds the exact prompt, the composer is cleared)
+  NO resend happens — the governed prompt is never submitted twice.
+  The REAL known popup (the provider's "Currently in peak hours"
+  capacity modal, LIVE-OBSERVED in the operator's captured run)
+  materializes only when the ASYNCHRONOUS chat-completion error
+  arrives — after the optimistic landing — so the acceptance is
+  additionally held through a bounded async-outcome window (a popup
+  or the provider's prompt-restore observed in the window re-opens
+  the bounded recovery; a quiet window records the acceptance).
+  Default budget: 3 attempts. Auth-shaped or error-shaped dialogs,
+  dialogs at any other time (including hung-worker recovery),
+  multiple simultaneous dialogs, or an
+  exhausted budget fail closed (`AUTHENTICATION_INTERRUPTED` /
+  `PROVIDER_ERROR` / `UNKNOWN_DIALOG` / `RETRY_EXHAUSTED`) — the
+  adapter never blindly presses keys (no key is ever issued on a
+  timer) and never pretends submission
+  succeeded. The absence of a popup is NEVER acceptance evidence:
+  acceptance is always the verified provider-state confirmation
+  (the conversation state advancing past the dispatch baseline with
+  the exact prompt landed as a user-message row, the Send->Stop
+  action-control transition corroborating, the composer decisively
+  cleared — and, on a fresh session, the chat object created).
+- **Hung worker** (`RecoverZaiHungWorker { worker, workItem, tabId }`):
+  verify generation is in progress, activate the provider `Stop`
+  control, VERIFY generation stopped, submit the FIXED message
+  `continue` (no alternate wording exists), and verify acceptance:
+  the acceptance signal is the conversation state advancing past the
+  continue-dispatch baseline with the exact fixed `continue` landed
+  as a user-message row AND the provider's working state
+  corroborating (the Stop control returning with the composer
+  decisively cleared — the agent resumed working on the fixed
+  message). A generation that visibly resumes while the `continue`
+  row never lands fails closed (a foreign generation is not our
+  recovery); a recovery whose message lands without the resumed
+  working state is held to the bounded observation window and fails
+  closed at its exhaustion. No key is ever pressed in this flow (a
+  dialog visible during recovery fails closed
+  `UNKNOWN_DIALOG` — the bounded popup recovery applies only to
+  submission). Default budget: 2
+  attempts. Any unverified transition is a typed governance hold.
+
+### Typed observations
+
+`ObserveZaiSession { worker }` reports the frozen thirteen-state
+vocabulary: `authentication-required`, `session-missing`,
+`ready-for-input`, `working`, `waiting`, `stopped`,
+`prompt-submitted`, `prompt-unconfirmed`,
+`expected-blocking-dialog`, `unexpected-dialog`,
+`human-verification-required`, `ambiguous`, `provider-error` —
+each with the observed tab id. The `human-verification-required`
+state (CTRL-014 continuation 23, the chat-tab baseline) is the
+provider's INTERACTIVE human-verification gate — the body-level
+Aliyun captcha popup (a slider puzzle injected as a direct `<body>`
+child, OUTSIDE the provider app DOM, carrying no `role="dialog"` —
+the dialog channel never sees it). It holds the GENERATION of an
+unauthenticated Chat submission (the row lands and the action slot
+swaps, but the completion waits for the human); only the human can
+solve it, so the adapter never tries — the typed operator gate
+(`HUMAN_VERIFICATION_REQUIRED`, terminal: complete the puzzle in
+the provider tab out of band, then re-invoke).
+
+### Provider observations (locator provenance)
+
+LIVE-OBSERVED on the real provider surface (2026-09-05, unauthenticated
+landing state — verified live by the worker probe):
+
+| Surface | Locator | Observed |
+|---|---|---|
+| Composer | `#chat-input` (textarea, placeholder "How can I help you today?" unauthenticated / "Send a Message" on the authenticated Agent surface) | visible on the landing page; the id is the stable locator (the placeholder varies by surface/mode) |
+| Send control | `#send-message-button` (`type="submit"`, `aria-label="Send Message"` on the authenticated surface) | disabled until the composer has text; activated only after the verified prompt read-back |
+| Model selector trigger | `button[aria-label="Select a model"]`, else `button[id^="model-selector-"][id$="-button"]` | LIVE-OBSERVED 2026-09-06 (closed state AND opened menu): exactly one trigger; its id embeds the SELECTED model's `data-value` with `.`->`_` (live unauthenticated: `#model-selector-x-preview-l-button`, text `GLM-5.3-Flash`; operator's authenticated Agent surface: `#model-selector-glm-5_2-button`, GLM-5.2 displayed) — the id is NOT a stable locator and is never hardcoded |
+| Model options | `button[aria-label="model-item"]` carrying `data-value` | LIVE-OBSERVED 2026-09-06 (menu open): rows `x-preview-l` / `glm-5.3` / `glm-5.2`; the exact GLM-5.3 row = `button[aria-label="model-item"][data-value="glm-5.3"]` (leading text token exactly `GLM-5.3`); GLM-5.3 and GLM-5.2 are disabled unauthenticated, enabled authenticated |
+| Selected-model trigger id | `#model-selector-glm-5_3-button` | the trigger id the live surface carries once GLM-5.3 is selected (the id-family ground truth for post-selection verification, with the trigger displaying the `GLM-5.3` label) |
+| Auth markers | buttons with exact text `Sign in` / `Log in` / `Sign up` | present unauthenticated |
+| Modal dialogs | `[role="dialog"], dialog` | the modal overlay containers |
+| Human-verification gate (c23) | `#aliyunCaptcha-window-popup` | LIVE-OBSERVED 2026-09-06 (the unauthenticated Chat submission flow): a body-level Aliyun captcha popup (direct `<body>` child, no `role="dialog"` — invisible to the dialog channel) holding the generation until the human solves the slider; the adapter never interacts with it |
+| Assistant row (c23) | `.chat-assistant` | LIVE-OBSERVED 2026-09-06: the rendered last provider response — the completion-error surface ("No response, Please try again later. ...") with action-slot facts identical to a successful completion |
+| Sidebar shell | `#sidebar` | the app sidebar root (both sidebar states) |
+| Mode toggle (both sidebar states) | `#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type` | EXACTLY ONE match — the Agent pill, second of the two-button pill pair (LIVE-OBSERVED 2026-09-06: resolves to exactly one element on the real surface) |
+| Mode-pill active marker | `#sidebar button[data-active="true"]:not([id]):nth-of-type(2):last-of-type` | zero matches while Chat is active; flips to exactly one when Agent mode activates |
+| Mode-pill pair | two `<button>` pills, Chat first, Agent second | both ALWAYS carry `data-active` (`"true"`/`"false"`); expanded sidebar renders the labels `Chat`/`Agent` (the provider's own i18n renders `Agent_Mode` as `Agent`); the collapsed sidebar renders icon-only pills (empty text); the pills have no id, no aria-label, no role; clicking the Agent pill switches the app into Agent mode |
+
+AUTHENTICATED-SURFACE-DECLARED (verified by the
+first-authenticated-use step above; fail closed when absent or
+ambiguous — a wrong declared locator can only produce a typed
+refusal, never an incorrect action):
+
+| Surface | Candidate locators |
+|---|---|
+| Stop control | `button[aria-label="Stop"]`, `button[title="Stop"]`, exact text `Stop` |
+| Conversation log | `[role="log"]`, `[class*="conversation"]`, `[class*="message-list"]`, `main` |
+| User messages | `[class*="user"][class*="message"]`, `[data-role="user"]`, `[class*="user-message"]` |
+
+Agent-selection semantics (LIVE-OBSERVED 2026-09-06, after the
+2026-09-05 operator live run exposed the pre-correction declared
+locators as non-matching on the real authenticated surface): the
+adapter resolves the sidebar mode-toggle Agent pill structurally
+(the second-and-last button of the two-button `data-active` pill
+pair inside `#sidebar` — works for both the expanded labeled
+sidebar and the collapsed icon-only sidebar), falls back to the
+unique sidebar mode pill whose exact text is `Agent` (the expanded
+labeled state), and verifies the selection ONLY by the pill
+becoming the active mode pill (`data-active="true"`) — a click is
+never evidence of the mode switch, and an Agent pill that is
+already active issues no click (clicking it would open a fresh
+provider Agent-mode session for nothing).
+
+### The chat-tab reference baseline (CTRL-014 continuation 23)
+
+The ARCHITECT-directed reference implementation (PR #6 comments
+5560253287 + 5560261256): the ordinary UNAUTHENTICATED Chat surface,
+LIVE-PROVEN end-to-end by the worker's real-browser experiment
+(2026-09-06 15:41-16:09Z). The adapter's `startWorkerSession`
+accepts `mode: "chat"` (the reference path) alongside the absent
+default `mode: "agent"` (the governed Work Order contract above).
+The two modes share the ENTIRE submission/verification/recovery
+lifecycle; the only differences are the explicitly isolated AGENT
+DELTA: the authenticated-session gate, the Agent-pill selection,
+the model selection, and the provisioning wait. The chat reference
+path skips all four — the ordinary Chat tab is ready-for-input at
+rest (LIVE-OBSERVED: a visible enabled composer beside the "Sign
+in" call-to-action; the auth markers are the chat baseline's
+accepted state, never a refusal for `mode: "chat"`, and never
+inferred onto the Agent contract).
+
+The same experiment established four new contract laws (each with
+focused regressions): **(1) the human-verification gate** — every
+unauthenticated Chat submission's generation is held by the
+body-level Aliyun captcha popup described above; a machine-perfect
+slider solve is rejected by the provider's risk engine after the
+first pass, so the gate is human-only BY DESIGN (the adapter's
+typed refusal is the only honest outcome); **(2) the
+completion-error rendering** — after the gate is passed the
+completion can fail server-side, with the assistant row
+(`.chat-assistant`) rendering "No response, Please try again
+later. SyntaxError: ..." while the action-slot facts (the send
+control back, the Stop gone, the Regenerate visible) are
+INDISTINGUISHABLE from a successful completion — the assistant-row
+text is the only completion-outcome discriminator, checked in the
+async-outcome hold before the completed-generation early exit; **(3)
+the turn-index badge** — the provider renders the CURRENT
+(in-flight) turn's user row as the exact prompt followed by
+whitespace and the `N/M` message index (the live row read `"... the
+word OK.         2/2"`); the exact-row predicate accepts both the
+bare and the badge-suffixed forms (a near-miss and a foreign text
+still fail); **(4) the retained-draft Stop surface** — a dispatch
+whose input pipeline did not consume the draft can leave the action
+slot swapped to Stop while the composer retains the text and no row
+lands; the watch's exhaustion reports the slot fact in its typed
+detail (never ok, never a blind resend). The tab itself is STABLE
+through the whole lifecycle — the URL advance to `/c/<chatId>` is a
+`history.replaceState`, not a navigation: no reload, no tab
+replacement, the content-script world persists.
+
+### Known limitations
+
+- The session registry is in-memory (service-worker lifetime). A
+  service-worker restart loses it; later `RecoverZaiHungWorker`
+  references fail closed `SESSION_UNKNOWN` (restart the session with
+  `StartZaiWorkerSession`; the browser tab's conversation is
+  unaffected — it is the human/provider's state, never ours). A
+  registry entry whose correlated tab has closed, or whose tab
+  navigated away from the provider origin, is a STALE reference:
+  a same-correlation `StartZaiWorkerSession` fails closed
+  `STALE_REFERENCE` (never `ok:true alreadyActive`) — the dead
+  session is never re-reported as active and never silently
+  re-established; the full governed sequence re-runs only after the
+  in-memory registry is lost on service-worker restart.
+- The authenticated-surface locators (Stop, conversation, user
+  messages) were declared, not live-observed (human authentication
+  is out of band for the worker). They are verified by the
+  documented `ObserveZaiSession` check at first authenticated use,
+  and every one of them fails closed rather than guessing. (The
+  sidebar mode toggle — the Agent selection path — IS live-observed
+  as of 2026-09-06, from the real origin in both sidebar states plus
+  the provider's own front-end code; see the provenance table.)
+- The adapter submits into the CURRENT conversation of the focused
+  chat.z.ai tab; it does not create new chats (not part of the
+  governed sequence).
+- Settle budgets (polls per step, attempt counts, recovery counts)
+  are constructor-injectable constants; the defaults are frozen in
+  `src/zaiAdapter.js` (`DEFAULTS`).
+
+### The operator live-test harness (CTRL-014 live evidence)
+
+A **developer/operator TEST page only** — `harness/harness.html` —
+exists to invoke the EXISTING CTRL-014 message boundary against the
+real installed extension and record reproducible live evidence for
+the Architect review (the live-evidence invocation work order, PR #6
+comment 5553979616). It is deliberately outside the production
+surface: the manifest does not declare it, the popup does not link
+it, and it adds no runtime orchestration (that is CTRL-016 scope).
+
+**Open it (operator, after the prerequisites above):**
+
+1. Load the extension unpacked and register the `Z.ai` Worker (popup).
+2. Authenticate `https://chat.z.ai` in a normal tab (human, out of band).
+3. Find the extension id (`chrome://extensions` → Pectoraux Controller
+   → ID) and open
+   `chrome-extension://<extension-id>/harness/harness.html`.
+4. Check the operator acknowledgment — invocations stay disabled
+   until you do. You are declaring a deliberate live test with the
+   exact Controller-generated governed prompt.
+
+**Use it:**
+
+- **ObserveZaiSession** — one button; the typed observation for the
+  selected Worker is recorded as evidence.
+- **StartZaiWorkerSession** — paste the Work Item identity and the
+  EXACT Controller-generated governed prompt into the prompt field.
+  The harness carries the prompt **verbatim** (a live character count
+  is the readback; it never authors, rewrites, normalizes, or
+  substitutes text). The result — submission confirmation with
+  attempts/popup-dismissals/generation, an idempotent
+  already-active report, or a typed refusal — is recorded verbatim.
+- **RecoverZaiHungWorker** — the `tabId` is prefilled from the exact
+  session correlation the last SUCCESSFUL start result reported (a
+  refusal or malformed result never prefills anything; type the exact
+  correlation yourself then). No new recovery semantics exist here —
+  the page sends exactly the existing frozen request.
+- **Evidence log** — one deterministic JSON line per invocation
+  (fixed key order: `seq`, `timestamp`, `requestKind`, `request`
+  verbatim including the prompt, `response` verbatim, `correlation`).
+  The log lives in the page's memory only — never persisted, never
+  sent anywhere; no credential or provider token can appear on this
+  surface by construction. **Copy evidence (JSONL)** puts the whole
+  log on your clipboard for the Architect review.
+
+**Discipline (audited):** the harness page's only extension API is
+`chrome.runtime.sendMessage` with the frozen message forms (the three
+CTRL-014 kinds plus `GetConfiguration` for the Worker list); it
+carries no provider locator, no provider origin, and no provider
+interpretation (all provider knowledge stays in `src/zaiAdapter.js`);
+it performs no network, storage, or tab access of its own. The pure
+request/evidence plumbing is `src/harnessCore.js` (node-tested in
+`tests/harness.test.js`; every request it builds validates at the
+real message boundary).
 
 ## The typed message boundary
 
@@ -275,6 +656,9 @@ mutate nothing.
 | `CreateBranch` | `repository`, `branch`, `fromSha` | `ref` (requires live session) |
 | `OpenPullRequest` | `repository`, `branch`, `baseBranch`, `baseSha`, `title`, `body` | `pullRequest` (requires live session) |
 | `MergePullRequest` | `repository`, `prNumber`, `workItem`, `baseRef`, `baseSha`, `headSha` | typed `RUNTIME_AUTHORIZATION_UNAVAILABLE` refusal (requires live session; the runtime-authorization handoff is not composed — CTRL-016 scope — so the merge POST is unreachable from the message surface with zero network) |
+| `ObserveZaiSession` | `worker` | `observation` (typed session state, tabId) |
+| `StartZaiWorkerSession` | `worker`, `workItem`, `prompt` | `session` (worker/workItem/tabId correlation) + `submitted` (attempts, popupDismissals, generation) |
+| `RecoverZaiHungWorker` | `worker`, `workItem`, `tabId` | `recovered` (attempts, the fixed message, generation) + `session` |
 
 The three mutation kinds are the complete mutation vocabulary — no
 approve/comment/close/complete/advance kind exists. They are transport
@@ -290,6 +674,9 @@ Error codes: `UNKNOWN_MESSAGE`, `MALFORMED_MESSAGE`,
 `RATE_LIMITED`, `STALE_REFERENCE`, `MUTATION_REFUSED`,
 `RUNTIME_AUTHORIZATION_UNAVAILABLE`,
 `GITHUB_UNAVAILABLE`, `GITHUB_MALFORMED`, `GITHUB_NOT_FOUND`,
+`PAGE_UNAVAILABLE`, `PAGE_MALFORMED`, `AUTHENTICATION_INTERRUPTED`,
+`UNKNOWN_DIALOG`, `AMBIGUOUS_STATE`, `RETRY_EXHAUSTED`,
+`SESSION_UNKNOWN`, `PROVIDER_ERROR`,
 `INTERNAL_ERROR`.
 
 ## Source layout
@@ -297,7 +684,9 @@ Error codes: `UNKNOWN_MESSAGE`, `MALFORMED_MESSAGE`,
 ```
 extension/
   manifest.json          MV3 manifest: storage + tabs permissions, three
-                         GitHub host permissions, oauth2 deployment
+                         GitHub host permissions + the chat.z.ai
+                         provider host, ONE content script
+                         (page/zaiPage.js), oauth2 deployment
                          section (public client id + minimal scope)
   package.json           ES-module declaration for the Node test runner
                          (no build step, no dependencies)
@@ -318,8 +707,27 @@ extension/
                          the merge transport is pure — one POST, zero
                          reads, frozen method, exact-head sha pin)
     service.js           the background service worker message router
+    zaiAdapter.js        the Z.ai browser Worker adapter — the ONLY
+                         place Z.ai provider knowledge lives (locators,
+                         the governed new-session sequence, bounded
+                         popup + hung-worker recovery, the in-memory
+                         session registry)
+    zaiPageBridge.js     the typed service-worker-to-tab channel
+    harnessCore.js       the operator live-test harness PURE plumbing
+                         (frozen request forms, exact-correlation
+                         extraction, deterministic evidence records;
+                         provider-agnostic, DOM-free, chrome-free)
+  page/
+    zaiPage.js           the single content script (matched only to
+                         https://chat.z.ai/*): the closed-vocabulary
+                         DOM primitive executor
   popup/
     popup.html/js/css    the operator UI (message-boundary only)
+  harness/
+    harness.html/js/css  the OPERATOR LIVE-TEST page (developer/test
+                         surface only — not manifest-declared, not
+                         popup-linked; invokes the frozen CTRL-014
+                         message kinds and records the evidence log)
   tests/                 node --test suite (offline, deterministic)
 ```
 
@@ -363,9 +771,18 @@ be an inferred fallback). To recover manually:
 - No bypassing provider authentication, CAPTCHAs, anti-bot controls,
   or rate limits; no undocumented private provider APIs (rate limits
   fail closed as `RATE_LIMITED`).
-- No provider page DOM automation (selectors, model selection, prompt
-  submission, popup/hang recovery) — that is CTRL-014/CTRL-015 scope,
-  inside provider adapters, not here.
+- No provider page automation OUTSIDE the authorized adapters: the
+  Z.ai Worker adapter (CTRL-014) is the only DOM-driving surface, its
+  locators live in `src/zaiAdapter.js` alone, its page channel is the
+  single closed-vocabulary content script (`page/zaiPage.js`, matched
+  only to `https://chat.z.ai/*`), and ChatGPT remains un-automated
+  until CTRL-015 is explicitly activated.
+- No credential automation of provider sessions: human
+  authentication is out of band; the adapter detects
+  authentication-required surfaces and fails closed
+  (`AUTHORIZATION_REQUIRED` / `AUTHENTICATION_INTERRUPTED`), never
+  filling login forms, never storing cookies, never bypassing
+  provider security controls.
 - No GitHub page-click automation where supported APIs exist; the
   github.com host permission covers exactly the two OAuth endpoints.
 - No second merge policy: `MergePullRequest` is the transport of an
