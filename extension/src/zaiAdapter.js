@@ -828,6 +828,39 @@ export function createZaiAdapter({
   }
 
   /**
+   * @private — CONTINUATION 20 (PR #6 comment 5559533083, the
+   * superseding execution directive): the provider's CONVERSATION
+   * STATE — the count of user-message turns rendered on the
+   * surface, the DOM projection of the operator-reported
+   * `chat.history.messages` (the UUID-keyed message nodes; the
+   * user-message rows are the rendered projection of the
+   * user-role nodes — the object itself lives in closure-scoped
+   * provider stores, unreachable through the supported extension
+   * surface, so the row projection IS the observable state). The
+   * count is read as the MAXIMUM across the user-message
+   * candidates: the candidates are overlapping projections of the
+   * SAME rows (a candidate matching zero rows returns a decisive
+   * empty array — the page script's texts mode never guesses), so
+   * the maximum is the faithful row count regardless of which
+   * candidate the live surface actually matches. Returns null when
+   * NO candidate read is structurally usable — an unreadable
+   * conversation state never advances (fail-closed: null is never
+   * greater than any baseline).
+   */
+  function userTurnCountOf(facts) {
+    let best = null;
+    for (const probe of EVIDENCE_PROBES) {
+      if (probe.name.startsWith("userMessageCandidate")) {
+        const texts = facts[probe.name]?.texts;
+        if (Array.isArray(texts)) {
+          best = Math.max(best ?? 0, texts.length);
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
    * The typed session-state classifier. `session` is the registry
    * record when the observation belongs to an active worker session
    * (null for a standalone observation). CONTINUATION 13 (PR #6
@@ -1378,27 +1411,45 @@ export function createZaiAdapter({
      * CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305 — the
      * superseded Send-reappearance/message-evidence state machine),
      * REVISED by CONTINUATION 16 (PR #6 review 5125198728 — the DIRECT
-     * Z.ai CHAT-STATE WORKFLOW): THE AGENT-START WATCH — the bounded
-     * watch for the provider-owned signal that the Z.ai Agent has
-     * ACTUALLY STARTED WORKING. THE DETECTOR (startSignalOf): the
-     * composer action slot rendering the Stop control (the send control
-     * absent — the provider's mutually exclusive slot machine) with the
-     * composer DECISIVELY EMPTY (the draft consumed — a prompt still
-     * held in the composer is the provider's own proof the submission
-     * was NOT consumed, so a Stop control over a text-holding composer
-     * is a foreign or unconsumed generation, never our start signal)
-     * AND, on a fresh session (the chat object did NOT exist at
-     * dispatch — the session URL was at the origin base), the CHAT
-     * OBJECT CREATED (the session URL advanced to /c/... — the
-     * provider's own computed proof the submission was ACCEPTED: the
-     * bundle-proven chat creation runs on the accepted first
-     * submission and is skipped by the refused one; review requirement
-     * 4 candidate (a), combined with (c) for confidence — a foreign
-     * generation over a discarded input on a fresh session has a Stop
-     * control and an empty composer but NO chat object, and is never
-     * our start signal). On an existing chat (the URL already at
-     * /c/... at dispatch) the chat-state conjunct is vacuous — the
-     * Stop-slot + empty-composer reading carries the signal alone.
+     * Z.ai CHAT-STATE WORKFLOW), REVISED AGAIN by CONTINUATION 20 (PR #6
+     * comment 5559533083 — the superseding execution directive: the
+     * operator's reported runtime object `chat` with `chat.id`,
+     * `history.currentId`, UUID-keyed `history.messages`, `role`,
+     * `parentId`, `childrenIds` — the provider's CONVERSATION STATE):
+     * THE AGENT-START WATCH — the bounded watch for the provider-owned
+     * signal that the Z.ai Agent has ACTUALLY STARTED WORKING. THE
+     * DETECTOR (startSignalOf), per the directive's hierarchy —
+     * prompt acceptance = the conversation state advancing with a new
+     * turn; generation start = the provider's working state as
+     * corroborating evidence: (i) THE CONVERSATION-STATE ADVANCEMENT
+     * (continuation 20): the user-message turn count advanced past the
+     * dispatch baseline AND the exact correlated text landed as a
+     * user-message row — the operator's `chat.history.messages`
+     * projection (the object itself lives in closure-scoped provider
+     * stores, unreachable through the supported extension surface;
+     * the rendered user rows ARE the observable conversation state,
+     * and the count delta is the new turn; a STALE exact row from a
+     * prior run never advances the count, a FOREIGN turn never
+     * carries the exact text); (ii) THE PROVIDER'S WORKING STATE,
+     * corroborating: the composer action slot rendering the Stop
+     * control (the send control absent — the provider's mutually
+     * exclusive slot machine); (iii) the composer DECISIVELY EMPTY
+     * (the draft consumed — a prompt still held in the composer is
+     * the provider's own proof the submission was NOT consumed, so a
+     * Stop control over a text-holding composer is a foreign or
+     * unconsumed generation, never our start signal); and (iv), on a
+     * fresh session (the chat object did NOT exist at dispatch — the
+     * session URL was at the origin base), the CHAT OBJECT CREATED
+     * (the session URL advanced to /c/... — the provider's own
+     * computed proof the submission was ACCEPTED: the bundle-proven
+     * chat creation runs on the accepted first submission and is
+     * skipped by the refused one — a foreign generation over a
+     * discarded input on a fresh session has a Stop control and an
+     * empty composer but NO chat object, and is never our start
+     * signal). On an existing chat (the URL already at /c/... at
+     * dispatch) the chat-state conjunct is vacuous — the
+     * conversation-advancement + Stop-slot + empty-composer reading
+     * carries the signal.
      * THE WATCH LOOP: rounds of bounded observation (the settle budget
      * per round) for the start signal or a decisive failure surface;
      * while the round is unresolved, ONE Enter is issued per
@@ -1454,15 +1505,46 @@ export function createZaiAdapter({
      *        already existed when the correlated text was dispatched
      *        (an existing chat's URL is already at /c/... — the
      *        chat-state conjunct is vacuous for the watch)
+     * @param {number} baselineUserTurns the count of user-message
+     *        turns rendered on the surface at the correlated text's
+     *        DISPATCH (the read the caller already holds — the
+     *        pre-send gate / the entered / the read-back facts): the
+     *        conversation-state ADVANCEMENT is measured against this
+     *        baseline (CONTINUATION 20, PR #6 comment 5559533083 —
+     *        "prompt acceptance = conversation state advances with a
+     *        new turn": a turn count that never advances past the
+     *        baseline never carries the new turn, so a STALE exact
+     *        row from a prior run is never the acceptance)
      * @returns {Promise<{ started?: object, refusal: object,
      *                    reestablished?: boolean }>}
      */
-    const watchAgentStart = async (tabId, correlate, chatExistedAtDispatch) => {
-      /** The start signal: the review's combined detector. */
+    const watchAgentStart = async (tabId, correlate, chatExistedAtDispatch, baselineUserTurns) => {
+      /**
+       * The start signal: the combined provider-state detector.
+       * CONTINUATION 20 (PR #6 comment 5559533083, the superseding
+       * execution directive): the signal's composition now follows
+       * the directive's hierarchy — the CONVERSATION-STATE
+       * ADVANCEMENT is the prompt-acceptance leg (the user-turn
+       * count advanced past the dispatch baseline AND the exact
+       * correlated text landed as a user-message row — the new turn
+       * is OURS, not a foreign turn; a stale exact row never
+       * advances the count, a foreign turn never carries the exact
+       * text), with the provider's working state (the Send→Stop
+       * action-slot transition, `agentStartedOf`) as the
+       * corroborating leg, the decisively empty composer (the
+       * consumed draft — never a text-holding composer under a
+       * foreign generation), and (a fresh session) the chat object
+       * created — the session URL advanced to /c/... (the
+       * bundle-proven server-acceptance routing that discriminates
+       * the refused submission's withdrawn local echo).
+       */
       const startSignalOf = (f) =>
         agentStartedOf(f) &&
         composerValueOf(f) === "" &&
-        (chatExistedAtDispatch || chatObjectCreatedOf(f) === true);
+        (chatExistedAtDispatch || chatObjectCreatedOf(f) === true) &&
+        userTurnCountOf(f) !== null &&
+        userTurnCountOf(f) > baselineUserTurns &&
+        messageEvidenceContains(f, correlate);
       /** One observation round: decisive on the start signal or a failure surface. */
       const observeRound = async () => {
         const decisive = (f) => {
@@ -1880,7 +1962,12 @@ export function createZaiAdapter({
         // THIS read (a landed accepted submission has created the chat
         // object — the URL advanced; a locally-echoed refused one has
         // not, and the watch's exhaustion diagnoses exactly that).
-        const outcome = await watchAgentStart(tabId, prompt, chatObjectCreatedOf(entered.facts) === true);
+        const outcome = await watchAgentStart(
+          tabId,
+          prompt,
+          chatObjectCreatedOf(entered.facts) === true,
+          userTurnCountOf(entered.facts) ?? 0
+        );
         if (outcome.started) {
           const recorded = recordSubmission(outcome.started);
           if (recorded.ok) {
@@ -1963,7 +2050,12 @@ export function createZaiAdapter({
       //    The chat state at DISPATCH (the pre-send gate read) makes
       //    the conjunct vacuous on an existing chat and strict on a
       //    fresh one.
-      const outcome = await watchAgentStart(tabId, prompt, chatObjectCreatedOf(gate.facts) === true);
+      const outcome = await watchAgentStart(
+        tabId,
+        prompt,
+        chatObjectCreatedOf(gate.facts) === true,
+        userTurnCountOf(gate.facts) ?? 0
+      );
       if (outcome.started) {
         const recorded = recordSubmission(outcome.started);
         if (recorded.ok) {
@@ -2199,16 +2291,25 @@ export function createZaiAdapter({
       //    recovery's session — is already at a chat route, so the
       //    conjunct is vacuous; a fresh surface requires the chat
       //    object), with the SAME timed Enter recovery and the SAME
-      //    bounded fail-closed window. The acceptance is the start
-      //    signal itself, never message-row evidence (superseded —
-      //    the `continue` row landing is context).
+      //    bounded fail-closed window. CONTINUATION 20 (PR #6 comment
+      //    5559533083): the acceptance is the CONJUNCT — the
+      //    conversation-state advancement (the new `continue` turn
+      //    landed: the count advanced past this readBack's baseline
+      //    AND the exact text present) with the provider-owned working
+      //    state (the Stop control) corroborating; a dropped row
+      //    never advances the count and fails the recovery closed.
       //
       //    The watch's EXHAUSTION deliberately does NOT loop into a
       //    fresh recovery attempt: a retry would re-Stop a RESUMED
       //    generation and re-send `continue` — the duplicate the
       //    frozen no-duplicate law exists to prevent. The typed
       //    refusal routes the operator instead.
-      const outcome = await watchAgentStart(tabId, ZAI_RECOVERY_MESSAGE, chatObjectCreatedOf(readBack.facts) === true);
+      const outcome = await watchAgentStart(
+        tabId,
+        ZAI_RECOVERY_MESSAGE,
+        chatObjectCreatedOf(readBack.facts) === true,
+        userTurnCountOf(readBack.facts) ?? 0
+      );
       if (outcome.started) {
         const record = registered ?? {
           worker,

@@ -436,13 +436,16 @@ test("THE FOREIGN-GENERATION FALSE POSITIVE on a fresh session: a Stop control o
   assert.ok(["PAGE_MALFORMED", "AMBIGUOUS_STATE", "RETRY_EXHAUSTED"].includes(result.error.code));
 });
 
-test("THE EXISTING-CHAT VACUITY LAW: on an existing chat (the session URL already at /c/<chatId> at dispatch) the start signal is the Stop slot + the decisively empty composer alone — the chat-state conjunct is vacuous, and no new URL advance is required", async () => {
+test("THE EXISTING-CHAT VACUITY LAW: on an existing chat (the session URL already at /c/<chatId> at dispatch) the start signal is the conversation advancement + the Stop slot + the decisively empty composer — the chat-state conjunct is vacuous, and no new URL advance is required", async () => {
   // CONTINUATION 16: an existing chat's URL is already at a chat
   // route BEFORE the submission — the chat-object-creation conjunct
   // applies only to FRESH sessions (the provider's URL advance
   // happens exactly once, at the accepted FIRST submission; the
   // mid-conversation recovery's `continue` submissions ride the
-  // same law). On the existing chat the detector is the Stop-slot +
+  // same law). CONTINUATION 20: the signal still requires the
+  // conversation-state advancement (the new turn landed) — the
+  // vacuity is the chat-object conjunct's alone. On the existing
+  // chat the detector is the advancement + Stop-slot +
   // empty-composer reading, with no spurious URL requirement.
   const built = build({ chatUrl: "https://chat.z.ai/c/existing-chat-77" });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
@@ -453,6 +456,166 @@ test("THE EXISTING-CHAT VACUITY LAW: on an existing chat (the session URL alread
   assert.equal(built.pages[0].state.url, "https://chat.z.ai/c/existing-chat-77");
   assert.equal(built.pages[0].state.chatCreated, true);
   assert.ok(built.pages[0].state.conversation.includes(PROMPT));
+  assert.equal(built.pages[0].state.composerValue, "");
+});
+
+test("THE CONVERSATION-ADVANCEMENT ACCEPTANCE (the directive's conjunct): the start signal fires only with the conversation state advanced past the dispatch baseline — the new user turn carrying the EXACT governed prompt — AND the Send→Stop working state corroborating, the composer decisively empty, and (a fresh session) the chat object created — every leg directly asserted", async () => {
+  // CONTINUATION 20 (PR #6 comment 5559533083, the superseding
+  // execution directive): "prompt acceptance = conversation state
+  // advances with a new turn; generation start = provider working
+  // state (e.g. Send/Stop transition) as corroborating evidence".
+  // The operator's reported runtime object — `chat` with
+  // `history.messages` — lives in closure-scoped provider stores,
+  // unreachable through the supported extension surface; the
+  // RENDERED user-message rows are its observable projection
+  // (userTurnCountOf), and the dispatch-baseline delta is the new
+  // turn. This regression asserts every leg of the conjunct on the
+  // genuine happy path: the turn count advanced from the dispatch
+  // baseline (0 -> 1), the exact prompt landed as the new turn, the
+  // Stop control rendered with the send control absent, the
+  // composer read decisively empty, and the fresh session's URL
+  // advanced to the /c/ chat route (the chat object created).
+  const built = build();
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.generation, "working");
+  // The conversation-state advancement: the user-turn count advanced
+  // past the dispatch baseline (the new turn landed exactly once).
+  assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
+  // The provider's working state, corroborating: the Stop control
+  // rendered (the Send→Stop action-slot transition).
+  assert.equal(built.pages[0].state.stop.visible, true);
+  // The composer decisively empty (the draft consumed).
+  assert.equal(built.pages[0].state.composerValue, "");
+  // The fresh session's chat object created (the URL advanced).
+  assert.equal(built.pages[0].state.chatCreated, true);
+  assert.ok(built.pages[0].state.url.startsWith("https://chat.z.ai/c/"));
+});
+
+test("THE DISCARDED-INPUT NO-ADVANCEMENT LAW (the c20 discriminator on an existing chat): our dispatch's input is discarded and a FOREIGN generation takes the Stop slot with the composer decisively empty — the conversation state NEVER advances past the dispatch baseline, so the start signal NEVER fires (the c16 Stop+empty+chat reading alone would have recorded ok:true here — the conversation-advancement conjunct closes that hole)", async () => {
+  // CONTINUATION 20 (PR #6 comment 5559533083): "prompt acceptance =
+  // conversation state ADVANCES with a new turn" — the advancement
+  // is the delta past the dispatch baseline. On an EXISTING chat the
+  // c16 signal was the Stop slot + the decisively empty composer
+  // alone (the chat-object conjunct vacuous) — a foreign generation
+  // over a discarded input satisfied it. The c20 conjunct requires
+  // the new turn: this surface (our prompt typed + verified + sent;
+  // the input discarded around the send — the row withdrawn before
+  // any observation; the foreign generation's Stop; the empty
+  // composer; NO new turn) never fires the signal, and the watch
+  // fails closed with the typed diagnosis. Machine-differentiated:
+  // at the pre-c20 adapter this surface records ok:true.
+  const built = build({
+    chatUrl: "https://chat.z.ai/c/existing-chat-77",
+    conversation: ["an earlier operator turn"], // the pre-dispatch baseline: one user turn
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button") {
+        state.__sent = true;
+      }
+      if (state.__sent && message.op === "probe") {
+        state.__sent = false;
+        state.composerValue = ""; // our dispatch's input was discarded
+        state.stop.visible = true; // the FOREIGN generation holds the slot
+        state.conversation = state.conversation.filter((t) => t !== PROMPT); // our row is withdrawn before any observation
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.submitted, undefined); // NEVER a claimed submission
+  // The conversation NEVER advanced: exactly the one pre-dispatch
+  // turn — our prompt never landed (the discarded input).
+  assert.equal(built.pages[0].state.conversation.length, 1);
+  assert.ok(!built.pages[0].state.conversation.includes(PROMPT));
+  // The failure is typed and fail-closed (the exhaustion routes the
+  // empty composer + no evidence + the existing chat to the
+  // accepted-not-started refusal, never a re-establishment).
+  assert.ok(["PAGE_MALFORMED", "AMBIGUOUS_STATE", "RETRY_EXHAUSTED"].includes(result.error.code));
+});
+
+test("THE STALE-EXACT-ROW INTERPLAY: an existing chat whose conversation ALREADY carries the exact governed prompt row from a prior run — the landed-row protection refuses the dispatch before the watch (the row is indistinguishable from a landed submission at the read; never submitted twice), and the bounded attempts fail closed with the typed refusal", async () => {
+  // CONTINUATION 14's no-duplicate law meets CONTINUATION 20's
+  // acceptance hierarchy on the stale-row surface: a prior run's
+  // exact row in the evidence + our prompt typed into the composer
+  // is the prompt-present-in-composer-AND-in-evidence state —
+  // ensurePrompt refuses it (a landed row is never re-submitted),
+  // so the dispatch never reaches the send; the c20 conjunct is
+  // never even consulted. The honest law for this surface is the
+  // landed-row protection, and the refusal is typed.
+  const built = build({
+    chatUrl: "https://chat.z.ai/c/existing-chat-77",
+    conversation: [PROMPT], // the STALE exact row from a prior run
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.submitted, undefined);
+  // The stale row is the ONLY turn — nothing was added, nothing was
+  // sent (the landed row is protected from the duplicate).
+  assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
+  assert.ok(["PAGE_MALFORMED", "AMBIGUOUS_STATE", "RETRY_EXHAUSTED"].includes(result.error.code));
+});
+
+test("THE FOREIGN-TURN DISCRIMINATOR: the conversation advances with a DIFFERENT text (a foreign turn) while the Stop control renders and the composer is decisively empty — the advancement happened but NOT with the exact correlated text: never the start signal", async () => {
+  // CONTINUATION 20 (PR #6 comment 5559533083): the acceptance leg
+  // is the CONJUNCT of the advancement (the count delta) AND the
+  // exact correlated text as the new turn — "the new turn is OURS".
+  // A foreign turn (the operator's manual typing, a queued prior
+  // prompt) advancing the count while OUR dispatch's input was
+  // discarded (our row withdrawn before any observation) and a
+  // foreign generation runs satisfies the delta alone; the
+  // exact-text conjunct refuses it. Fail closed.
+  const built = build({
+    chatUrl: "https://chat.z.ai/c/existing-chat-77",
+    conversation: ["an earlier operator turn"], // the pre-dispatch baseline: one user turn
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button") {
+        state.__sent = true;
+      }
+      if (state.__sent && message.op === "probe") {
+        state.__sent = false;
+        state.composerValue = ""; // our dispatch's input was discarded
+        state.stop.visible = true; // the FOREIGN generation holds the slot
+        state.conversation = state.conversation.filter((t) => t !== PROMPT); // our row is withdrawn before any observation
+        state.conversation.push("an unrelated operator prompt"); // the FOREIGN turn advanced the count
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.submitted, undefined);
+  // Our exact prompt NEVER landed (the foreign turn is the only new row).
+  assert.ok(!built.pages[0].state.conversation.includes(PROMPT));
+  assert.ok(built.pages[0].state.conversation.includes("an unrelated operator prompt"));
+  assert.ok(["PAGE_MALFORMED", "AMBIGUOUS_STATE", "RETRY_EXHAUSTED"].includes(result.error.code));
+});
+
+test("THE REPEATED-RECOVERY ADVANCEMENT: a SECOND hung recovery on a chat whose conversation already carries an earlier `continue` row still fires the start signal — the advancement is the turn-count DELTA (the stale row never blocks the signal; a new turn lands for the new dispatch)", async () => {
+  // CONTINUATION 20 (PR #6 comment 5559533083): the advancement is
+  // measured as the user-turn count delta past the DISPATCH
+  // baseline — deliberately NOT as text-presence-vs-baseline (a
+  // presence-delta design would permanently block every recovery
+  // after the first one on the same chat, because the earlier
+  // `continue` row is already present at the second dispatch). The
+  // count-delta design fires the signal exactly when the NEW turn
+  // lands. This regression machine-differentiates the two designs.
+  const built = await hungSession();
+  // The FIRST recovery: the `continue` turn lands, the generation
+  // resumes, the signal fires.
+  const first = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.ok(built.pages[0].state.conversation.filter((t) => t === "continue").length >= 1);
+  // The session hangs AGAIN: the generation re-arms the Stop slot.
+  built.pages[0].state.stop.visible = true;
+  // The SECOND recovery on the SAME chat: the earlier `continue`
+  // row is already in the conversation at the second dispatch — the
+  // count-delta conjunct must still fire on the NEW turn.
+  const second = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.recovered.acceptance, "agent-start");
+  assert.equal(second.recovered.generation, "working");
+  // The new turn landed for the second dispatch (the count advanced
+  // past the second dispatch's baseline).
+  assert.ok(built.pages[0].state.conversation.filter((t) => t === "continue").length >= 2);
   assert.equal(built.pages[0].state.composerValue, "");
 });
 
@@ -1859,16 +2022,24 @@ test("hung-worker recovery performs Stop -> verified stopped -> fixed continue -
   assert.equal(types[0].text, "continue");
 });
 
-test("recovery where the resumed generation's start signal appears: the acceptance is the START SIGNAL — the `continue` row landing is CONTEXT ONLY (a provider row-drop never fails a started recovery)", async () => {
-  // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
-  // message-row evidence predicate is SUPERSEDED — the acceptance is
-  // the provider-owned start signal (the Stop control visible with
-  // the composer decisively empty: the agent resumed working). A
-  // provider that drops the landed row from the conversation surface
-  // while the generation runs never fails the started recovery: the
-  // row is context, the signal is the proof. (The c14 regression —
-  // "a resumed generation state is not acceptance" — is reversed by
-  // the directive: a resumed generation state IS the acceptance.)
+test("recovery where the provider DROPS the `continue` row: the conversation-state ADVANCEMENT is the acceptance — a row that never lands fails the started recovery closed (the operator observes; the resumed generation is context, never the proof)", async () => {
+  // CONTINUATION 20 (PR #6 comment 5559533083, the superseding
+  // execution directive): "prompt acceptance = conversation state
+  // advances with a new turn" — the user-turn advancement is now a
+  // REQUIRED leg of the start signal (the user-turn count advanced
+  // past the dispatch baseline AND the exact correlated text landed
+  // as a user-message row), with the Send→Stop working state as
+  // corroborating evidence. A provider that drops the landed row
+  // from the conversation surface never shows the advancement: the
+  // watch exhausts and the recovery FAILS CLOSED with the typed
+  // diagnosis — the resumed generation's Stop control and the
+  // cleared composer are context, never the proof. (The c15
+  // "row-drop never fails a started recovery" tolerance is
+  // superseded by the directive's acceptance hierarchy; the
+  // operator's reported runtime — "subsequent successful prompts
+  // add another message/turn to chat.history.messages" — has the
+  // successful prompt ALWAYS adding the turn, so the dropped-row
+  // surface is a REFUSAL surface under this contract.)
   const built = await hungSession({
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button" && state.composerValue === "continue") {
@@ -1886,15 +2057,20 @@ test("recovery where the resumed generation's start signal appears: the acceptan
     },
   });
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.recovered.acceptance, "agent-start");
-  assert.equal(result.recovered.generation, "working");
-  // The exact fixed message never landed in the conversation evidence — context only.
+  // The advancement never showed: the recovery fails closed with the
+  // typed diagnosis — never an inferred success, never a record.
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/agent-start watch exhausted|post-response|Observe the session/i.test(result.error.message));
+  // The exact fixed message never landed in the conversation evidence.
   assert.ok(!built.pages[0].state.conversation.includes("continue"));
-  // The start signal held: the Stop control visible with the composer decisively empty.
+  // The resumed generation's surface held (context, not the proof):
+  // the Stop control visible with the composer decisively empty.
   assert.equal(built.pages[0].state.stop.visible, true);
   assert.equal(built.pages[0].state.composerValue, "");
-  // Bounded: the fixed message was typed exactly once (no re-Stop loop after the started signal).
+  // Bounded: the fixed message was typed exactly once (the watch's
+  // exhaustion deliberately does NOT loop a fresh attempt — a retry
+  // would re-Stop the RESUMED generation and re-send `continue`).
   const recoveriesTyped = built.pages[0].history().filter((c) => c.op === "type" && c.text === "continue").length;
   assert.equal(recoveriesTyped, 1);
 });
@@ -2066,20 +2242,18 @@ test("the Stop control carrying the long-task tooltip label still resolves and c
   assert.ok(!built.pages[0].state.regenerate.clicked, "the Regenerate control must never be clicked");
 });
 
-test("a Regenerate control appearing after the adapter's own Stop is CONTEXT ONLY — the acceptance is the start signal; the Regenerate control is never clicked", async () => {
+test("a Regenerate control appearing after the adapter's own Stop is CONTEXT ONLY — it is never clicked; under the conversation-advancement acceptance a dropped `continue` row fails the recovery closed (the operator observes)", async () => {
   // Requirement 4 (PR #6 comment 5557087907): "Generation resuming, a
   // cleared composer, or a Regenerate button appearing are context
-  // only and never acceptance by themselves." CONTINUATION 15: the
-  // acceptance IS the provider-owned start signal (the Stop control
-  // visible with the composer decisively empty — the agent resumed
-  // working); the post-stop Regenerate surface and the landed
-  // `continue` row are CONTEXT. After the adapter's own verified
-  // Stop, the fixture renders the REAL post-stop surface (the
-  // stopped response's Regenerate control visible, the send control
-  // back); the continue-send's start signal then succeeds the
-  // recovery, and this test's hook additionally DROPS the `continue`
-  // row — proving the row was never the predicate. The Regenerate
-  // control is never clicked as a remedy or an acceptance.
+  // only and never acceptance by themselves." CONTINUATION 20 (PR #6
+  // comment 5559533083): the acceptance is the CONJUNCT — the
+  // conversation-state advancement (the new `continue` turn landed)
+  // WITH the provider-owned working state (the Stop control) — so
+  // this surface (the post-stop Regenerate control visible, the send
+  // control back, the `continue` row DROPPED by the hook) has no
+  // advancement: the recovery fails closed with the typed
+  // post-response/unobserved diagnosis. The Regenerate control is
+  // never clicked as a remedy or an acceptance.
   const built = await hungSession({
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button" && state.composerValue === "continue") {
@@ -2097,15 +2271,18 @@ test("a Regenerate control appearing after the adapter's own Stop is CONTEXT ONL
     },
   });
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.recovered.acceptance, "agent-start");
-  assert.equal(result.recovered.generation, "working");
+  // No conversation advancement: fail closed with the typed
+  // diagnosis — the Regenerate surface and the cleared composer are
+  // context, never the proof.
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/agent-start watch exhausted|post-response|Observe the session/i.test(result.error.message));
   // The post-response surface rendered and the Regenerate control was never clicked.
   assert.equal(built.pages[0].state.regenerate.visible, true);
   assert.ok(!built.pages[0].state.regenerate.clicked, "the Regenerate control must never be clicked");
-  // The dropped row is context only — the start signal held.
+  // The dropped row never landed — the advancement requirement is
+  // what fails the recovery (the c20 acceptance leg).
   assert.ok(!built.pages[0].state.conversation.includes("continue"));
-  assert.equal(built.pages[0].state.stop.visible, true);
   assert.equal(built.pages[0].state.composerValue, "");
 });
 
