@@ -423,6 +423,19 @@ export function fakeMessagingTabsApi({ tabs = [] } = {}) {
  * adapter's probe vocabulary carries NO dialog probe — the dialog
  * is invisible to every fact read, by construction.
  *
+ * CONTINUATION 14 (PR #6 review 5124542353 / the work order
+ * 5557596159 — "REPLACE POPUP DETECTION WITH SEND-CONTROL STATE
+ * MACHINE"): the pressEnter primitive models the provider's composer
+ * keybinding (the Enter on the focused composer holding text
+ * SUBMITS it — the same submission semantics as the send control's
+ * click; a dialog open on the surface captures the key instead); the
+ * async restore models the REAL capacity-rejection semantics (the
+ * submission did NOT land — the optimistically landed row is
+ * withdrawn with the restore); and the `sendInaccessible` knob
+ * models the slot rendering NEITHER control (the surface whose Send
+ * control cannot be resolved/accessed — the Enter-fallback
+ * regressions).
+ *
  * `beforeRespond(command, state, history)` lets a test mutate the
  * page state at a precise point in the sequence (authentication
  * dropping, a send that does not take).
@@ -511,6 +524,20 @@ export function fakeZaiPage({
   sendEnabledLie = false,
   duplicateSend = false,
   generationCompletes = null,
+  // CONTINUATION 14 (PR #6 review 5124542353, requirement 5): the
+  // `sendInaccessible` knob models the composer action slot rendering
+  // NEITHER control — #send-message-button resolves ZERO elements
+  // while the composer itself stays a normal enabled input. This is
+  // the surface whose Send control cannot be resolved/accessed
+  // decisively: the adapter's Enter fallback fires (exactly once per
+  // bounded attempt), the pressEnter submits the composer's verified
+  // text, and the state machine continues into the
+  // Send-reappearance wait (a test disarms the knob on the Enter to
+  // model the provider's slot re-render — "if Send becomes
+  // resolvable, continue"; a knob that persists models a Send
+  // control that never becomes resolvable — "fail closed after the
+  // bounded retry budget").
+  sendInaccessible = false,
   // The post-response Regenerate control (CONTINUATION-11,
   // LIVE-OBSERVED in the operator's saved authenticated capture at
   // main 5d14d90): the bits-ui tooltip wrapper
@@ -620,6 +647,7 @@ export function fakeZaiPage({
     sendSlotStuck,
     sendEnabledLie,
     duplicateSend,
+    sendInaccessible,
     pendingStop: null,
     generationCompletes: generationCompletes ? { probes: generationCompletes, fired: false } : null,
     pendingCompletion: null,
@@ -759,12 +787,24 @@ export function fakeZaiPage({
       }
       // The async popup materializes on the Nth fact read after the
       // send (the asynchronous MODEL_CONCURRENCY_LIMIT arrival).
+      // CONTINUATION 14: the restore now models the REAL
+      // capacity-rejection semantics — the submission did NOT land
+      // (the error handler restores the prompt into the composer), so
+      // the optimistically landed row is WITHDRAWN with the restore.
+      // (The pre-correction fixture left the row in place, making the
+      // evidence-present state reachable through a restore — under
+      // the continuation-14 contract that state is the NEVER-RESEND
+      // path, so the resend regression needs the faithful
+      // no-row-after-restore surface.)
       if (state.pendingPopup !== null) {
         state.pendingPopup -= 1;
         if (state.pendingPopup <= 0) {
           state.pendingPopup = null;
           state.dialog = { text: state.asyncPopup.text };
           if (state.asyncPopup.restore) {
+            if (state.conversation[state.conversation.length - 1] === state.lastSubmitted) {
+              state.conversation.pop(); // the submission did not land
+            }
             state.composerValue = state.lastSubmitted; // the provider's prompt restore
           }
         }
@@ -812,8 +852,21 @@ export function fakeZaiPage({
       return { ok: true, typed: true, value: state.composerValue };
     }
     if (message.op === "pressEnter") {
+      // CONTINUATION 14 (PR #6 review 5124542353, requirement 5 — the
+      // work order 5557596159): the Enter primitive's
+      // surface-faithful semantics. The real page script dispatches
+      // the Enter key sequence on the FOCUSED element (the composer —
+      // focused by the type op). A dialog open on the surface
+      // captures the key (the legacy dismissable-popup modeling: the
+      // dialog closes, nothing is submitted — the adapter NEVER
+      // issues the Enter for a dialog, so this only models the
+      // provider's key routing); with no dialog, a composer holding
+      // text SUBMITS it (the provider's composer keybinding — the
+      // same submission semantics as the send control's click).
       if (state.dialog) {
-        state.dialog = null; // the known dismissable popup
+        state.dialog = null; // the dialog captured the key
+      } else if (state.composerValue.length > 0) {
+        submit(); // the Enter on the focused composer submits
       }
       return { ok: true, pressed: "Enter", target: "TEXTAREA" };
     }
@@ -927,7 +980,12 @@ export function fakeZaiPage({
       // MALFORMED surface that renders BOTH controls with an empty
       // composer (the contradictory control state that must fail
       // closed); `duplicateSend` models two send controls (the
-      // ambiguous enabled read).
+      // ambiguous enabled read); `sendInaccessible` (CONTINUATION 14)
+      // models the slot rendering NEITHER control — the
+      // Send-inaccessible surface of the Enter-fallback regressions.
+      if (state.sendInaccessible) {
+        return [];
+      }
       if (state.stop.visible && state.composerValue.length === 0 && !state.sendSlotStuck) {
         return [];
       }

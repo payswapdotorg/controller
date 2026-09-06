@@ -22,20 +22,48 @@
  *         FRESH decisive composer read immediately before the send —
  *         the exact prompt must STILL be present, verbatim; an
  *         unreadable, empty, or rewritten composer is NEVER sent;
- *     6. send;
- *     7. verify ACTUAL submission from the resulting provider state —
- *         MESSAGE-EXCLUSIVE USER-message evidence only: the exact
- *         prompt observed as an EXACT user-message row, with a
- *         DECISIVELY empty composer (an absent or ambiguous
- *         composer read is never "cleared" and never "present").
- *         Containment in a mixed message REGION (user + assistant
- *         text, e.g. `[role="log"]`) is never acceptance evidence —
- *         an assistant echo of the exact prompt with an empty
- *         composer is not a submission (continuation 9, PR #6
- *         review 5123260890, requirement 2). `generation:"waiting"`
- *         is reported context only — it NEVER participates in the
- *         acceptance predicate. Broad region matches are never
- *         acceptance evidence.
+ *     6. send — the composer action-slot STATE MACHINE (continuation
+ *        14, PR #6 review 5124542353 / the work order 5557596159):
+ *        the Send control must be RESOLVED/ACCESSED decisively (the
+ *        provider's own slot renders send XOR Stop). When it cannot
+ *        be — the slot renders the Stop control, a contradictory or
+ *        unresolvable slot, or the send click itself fails — the
+ *        ENTER FALLBACK fires exactly ONCE for that attempt: the
+ *        existing Enter page primitive (closed-vocabulary,
+ *        command-gated) is pressed — the pre-send gate has just
+ *        verified the exact prompt decisively present in the
+ *        composer, so the Enter submits it — and the state machine
+ *        continues into the Send-reappearance wait. The fallback is
+ *        for an inaccessible/unavailable Send control ONLY: never
+ *        popup recognition, never dialog inspection, and never a
+ *        second Enter within the same attempt (the bounded attempt
+ *        budget governs the retries);
+ *     7. WAIT boundedly until the Send control REAPPEARS, then verify
+ *        ACTUAL submission from the resulting provider state —
+ *        MESSAGE-EXCLUSIVE USER-message evidence only: the exact
+ *        prompt observed as an EXACT user-message row, with a
+ *        DECISIVELY empty composer (an absent or ambiguous
+ *        composer read is never "cleared" and never "present").
+ *        A TRANSIENT missing Send control (the Stop control
+ *        replacing it while the generation is in flight — the
+ *        provider's own slot machine) is NOT an error: the wait
+ *        tolerates it within the bounded budget. The acceptance is
+ *        recorded ONLY at the Send-reappearance boundary — never
+ *        while the control state is stop; a Stop state persisting
+ *        past the budget fails closed with the typed mid-generation
+ *        diagnosis (a confirmed submission is NEVER resent); a Send
+ *        control reappearing WITHOUT the exact user-message evidence
+ *        is the contract's unsuccessful branch (the bounded
+ *        exact-prompt re-establishment/resend); a Send control that
+ *        never becomes resolvable fails closed after the bounded
+ *        retry budget. Containment in a mixed message REGION (user
+ *        + assistant text, e.g. `[role="log"]`) is never acceptance
+ *        evidence — an assistant echo of the exact prompt with an
+ *        empty composer is not a submission (continuation 9, PR #6
+ *        review 5123260890, requirement 2). `generation:"waiting"`
+ *        is reported context only — it NEVER participates in the
+ *        acceptance predicate. Broad region matches are never
+ *        acceptance evidence.
  *
  *   provider dialogs are NOT a governed signal (continuation 13, PR
  *   #6 review 5124488246 — the ARCHITECT work order "REMOVE POPUP
@@ -50,8 +78,10 @@
  *   blocks the surface expresses itself through those facts: an
  *   unreadable composer, a send that does not take, a bounded
  *   budget exhaustion — every one of them fails closed through the
- *   ordinary bounded paths). The adapter never presses Enter in
- *   any governed flow.
+ *   ordinary bounded paths). The ONLY Enter the adapter ever issues
+ *   is the continuation-14 Send-inaccessible fallback (exactly one
+ *   per bounded attempt — never popup recognition, never dialog
+ *   inspection, never a dismissal).
  *
  *   the second observed failure mode (continuation 6, PR #6 review
  *   5123047551): the input state can be discarded around a send
@@ -71,9 +101,18 @@
  *   `continue` -> verified acceptance (the exact message confirmed
  *   present in the user-message evidence with the composer cleared
  *   — a resumed generation state alone is NEVER
- *   acceptance evidence). No alternate recovery wording. Bounded
- *   attempts; failure to confirm a required transition is a typed
- *   governance-hold outcome.
+ *   acceptance evidence). The continue-send uses the SAME
+ *   control-state rule as Start (continuation 14, PR #6 review
+ *   5124542353): the Send control resolved/accessed decisively, else
+ *   the Enter fallback exactly once for that recovery attempt. The
+ *   acceptance is the frozen message-exclusive evidence (recorded as
+ *   soon as the exact `continue` lands with the composer decisively
+ *   cleared — typically in the queued window with the Send control
+ *   rendered, the reappearance trivially holding; a resumed
+ *   generation observed at the acceptance read is reported as
+ *   context, never the proof). No alternate recovery wording.
+ *   Bounded attempts; failure to confirm a required transition is a
+ *   typed governance-hold outcome.
  *
  * Layering:
  *   - every provider locator lives in ZAI_LOCATORS below (with its
@@ -567,21 +606,25 @@ export function createZaiAdapter({
 
   /**
    * @private — CONTINUATION 12 (PR #6 comment 5557322324, requirement 7:
-   * "a contradictory/unreadable control state fails closed"): the
+   * "a contradictory/unreadable control state fails closed"), REVERSED
+   * in its stop-state permission by CONTINUATION 14 (PR #6 review
+   * 5124542353, the review's gap 1: "controlStateRefusal() explicitly
+   * permits `stop` as a recording state" — no more): the
    * submission-acceptance control-state consistency gate. Returns a
    * typed AMBIGUOUS_STATE refusal when the recording facts carry a
-   * contradictory or unreadable composer action-slot state, or when
-   * the provider's own computed prompt-present signal contradicts the
+   * contradictory or unreadable composer action-slot state, when the
+   * provider's own computed prompt-present signal contradicts the
    * decisively-empty composer read (send ENABLED while #chat-input
    * reads "" — the composer read is untrustworthy and the acceptance
-   * is never recorded from it), or when the send control resolved
+   * is never recorded from it), when the send control resolved
    * ambiguously (the enabled probe degraded to null on a zero/many
-   * match while the control is visible). Returns null when the
-   * control state is consistent — the caller records the acceptance.
-   * Context semantics are untouched: a "stop" reading (generation in
-   * progress) and a "send" reading consistent with the composer are
-   * BOTH acceptable recording states (the frozen acceptance rule is
-   * the message-exclusive evidence, not the control state).
+   * match while the control is visible), or — since continuation 14
+   * — when the composer action slot STILL RENDERS THE STOP CONTROL
+   * (the generation actively in progress): the acceptance is
+   * recorded ONLY after the Send control REAPPEARS (the
+   * state-machine boundary of the continuation-14 work order), never
+   * while the control state is stop. Returns null when the control
+   * state is consistent — the caller records the acceptance.
    */
   function controlStateRefusal(facts) {
     const control = controlStateOf(facts);
@@ -595,6 +638,17 @@ export function createZaiAdapter({
       return failure(
         "AMBIGUOUS_STATE",
         "the composer action slot is unreadable — neither the send control nor the Stop control is visible; the submission acceptance is not recorded from an unreadable control state"
+      );
+    }
+    // CONTINUATION 14 (PR #6 review 5124542353 — the review's gap 1):
+    // a "stop" control state is NO LONGER a permitted recording state.
+    // The reappearance of the Send control is now the state-machine
+    // boundary: while the Stop control is rendered (the generation
+    // actively in progress) the acceptance is never recorded.
+    if (control === "stop") {
+      return failure(
+        "AMBIGUOUS_STATE",
+        "the composer action slot still renders the Stop control — the generation is actively in progress; since continuation 14 the acceptance is recorded only after the Send control reappears (the state-machine boundary), never while the control state is stop"
       );
     }
     const sendEnabled = sendEnabledOf(facts);
@@ -1072,11 +1126,28 @@ export function createZaiAdapter({
         "the composer value could not be read decisively (absent or ambiguous) — refusing to prepare a submission on an unreadable input state"
       );
     }
-    if (composerValue === prompt) {
-      return { ok: true, present: true };
-    }
     if (composerValue === "" && messageEvidenceContains(facts.facts, prompt)) {
       return { ok: true, confirmed: true, facts: facts.facts };
+    }
+    if (composerValue === prompt) {
+      // CONTINUATION 14 (PR #6 review 5124542353 / the work order
+      // 5557596159, requirement 6 — "never duplicate an
+      // already-confirmed user message", hardened): the composer
+      // holds the exact prompt AND the message evidence already
+      // carries it — the submission appears already confirmed (the
+      // provider's restored copy over the landed row). The governed
+      // prompt is never submitted twice: a typed refusal, never a
+      // resend, never a re-type. (Without the evidence, the exact
+      // prompt in the composer is the ordinary unconfirmed state —
+      // sent as-is, the provider surface never disturbed with a
+      // re-type.)
+      if (messageEvidenceContains(facts.facts, prompt)) {
+        return failure(
+          "AMBIGUOUS_STATE",
+          "the exact prompt is present in the composer AND in the message evidence — the submission appears already confirmed (the provider's restored copy over the landed row); the governed prompt is never submitted twice, so the bounded retry re-observes instead of resending"
+        );
+      }
+      return { ok: true, present: true };
     }
     return enterPrompt(tabId, prompt);
   }
@@ -1087,6 +1158,28 @@ export function createZaiAdapter({
    */
   async function send(tabId) {
     return click(tabId, ZAI_LOCATORS.send);
+  }
+
+  /**
+   * CONTINUATION 14 (PR #6 review 5124542353, requirement 5 — the
+   * work order 5557596159): the Send-inaccessible Enter fallback.
+   * Invokes the EXISTING page primitive (page/zaiPage.js pressEnter:
+   * the closed-vocabulary Enter key dispatch on the focused element)
+   * EXACTLY ONCE per bounded attempt, ONLY when the Send control
+   * could not be resolved/accessed decisively (the slot rendering the
+   * Stop control, a contradictory or unresolvable slot, or the send
+   * click itself failing), and only AFTER the pre-send gate verified
+   * the exact prompt decisively present in the composer — the focused
+   * composer receives the Enter and submits it. This is NEVER popup
+   * recognition or handling: no dialog is inspected, classified, or
+   * dismissed by it, and no governed flow issues any other Enter.
+   * The state machine continues from the Enter into the
+   * Send-reappearance wait (the re-observation): a Send control that
+   * becomes resolvable proceeds through the boundary; one that never
+   * does fails closed after the bounded retry budget.
+   */
+  async function pressEnter(tabId) {
+    return pageBridge.send(tabId, { zaiPage: true, op: "pressEnter" });
   }
 
   /**
@@ -1291,6 +1384,183 @@ export function createZaiAdapter({
       };
     };
 
+    /**
+     * CONTINUATION 14 (PR #6 review 5124542353 / the ARCHITECT work
+     * order 5557596159 — "REPLACE POPUP DETECTION WITH SEND-CONTROL
+     * STATE MACHINE"): THE SEND-REAPPEARANCE BOUNDARY — the bounded
+     * wait until the Send control REAPPEARS (the composer action slot
+     * renders the send control again) with the resulting provider
+     * state decidable-success: the exact prompt present in the
+     * MESSAGE-EXCLUSIVE evidence with the composer decisively empty.
+     * A TRANSIENT missing Send control (the Stop control replacing
+     * it while the generation is in flight — the provider's own slot
+     * machine) is NOT an error: the wait tolerates it within the
+     * bounded settle budget. The wait is DECISIVE only on the success
+     * boundary or a decisive failure surface (authentication required
+     * / a provider error); every other observable keeps waiting — an
+     * instantaneous Send-visible reading in the processing window
+     * (the composer still holding the exact prompt) is
+     * indistinguishable from the provider's restored copy at any
+     * single instant, so only the decidable-success reading (or the
+     * budget's exhaustion) routes the state machine: the duplication
+     * protection. The EXHAUSTION analysis routes the final facts:
+     *   - the boundary reached -> the acceptance is recorded (the
+     *     recording gate refuses a contradictory/unreadable control
+     *     state, and since continuation 14 a "stop" state too — the
+     *     acceptance is NEVER recorded while the generation is in
+     *     progress);
+     *   - the Stop control persistently visible -> the typed
+     *     mid-generation refusal: whether or not the submission is
+     *     confirmed by the evidence, a confirmed submission is NEVER
+     *     resent, and the bounded retry re-observes;
+     *   - the evidence present on a non-recordable read (the composer
+     *     holding text or unreadable) -> the never-resend refusal (a
+     *     resend would duplicate the landed message);
+     *   - the Send control reappeared WITHOUT the exact user-message
+     *     evidence -> the contract's unsuccessful branch: the bounded
+     *     exact-prompt re-establishment/resend (the next attempt); the
+     *     DISCARDED variant (empty composer, no evidence) runs the
+     *     compose re-establishment first;
+     *   - a contradictory or unresolvable slot / an unreadable
+     *     composer -> the existing fail-closed refusals.
+     *
+     * @returns {Promise<{recorded?: object, refusal: object,
+     *                    reestablished?: boolean}>}
+     */
+    const sendBoundaryOutcome = async () => {
+      const boundary = await settle(tabId, [], (f) => {
+        const c = classifySession(f, null);
+        if (c.state === "authentication-required" || c.state === "provider-error") {
+          return true; // a decisive failure surface ends the wait
+        }
+        if (controlStateOf(f) !== "send") {
+          return false; // the Send control has not reappeared — the transient missing-Send window (the Stop state) is tolerated, never an error
+        }
+        // THE BOUNDARY: the Send control reappeared AND the resulting
+        // state is decidable-success (the exact prompt in the
+        // message-exclusive evidence with the composer decisively
+        // empty).
+        return composerValueOf(f) === "" && messageEvidenceContains(f, prompt);
+      });
+      if (!boundary.ok) {
+        return { refusal: boundary };
+      }
+      const f = boundary.facts;
+      const verdict = classifySession(f, null);
+      if (verdict.state === "authentication-required") {
+        return {
+          refusal: failure(
+            "AUTHORIZATION_REQUIRED",
+            `the chat.z.ai session lost authentication before the submission was accepted: ${verdict.detail}. Human authentication is out of band — authenticate in the provider tab, then start the worker session again`
+          ),
+        };
+      }
+      if (verdict.state === "provider-error") {
+        return { refusal: failure("PROVIDER_ERROR", `the provider surfaced an error before the submission was accepted: ${verdict.detail}`) };
+      }
+      const control = controlStateOf(f);
+      const composerValue = composerValueOf(f);
+      const evidence = messageEvidenceContains(f, prompt);
+      if (control === "send" && composerValue === "" && evidence) {
+        // THE BOUNDARY reached: record the acceptance from the
+        // MESSAGE-EXCLUSIVE evidence (the exact row + the decisively
+        // empty composer), GATED on the control-state consistency of
+        // the recording facts (the continuation-12 contradictions,
+        // plus the continuation-14 stop-state refusal).
+        const recorded = recordSubmission(f);
+        if (recorded.ok) {
+          return { recorded };
+        }
+        return { refusal: recorded };
+      }
+      // The MALFORMED control states refuse BEFORE any evidence
+      // routing: a contradictory or unresolvable slot never yields a
+      // recordable, resendable, or discardable reading — the surface
+      // is unreadable and the typed refusal says so.
+      if (control === "contradictory" || control === "unresolvable") {
+        return { refusal: controlStateRefusal(f) };
+      }
+      if (control === "stop") {
+        // The mid-generation outcome: the Stop control still rendered
+        // (the generation actively in progress) and the Send control
+        // not reappeared within the bounded wait. The acceptance is
+        // recorded only at the boundary — and a submission confirmed
+        // by the evidence is NEVER resent (the bounded retries
+        // re-observe through the already-confirmed path).
+        return {
+          refusal: failure(
+            "AMBIGUOUS_STATE",
+            evidence
+              ? "the Send control did not reappear within the bounded wait — the Stop control remains visible (the generation is actively in progress) while the submission is CONFIRMED by the message-exclusive evidence. The acceptance is recorded only at the Send-reappearance boundary (the continuation-14 state machine); the confirmed submission is NEVER resent — observe the session, or widen the settle budget and re-invoke Start"
+              : "the Send control did not reappear within the bounded wait — the Stop control remains visible (a generation is in progress) and the exact prompt's submission is not confirmed by message evidence; the bounded retry re-observes"
+          ),
+        };
+      }
+      if (evidence) {
+        // The submission is CONFIRMED by the evidence but the boundary
+        // did not open on a recordable read: the composer holds text
+        // (the provider's restored copy over the landed row) or is
+        // unreadable. Never resent — a resend would duplicate the
+        // landed message; the bounded retry re-observes.
+        return {
+          refusal: failure(
+            "AMBIGUOUS_STATE",
+            composerValue !== null
+              ? "the exact prompt is present in the message evidence AND the composer holds text (the provider's restored copy or a pending state) — the submission appears already confirmed and the governed prompt is never submitted twice; the bounded retry re-observes"
+              : "the exact prompt is present in the message evidence but the composer state could not be read decisively — the acceptance is not recorded from an untrustworthy surface and the confirmed submission is never resent; the bounded retry re-observes"
+          ),
+        };
+      }
+      if (control === "send" && composerValue !== null && composerValue.length > 0) {
+        // The contract's UNSUCCESSFUL branch: the Send control
+        // reappeared WITHOUT the exact user-message evidence (the
+        // prompt was returned to or remains in the composer). The
+        // bounded retry re-establishes the exact prompt
+        // byte-identically (ensurePrompt verifies it — a restored
+        // exact prompt is sent as-is) and resends.
+        return {
+          refusal: failure(
+            "PAGE_MALFORMED",
+            "the Send control reappeared without the exact user-message evidence — the prompt was returned to or remains in the composer and the submission was not confirmed by observation; the bounded retry re-establishes the exact prompt byte-identically and resends"
+          ),
+        };
+      }
+      if (control === "send" && composerValue === "") {
+        const refusal = controlStateRefusal(f);
+        if (refusal) {
+          return { refusal };
+        }
+        // The SECOND observed failure mode (PR #6 review 5123047551,
+        // requirement 3): the composer decisively empty, the submission
+        // NOT confirmed by message evidence — the provider discarded
+        // the input state around the send attempt. The bounded compose
+        // re-establishment; the next attempt re-types the exact prompt
+        // byte-for-byte, re-reads it byte-for-byte, and only then
+        // resends.
+        const reestablished = await reestablishComposer(tabId);
+        if (reestablished.ok) {
+          return {
+            refusal: failure(
+              "PAGE_MALFORMED",
+              "the prompt was not present in the composer after the send attempt (submission not confirmed by message evidence) — the composer input state was re-established for a re-typed, re-verified resend"
+            ),
+            reestablished: true,
+          };
+        }
+        return { refusal: reestablished };
+      }
+      const refusal = controlStateRefusal(f);
+      if (refusal) {
+        return { refusal };
+      }
+      return {
+        refusal: failure(
+          "AMBIGUOUS_STATE",
+          "the composer state could not be read decisively after the send (absent or ambiguous) — submission is unconfirmed"
+        ),
+      };
+    };
+
     while (attempts < maxSubmissionAttempts) {
       attempts += 1;
       if (!prepared) {
@@ -1320,15 +1590,19 @@ export function createZaiAdapter({
         // The submission was already confirmed by MESSAGE-EXCLUSIVE
         // provider-state evidence (e.g. the send landed while the
         // verification was reading): never resend the governed prompt.
-        // CONTINUATION 12: a control-state inconsistency on the
-        // recording facts refuses the acceptance — the bounded retry
-        // re-observes (never resends a confirmed submission) and fails
-        // closed if it persists.
-        const recorded = recordSubmission(entered.facts);
-        if (recorded.ok) {
-          return recorded;
+        // CONTINUATION 14: the recording WAITS for the
+        // Send-reappearance boundary — the shared boundary wait + the
+        // exhaustion analysis (a "stop" control state never records;
+        // the bounded retry re-observes, never resends a confirmed
+        // submission).
+        const outcome = await sendBoundaryOutcome();
+        if (outcome.recorded) {
+          return outcome.recorded;
         }
-        lastRefusal = recorded;
+        if (outcome.reestablished) {
+          composeReestablishments += 1;
+        }
+        lastRefusal = outcome.refusal;
         continue;
       }
       // 5b. The PRE-SEND GATE (continuation 6, PR #6 review
@@ -1358,96 +1632,55 @@ export function createZaiAdapter({
         }
         continue;
       }
-      // 6. Send.
-      const sent = await send(tabId);
-      if (!sent.ok) {
-        lastRefusal = sent;
-        continue;
+      // 6. SEND — the composer action-slot state machine (CONTINUATION
+      //    14, PR #6 review 5124542353 / the work order 5557596159):
+      //    the Send control must be RESOLVED/ACCESSED decisively (the
+      //    provider's own slot renders send XOR Stop). When the gate
+      //    facts show the slot NOT rendering the Send control (the
+      //    Stop state, a contradictory, or an unresolvable slot), or
+      //    when the send click itself fails, the ENTER FALLBACK fires:
+      //    the existing Enter page primitive exactly ONCE for this
+      //    attempt (the pre-send gate has just verified the exact
+      //    prompt decisively present in the composer, so the focused
+      //    composer's Enter submits it), and the state machine
+      //    continues into the Send-reappearance wait. The fallback is
+      //    for an inaccessible/unavailable Send control ONLY — never
+      //    popup recognition, never dialog inspection, and no second
+      //    Enter within the same attempt (the bounded attempt budget
+      //    governs the retries).
+      let sent = false;
+      if (controlStateOf(gate.facts) === "send") {
+        const clicked = await send(tabId);
+        sent = clicked.ok;
       }
-      // 7. Verify ACTUAL submission from the resulting provider
-      //    state. Decisive outcomes only: a DECISIVELY cleared
-      //    composer WITH message-exclusive evidence of the exact
-      //    prompt (confirmed), or a composer that still HOLDS the
-      //    prompt (the send did not take). An absent/ambiguous
-      //    composer read is NOT decisive — the budget bounds the
-      //    wait and the final classification fails closed.
-      //    CONTINUATION 13 (PR #6 review 5124488246): a visible
-      //    dialog is never a decisive signal here — the verdict
-      //    reads only the composer and the message evidence.
-      const verdict = await settle(tabId, [], (f) => {
-        const composerValue = composerValueOf(f);
-        if (composerValue === null) {
-          return false; // an unreadable composer is NOT decisive
+      if (!sent) {
+        const enter = await pressEnter(tabId);
+        if (!enter.ok) {
+          lastRefusal = enter;
+          continue;
         }
-        if (composerValue === "" && messageEvidenceContains(f, prompt)) {
-          return true; // confirmed by message-exclusive evidence
-        }
-        return composerValue.length > 0; // unconfirmed (send did not take)
-      });
-      if (!verdict.ok) {
-        lastRefusal = verdict;
-        continue;
       }
-      const facts = verdict.facts;
-      if (composerValueOf(facts) === "" && messageEvidenceContains(facts, prompt)) {
-        // The confirm-shaped verdict: record the acceptance from the
-        // MESSAGE-EXCLUSIVE evidence (the exact row + the decisively
-        // empty composer), GATED on the control-state consistency of
-        // the recording facts (continuation 12) — a contradictory or
-        // unreadable composer action-slot state, or an enabled send
-        // control contradicting the decisively-empty composer read,
-        // refuses the acceptance and the bounded retry re-observes
-        // (never resends a confirmed submission). CONTINUATION 13:
-        // no async-outcome hold runs after this — a popup (or the
-        // provider's prompt restore) materializing beyond the verdict
-        // is a live-evidence matter, never a code-side guess.
-        const recorded = recordSubmission(facts);
-        if (recorded.ok) {
-          return recorded;
-        }
-        lastRefusal = recorded;
-        continue;
+      // 7. THE SEND-REAPPEARANCE BOUNDARY: the bounded wait until the
+      //    Send control REAPPEARS, then the boundary inspection —
+      //    success (the exact prompt in the message-exclusive evidence
+      //    with the composer decisively empty) records the acceptance;
+      //    the contract's unsuccessful branch (the Send control
+      //    reappeared without the evidence) routes the bounded
+      //    re-establish/resend; a Stop state that persists past the
+      //    budget fails closed with the typed mid-generation diagnosis
+      //    (a confirmed submission is NEVER resent); the contradictory/
+      //    unresolvable/unreadable surfaces fail closed through the
+      //    existing control-state refusals. CONTINUATION 13: a visible
+      //    dialog is never a decisive signal here — the wait reads only
+      //    the control-state, composer, and message-evidence facts.
+      const outcome = await sendBoundaryOutcome();
+      if (outcome.recorded) {
+        return outcome.recorded;
       }
-      const composerValue = composerValueOf(facts);
-      if (composerValue !== null && composerValue.length > 0) {
-        // Unconfirmed: the send did not take (the composer still holds
-        // the prompt — a provider surface a dialog renders busy
-        // expresses itself exactly this way). The bounded retry
-        // resends the exact prompt.
-        lastRefusal = failure(
-          "PAGE_MALFORMED",
-          "the prompt remained unsubmitted after the send (submission was not confirmed by observation)"
-        );
-        continue;
+      if (outcome.reestablished) {
+        composeReestablishments += 1;
       }
-      if (composerValue === "") {
-        // The SECOND observed failure mode (PR #6 review
-        // 5123047551, requirement 3): the composer is decisively
-        // empty, the submission is NOT confirmed by message
-        // evidence — the provider discarded the input state around
-        // the send attempt (the operator's captured post-run DOM: an
-        // empty composer with a disabled send control). Fail-closed
-        // remediation: the bounded compose re-establishment; the next
-        // attempt re-types the exact prompt byte-for-byte, re-reads it
-        // byte-for-byte, and only then resends.
-        const reestablished = await reestablishComposer(tabId);
-        if (reestablished.ok) {
-          composeReestablishments += 1;
-          lastRefusal = failure(
-            "PAGE_MALFORMED",
-            "the prompt was not present in the composer after the send attempt (submission not confirmed by message evidence) — the composer input state was re-established for a re-typed, re-verified resend"
-          );
-        } else {
-          lastRefusal = reestablished;
-        }
-        continue;
-      }
-      // An unreadable composer after the budget: never "cleared",
-      // never "present" — fail closed.
-      lastRefusal = failure(
-        "AMBIGUOUS_STATE",
-        "the composer state could not be read decisively after the send (absent or ambiguous) — submission is unconfirmed"
-      );
+      lastRefusal = outcome.refusal;
     }
     return (
       lastRefusal ??
@@ -1649,10 +1882,26 @@ export function createZaiAdapter({
         lastRefusal = failure("AMBIGUOUS_STATE", "the composer did not hold the fixed recovery message verbatim");
         continue;
       }
-      const sent = await send(tabId);
-      if (!sent.ok) {
-        lastRefusal = sent;
-        continue;
+      // The continue-send — the SAME control-state rule as Start
+      // (CONTINUATION 14, PR #6 review 5124542353): the Send control
+      // must be RESOLVED/ACCESSED decisively; when it cannot be (the
+      // slot rendering the Stop control, a contradictory or
+      // unresolvable slot, or the click itself failing), the ENTER
+      // FALLBACK fires exactly ONCE for this recovery attempt — the
+      // composer is verified to hold the exact fixed `continue`
+      // byte-identically, so the focused composer's Enter submits it.
+      // Never popup recognition, never dialog inspection.
+      let sent = false;
+      if (controlStateOf(readBack.facts) === "send") {
+        const clicked = await send(tabId);
+        sent = clicked.ok;
+      }
+      if (!sent) {
+        const enter = await pressEnter(tabId);
+        if (!enter.ok) {
+          lastRefusal = enter;
+          continue;
+        }
       }
 
       // 4. verify acceptance: the EXACT fixed message `continue`
@@ -1665,6 +1914,19 @@ export function createZaiAdapter({
       // resumed generation state — the Stop control returning, the
       // composer clearing — is observed context, NEVER acceptance
       // evidence: it does not identify the recovery message.
+      // CONTINUATION 14 (PR #6 review 5124542353): the acceptance is
+      // the frozen evidence rule and is recorded AS SOON AS the exact
+      // `continue` lands with the composer decisively cleared —
+      // typically in the queued window with the Send control rendered
+      // (the reappearance trivially holding; pinned by the
+      // regressions). The boundary wait is deliberately NOT extended
+      // past a landed row: requirement 6 of the work order forbids
+      // duplicating an already-confirmed user message, and a recovery
+      // retry after an exhausted boundary wait would re-Stop the
+      // RESUMED generation and re-send `continue` — exactly the
+      // duplicate the frozen rule exists to prevent. A resumed
+      // generation observed at the acceptance read is reported as
+      // context (generation:"working"), never as the proof.
       // CONTINUATION 13: a visible dialog never ends this wait and
       // never fails it — the acceptance is decided on the
       // message/composer facts alone.

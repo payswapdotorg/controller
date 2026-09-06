@@ -93,7 +93,9 @@ test("StartZaiWorkerSession carries the exact worker/workItem/prompt and maps th
     startWorkerSession: (arg) => ({
       ok: true,
       session: { worker: arg.worker, workItem: arg.workItem, tabId: 7 },
-      submitted: { attempts: 1, composeReestablishments: 0, generation: "working" },
+      // CONTINUATION 14: the Start record's generation is the Send-reappearance
+      // boundary read ("waiting" — never recorded while the Stop control is visible).
+      submitted: { attempts: 1, composeReestablishments: 0, generation: "waiting" },
     }),
   });
   const { service } = await startedService({ adapter });
@@ -106,7 +108,7 @@ test("StartZaiWorkerSession carries the exact worker/workItem/prompt and maps th
   });
   assert.equal(result.ok, true);
   assert.deepEqual(result.session, { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 });
-  assert.deepEqual(result.submitted, { attempts: 1, composeReestablishments: 0, generation: "working" });
+  assert.deepEqual(result.submitted, { attempts: 1, composeReestablishments: 0, generation: "waiting" });
   assert.equal(adapter.calls[0].arg.prompt, prompt);
   assert.equal(adapter.calls[0].arg.workItem, "CTRL-014");
 });
@@ -152,7 +154,13 @@ test("typed adapter refusals pass through the router unchanged (no repair)", asy
 // --------------------------------------------------------------------
 
 test("the real adapter serves StartZaiWorkerSession through the router", async () => {
-  const page = fakeZaiPage({ authenticated: true, agent: { present: true, active: false } });
+  // CONTINUATION 14: generationCompletes opens the Send-reappearance
+  // boundary at which the real adapter records the acceptance.
+  const page = fakeZaiPage({
+    authenticated: true,
+    agent: { present: true, active: false },
+    generationCompletes: 1,
+  });
   const tabsApi = fakeMessagingTabsApi({ tabs: [{ id: 7, url: "https://chat.z.ai/", page }] });
   const zai = createZaiAdapter({
     tabsApi,
