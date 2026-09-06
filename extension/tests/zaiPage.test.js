@@ -124,12 +124,15 @@ function matches(element, selector) {
  * Build the page-script environment and return its listener driver.
  * The fake document supports exactly the selector grammar the
  * product uses (tag, #id, [attr], [attr="value"], tag[attr="value"],
- * and comma groups).
+ * and comma groups) plus the document's own location (the
+ * CONTINUATION-16 "location" fact — the page's routing state,
+ * defaulting to the provider's fresh-session base URL).
  */
-function buildPage(elements, { activeElement = null } = {}) {
+function buildPage(elements, { activeElement = null, locationHref = "https://chat.z.ai/" } = {}) {
   const listeners = [];
   const document = {
     body: new FakeElement({ tag: "body" }),
+    location: { href: locationHref },
     querySelectorAll(selector) {
       // Parse-validate the selector FIRST — exactly like a real
       // document (parsing precedes matching, even with zero
@@ -260,6 +263,60 @@ test("invisible elements are excluded from every probe mode", async () => {
     probes: [{ name: "buttons", selector: "button", mode: "texts" }],
   });
   assert.deepEqual(plain(result.facts.buttons), { texts: [] });
+});
+
+test("the location mode reports the document's own URL — no element, no selector needed", async () => {
+  // CONTINUATION 16 (PR #6 review 5125198728 — the chat-state
+  // observable): the page's URL is the provider's own routing state
+  // (which chat session the page holds). The probe reports it
+  // VERBATIM — no parsing, no comparison, no navigation; the
+  // interpretation lives in the adapter. The probe needs no
+  // selector (no element exists to resolve) and never fails on a
+  // bogus/absent selector string.
+  const page = buildPage([], { locationHref: "https://chat.z.ai/c/9f1e2d3c-8b7a-4c6d-9e0f-1a2b3c4d5e6f" });
+  const result = await page.send({
+    zaiPage: true,
+    op: "probe",
+    probes: [
+      { name: "pageLocation", mode: "location" },
+      { name: "withBogusSelector", selector: "not a selector at all", mode: "location" },
+    ],
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(plain(result.facts.pageLocation), {
+    href: "https://chat.z.ai/c/9f1e2d3c-8b7a-4c6d-9e0f-1a2b3c4d5e6f",
+  });
+  // The selector is irrelevant to the location fact: both probes
+  // report the same URL, never an element lookup.
+  assert.deepEqual(plain(result.facts.withBogusSelector), plain(result.facts.pageLocation));
+});
+
+test("the location mode degrades to an explicit null fact when the page has no usable location", async () => {
+  // Absence is information, exactly like every other fact probe:
+  // a document without a usable location answers href: null (never
+  // a guessed URL, never an error).
+  const listeners = [];
+  const context = vm.createContext({
+    chrome: { runtime: { onMessage: { addListener(fn) { listeners.push(fn); } } } },
+    document: { body: {}, querySelectorAll: () => [] }, // no location
+    window: { getComputedStyle: () => ({ visibility: "visible", display: "block" }) },
+    HTMLElement: FakeElement,
+    HTMLTextAreaElement: FakeElement,
+    InputEvent: FakeInputEvent,
+    KeyboardEvent: FakeKeyboardEvent,
+    MouseEvent: FakeMouseEvent,
+    Event: FakeEvent,
+    Object,
+    Array,
+    Number,
+    String,
+  });
+  vm.runInContext(PAGE_SCRIPT, context, { filename: "page/zaiPage.js" });
+  const result = await new Promise((resolve) => {
+    listeners[0]({ zaiPage: true, op: "probe", probes: [{ name: "pageLocation", mode: "location" }] }, {}, resolve);
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(plain(result.facts.pageLocation), { href: null });
 });
 
 test("a malformed probe (bad mode / bad shape) refuses the whole batch", async () => {

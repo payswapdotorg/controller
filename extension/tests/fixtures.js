@@ -597,6 +597,21 @@ export function fakeZaiPage({
   composeStuck = false,
   duplicateComposer = false,
   beforeRespond = null,
+  // CONTINUATION 16 (PR #6 review 5125198728 — the DIRECT Z.ai
+  // CHAT-STATE WORKFLOW): the page's URL, modeling the provider's
+  // own routing state (which chat session the page holds).
+  // BUNDLE-PROVEN: the provider's submission handler creates the
+  // chat object server-side on an ACCEPTED first submission (the
+  // chat id from the response -> the current-chat store ->
+  // REFRESH_AGENT_CHAT_LIST -> history.replaceState to `/c/<id>`),
+  // and the 429/capacity path returns BEFORE the creation (no
+  // chat, no URL advance). The fixture defaults to the
+  // fresh-session base URL (no chat object); a surface modeling an
+  // EXISTING chat passes `chatUrl: "https://chat.z.ai/c/<id>"` (an
+  // accepted submission never re-advances it — the chat object
+  // already exists). Read by the adapter through the page script's
+  // "location" fact probe.
+  chatUrl = null,
 } = {}) {
   // The REAL peak-hours dialog's trimmed text as captured (title +
   // body + button labels): deliberately non-auth-shaped and
@@ -607,6 +622,11 @@ export function fakeZaiPage({
   const effectiveSelectedValue = selectedValue ?? (authenticated ? "glm-5.2" : "x-preview-l");
   const initialSelectedValue = effectiveSelectedValue;
   const history = [];
+  // The provider's chat-object routing state: the fresh session
+  // sits at the origin base (no chat); an accepted first submission
+  // creates the chat and routes the page to /c/<id> (the deterministic
+  // fixture chat id).
+  const initialUrl = chatUrl ?? "https://chat.z.ai/";
   const state = {
     authenticated,
     composerValue,
@@ -629,6 +649,9 @@ export function fakeZaiPage({
     generates,
     popupOnSend,
     popupText,
+    url: initialUrl,
+    chatCreated: initialUrl.startsWith("https://chat.z.ai/c/"),
+    chatId: "c-014-fixture-7f3d",
     asyncPopup: asyncPopup
       ? {
           probes: asyncPopup.probes,
@@ -712,6 +735,24 @@ export function fakeZaiPage({
       state.lastSubmitted = state.composerValue;
       state.conversation.push(state.composerValue);
       state.composerValue = "";
+      // CONTINUATION 16 (PR #6 review 5125198728): the chat-object
+      // creation — the provider's own submission handler creates
+      // the chat server-side on an ACCEPTED first submission (the
+      // chat id from the response -> the current-chat store ->
+      // REFRESH_AGENT_CHAT_LIST -> history.replaceState to
+      // `/c/<id>`). The 429/capacity path (`asyncPopup`) returns
+      // BEFORE the creation: no chat object, no URL advance — the
+      // landed row is the provider's local optimistic echo of a
+      // submission the server refused. The block applies only while
+      // the async error is still PENDING (not yet fired): a LATER
+      // submission (e.g. the timed-Enter re-submission of the
+      // provider-restored prompt) is an ordinary fresh submission
+      // that creates the chat when accepted. An existing chat
+      // (already at /c/<id>) never re-advances.
+      if (!state.chatCreated && !(state.asyncPopup && !state.asyncPopup.fired)) {
+        state.chatCreated = true;
+        state.url = `https://chat.z.ai/c/${state.chatId}`;
+      }
       // The REAL modality: the landing happens FIRST; the capacity
       // dialog materializes only on the ASYNC error path — modeled
       // as a fact-read countdown after the send (once per Start).
@@ -891,6 +932,11 @@ export function fakeZaiPage({
   function probeFact(probe) {
     const count = (selector) => resolveList(selector).length;
     switch (probe.mode) {
+      // CONTINUATION 16: the document's own URL — the selectorless
+      // routing-state fact (mirrors the real page script's "location"
+      // mode: reported verbatim, never interpreted here).
+      case "location":
+        return { ok: true, fact: { href: state.url } };
       case "count":
         return { ok: true, fact: { count: count(probe.selector), matching: count(probe.selector) } };
       case "texts": {

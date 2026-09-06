@@ -13,7 +13,18 @@
  *
  *   { zaiPage: true, op: "probe", probes: [{ name, selector, mode }] }
  *       mode: "visible" | "enabled" | "text" | "value" | "count" | "texts"
+ *              | "location"
  *       -> { ok: true, facts: { [name]: ... } }   structural facts only
+ *
+ *       CONTINUATION 16 (PR #6 review 5125198728): the "location" mode
+ *       reports the document's own URL (href) — a GENERIC page fact
+ *       with no element, so its probe needs no selector. The page's
+ *       URL is the provider's own routing state (which chat session
+ *       the page holds); this script only REPORTS it, never
+ *       navigates, never parses it, never compares it — every
+ *       interpretation of the URL lives in the adapter. Like every
+ *       fact probe it is read-only: no action can ever be issued
+ *       through it.
  *
  *   { zaiPage: true, op: "click", selector }
  *       -> clicks the single visible+enabled match (ambiguity refuses)
@@ -54,7 +65,7 @@
 (function () {
   "use strict";
 
-  var PROBE_MODES = ["visible", "enabled", "text", "value", "count", "texts"];
+  var PROBE_MODES = ["visible", "enabled", "text", "value", "count", "texts", "location"];
   var MAX_PROBES = 64;
   var MAX_TEXT = 4000;
 
@@ -110,11 +121,20 @@
     if (typeof probe.name !== "string" || probe.name.length === 0) {
       return fail("PAGE_MALFORMED", "probe.name must be a non-empty string");
     }
-    if (typeof probe.selector !== "string" || probe.selector.length === 0) {
-      return fail("PAGE_MALFORMED", "probe.selector must be a non-empty string");
-    }
     if (PROBE_MODES.indexOf(probe.mode) === -1) {
       return fail("PAGE_MALFORMED", "probe.mode must be one of " + PROBE_MODES.join(", "));
+    }
+    // CONTINUATION 16: the document's own URL — the one selectorless
+    // fact (no element exists to resolve; the URL is the page's
+    // routing state, reported verbatim, never interpreted here). A
+    // page without a usable location answers an explicit null fact
+    // (absence is information, exactly like every other fact probe).
+    if (probe.mode === "location") {
+      var href = document.location && typeof document.location.href === "string" ? document.location.href : null;
+      return { ok: true, fact: { href: href } };
+    }
+    if (typeof probe.selector !== "string" || probe.selector.length === 0) {
+      return fail("PAGE_MALFORMED", "probe.selector must be a non-empty string");
     }
     var found = matches(probe.selector);
     if (found === null) {

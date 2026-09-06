@@ -82,6 +82,10 @@ function build({
   generationCompletes = null,
   // The CONTINUATION-14 Send-inaccessible knob (see fixtures.js).
   sendInaccessible = false,
+  // The CONTINUATION-16 chat-state URL (see fixtures.js): the page's
+  // routing state — default null models the FRESH session (the origin
+  // base, no chat object); a "/c/<id>" value models an EXISTING chat.
+  chatUrl = null,
 } = {}) {
   const pages = [];
   const tabs = [];
@@ -113,6 +117,7 @@ function build({
       duplicateSend,
       generationCompletes,
       sendInaccessible,
+      chatUrl,
     });
     pages.push(page);
     tabs.push({ id: 7 + i, url: "https://chat.z.ai/", title: "Z.ai", page });
@@ -308,6 +313,147 @@ test("the PROVISIONING WAIT: a fresh-session surface that is not yet ready becom
   assert.equal(result.submitted.generation, "working");
   assert.equal(built.pages[0].state.conversation.includes(PROMPT), true);
   assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 0); // the signal arrived before any cadence tick
+});
+
+test("PROVISIONING-NOT-READY: a fresh Agent-mode session whose surface never becomes a ready input fails closed with the typed provisioning refusal — the exact prompt is never typed, nothing is ever sent, and the Enter cadence never starts", async () => {
+  // CONTINUATION 16 (PR #6 review 5125198728, requirements 1 + 9 —
+  // the "provisioning-not-ready" regression): the creation of the
+  // fresh Agent-mode chat/session is an ASYNCHRONOUS provider
+  // operation; the most reliable observable that provisioning
+  // completed is the composer becoming a visible ENABLED input. The
+  // surface here passes the initial precheck (ready before the mode
+  // switch), then re-provisions on the Agent-mode switch and NEVER
+  // readies again (the hung provisioning window): the bounded
+  // PROVISIONING WAIT exhausts and Start fails closed with the
+  // TYPED provisioning refusal — the exact prompt is never typed
+  // into an unprovisioned surface, nothing is ever sent, no Enter
+  // is ever issued, and nothing ever lands.
+  const AGENT_PILL = "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type";
+  const built = build({
+    beforeRespond: (message, state) => {
+      // The fresh Agent-mode session re-provisions after the mode
+      // switch: the composer (an enabled input at the precheck)
+      // becomes a not-yet-ready input, and provisioning NEVER
+      // completes (the hung window).
+      if (message.op === "click" && message.selector === AGENT_PILL) {
+        state.__provisioning = true;
+      }
+      if (state.__provisioning && message.op === "probe") {
+        state.composerDisabled = true;
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "RETRY_EXHAUSTED");
+  assert.ok(/did not complete provisioning/.test(result.error.message), result.error.message);
+  assert.ok(/asynchronous provider operation/.test(result.error.message), result.error.message);
+  const history = built.pages[0].history().filter((c) => c.op !== "probe");
+  assert.equal(history.filter((c) => c.op === "type").length, 0); // never typed into the unprovisioned surface
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 0); // never sent
+  assert.equal(history.filter((c) => c.op === "pressEnter").length, 0); // the watch never started
+  assert.equal(built.pages[0].state.conversation.length, 0); // nothing landed
+  assert.equal(result.submitted, undefined); // never a claimed submission
+});
+
+test("THE CHAT-STATE CREATION FACT: a successful Start on a FRESH session carries the provider's own chat-object creation — the session URL advanced from the origin base to the /c/<chatId> route (the bundle-proven accepted-submission routing)", async () => {
+  // CONTINUATION 16 (PR #6 review 5125198728, requirement 4 candidate
+  // (a) — "the appearance/creation of the chat object/session state
+  // after provisioning"): the provider's submission handler creates
+  // the chat server-side on the ACCEPTED first submission (the chat
+  // id from the response -> the current-chat store ->
+  // REFRESH_AGENT_CHAT_LIST -> history.replaceState(`/c/<id>`) —
+  // BUNDLE-PROVEN) and the 429/capacity path returns BEFORE the
+  // creation. The fixture models the same machine: the fresh session
+  // starts at the origin base (no chat object), the accepted
+  // submission creates the chat and advances the URL, and the start
+  // signal (the Stop slot + the decisively empty composer + the chat
+  // object created — the combined detector) is observed on exactly
+  // that surface.
+  const built = build();
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.generation, "working"); // the start signal itself
+  // The chat object was created by the accepted submission: the URL
+  // advanced from the origin base to the chat route.
+  assert.equal(built.pages[0].state.chatCreated, true);
+  assert.ok(built.pages[0].state.url.startsWith("https://chat.z.ai/c/"), built.pages[0].state.url);
+  // The landed row and the cleared composer are the CONTEXT facts.
+  assert.ok(built.pages[0].state.conversation.includes(PROMPT));
+  assert.equal(built.pages[0].state.composerValue, "");
+});
+
+test("THE FOREIGN-GENERATION FALSE POSITIVE on a fresh session: a Stop control over a decisively empty composer with the chat object NEVER created (the submission was never accepted) is NOT the start signal — Start fails closed, never ok:true", async () => {
+  // CONTINUATION 16 (PR #6 review 5125198728, requirement 4 —
+  // "combine signals when needed for confidence"): the c15 detector
+  // (the Stop slot + the decisively empty composer alone) could not
+  // distinguish OUR accepted generation from a FOREIGN one on a
+  // fresh session where the input state was discarded around the
+  // send and a foreign generation holds the action slot. The
+  // provider's own routing state closes the gap: OUR accepted
+  // submission CREATES the chat object (the URL advance —
+  // bundle-proven), so a Stop control over an empty composer with
+  // NO chat object is a foreign generation, never our start signal.
+  // MACHINE-DIFFERENTIATED: the c15 detector accepted exactly this
+  // surface as ok:true (the git-stash differential against the
+  // pre-c16 zaiAdapter.js fails this regression at the first watch
+  // round).
+  const built = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button") {
+        // The input state is discarded around the send (the c6
+        // failure mode) AND a foreign generation takes the action
+        // slot: the provider's own concurrency gate never accepted
+        // OUR prompt — the chat object is never created, the URL
+        // never advances.
+        state.__foreign = true;
+      }
+      if (state.__foreign && message.op === "probe") {
+        state.__foreign = false;
+        state.composerValue = ""; // the input was discarded
+        state.stop.visible = true; // the FOREIGN generation holds the slot
+        state.conversation = state.conversation.filter((t) => t !== PROMPT); // nothing of ours landed
+        // The provider's concurrency gate refused OUR submission
+        // BEFORE the chat creation (the bundle's 429-before-create
+        // path): no chat object, no URL advance.
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.submitted, undefined); // NEVER a claimed submission — the c15 false positive is closed
+  // The surface's own routing state held: the chat object was never
+  // created (the URL never advanced past the origin base).
+  assert.equal(built.pages[0].state.chatCreated, false);
+  assert.equal(built.pages[0].state.url, "https://chat.z.ai/");
+  assert.ok(!built.pages[0].state.conversation.includes(PROMPT)); // our prompt never landed
+  // The failure is typed and routed by the chat state: the first
+  // exhaustion (empty composer, no evidence, NO chat object) took
+  // the safe compose re-establishment, and the bounded attempts
+  // ended in a typed refusal.
+  assert.ok(["PAGE_MALFORMED", "AMBIGUOUS_STATE", "RETRY_EXHAUSTED"].includes(result.error.code));
+});
+
+test("THE EXISTING-CHAT VACUITY LAW: on an existing chat (the session URL already at /c/<chatId> at dispatch) the start signal is the Stop slot + the decisively empty composer alone — the chat-state conjunct is vacuous, and no new URL advance is required", async () => {
+  // CONTINUATION 16: an existing chat's URL is already at a chat
+  // route BEFORE the submission — the chat-object-creation conjunct
+  // applies only to FRESH sessions (the provider's URL advance
+  // happens exactly once, at the accepted FIRST submission; the
+  // mid-conversation recovery's `continue` submissions ride the
+  // same law). On the existing chat the detector is the Stop-slot +
+  // empty-composer reading, with no spurious URL requirement.
+  const built = build({ chatUrl: "https://chat.z.ai/c/existing-chat-77" });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.generation, "working");
+  // The URL never re-advanced (the chat object already existed) and
+  // the acceptance needed no new URL fact — the conjunct was vacuous.
+  assert.equal(built.pages[0].state.url, "https://chat.z.ai/c/existing-chat-77");
+  assert.equal(built.pages[0].state.chatCreated, true);
+  assert.ok(built.pages[0].state.conversation.includes(PROMPT));
+  assert.equal(built.pages[0].state.composerValue, "");
 });
 
 test("the signal appears only AFTER one or more 5-second Enter retries: the queued generation becomes active mid-watch and ALL Enter retries stop IMMEDIATELY at the signal (the cessation law)", async () => {
@@ -807,21 +953,26 @@ test("a PERSISTENTLY blocking dialog the adapter does not recognize: the timed E
   assert.ok(!built.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
 });
 
-test("the asynchronous peak-hours dialog materializing after the send: the adapter stays dialog-blind — the never-starting generation fails closed with the queued/unobserved diagnosis, the landed message is NEVER resent, and the Enter cadence is the only recovery attempted", async () => {
+test("the asynchronous peak-hours dialog materializing after the send: the adapter stays dialog-blind — the refused submission fails closed with the REFUSED-ECHO diagnosis (the landed row is the provider's local optimistic echo — never resent), and the Enter cadence is the only recovery attempted", async () => {
   // The REAL provider modality (LIVE-OBSERVED, the operator's captured
   // run): the "Currently in peak hours" capacity dialog materializes
   // only when the ASYNC error arrives — after the optimistic landing
   // (the exact user-message row + the cleared composer). CONTINUATION
   // 15: the capacity rejection means NO generation started — the
-  // start signal never appears, the watch fails closed with the
-  // queued/completed-unobserved diagnosis (the message evidence is
-  // CONTEXT ONLY — never the acceptance predicate, and a landed
-  // message is never resent: exactly one type, exactly one send). The
-  // dialog is never inspected; the Enter nudges are issued on the
-  // clock, and the provider's own key routing decides what they do
-  // (the fixture models the dialog capturing the first Enter — the
-  // dismissal is the provider's behavior, not adapter popup
-  // semantics).
+  // start signal never appears, the watch fails closed (the message
+  // evidence is CONTEXT ONLY — never the acceptance predicate, and a
+  // landed message is never resent: exactly one type, exactly one
+  // send). CONTINUATION 16: the 429/capacity path returns BEFORE the
+  // chat creation (BUNDLE-PROVEN), so the surface's own routing state
+  // proves the submission was REFUSED server-side — the exhaustion
+  // diagnoses the landed row as the provider's LOCAL OPTIMISTIC ECHO
+  // of a refused submission (the sharper, chat-state-routed
+  // refusal; the pre-c16 queued/unobserved wording named the wrong
+  // modality for exactly this surface). The dialog is never
+  // inspected; the Enter nudges are issued on the clock, and the
+  // provider's own key routing decides what they do (the fixture
+  // models the dialog capturing the first Enter — the dismissal is
+  // the provider's behavior, not adapter popup semantics).
   const built = build({
     generates: false, // the capacity error means no generation started
     popupAfterSend: { probes: 1 }, // materializes on the 1st fact read after the send
@@ -829,7 +980,8 @@ test("the asynchronous peak-hours dialog materializing after the send: the adapt
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
-  assert.ok(/queued or have completed unobserved/.test(result.error.message), result.error.message);
+  assert.ok(/local echo of a submission the server REFUSED/.test(result.error.message), result.error.message);
+  assert.ok(/chat object was never created/.test(result.error.message), result.error.message);
   assert.equal(Object.keys(result.submitted ?? {}).length, 0); // never a claimed submission
   const history = built.pages[0].history();
   assert.equal(history.filter((c) => c.op === "type").length, 1); // typed exactly once
@@ -889,8 +1041,13 @@ test("a send that clears the composer without message-evidence confirmation is N
       if (message.op === "probe") {
         // The adversarial provider state: the message evidence NEVER
         // contains the exact prompt (the hook filters it out of every
-        // observation; the send click itself always succeeds).
+        // observation; the send click itself always succeeds). CONTINUATION
+        // 16: the submission also never creates the chat object (the
+        // surface never accepted it — the URL state resets with the
+        // filtered row, the bundle's refused-before-creation path).
         state.conversation = state.conversation.filter((t) => t !== PROMPT);
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
       }
     },
   });
@@ -977,6 +1134,11 @@ test("a weak surface carrying the prompt NEVER confirms an unlanded submission (
     beforeRespond: (message, state) => {
       if (message.op === "probe") {
         state.conversation = state.conversation.filter((t) => t !== PROMPT);
+        // CONTINUATION 16: the submission never landed, so the chat
+        // object was never created (the refused-before-creation
+        // semantics) — the URL state resets with the filtered row.
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
       }
     },
   });
@@ -1055,6 +1217,11 @@ test("the second observed failure mode: a send that discards the prompt (empty c
         if (state.conversation[state.conversation.length - 1] === PROMPT) {
           state.conversation.pop(); // the submission did not land
         }
+        // CONTINUATION 16: the submission did not land, so the chat
+        // object was never created either (the provider's refused-
+        // before-creation path) — the URL state resets with the row.
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
         state.stop.visible = false; // nothing is generating
       }
     },
@@ -1107,6 +1274,11 @@ test("a compose control whose click never re-establishes an enabled composer fai
         if (state.conversation[state.conversation.length - 1] === PROMPT) {
           state.conversation.pop();
         }
+        // CONTINUATION 16: the submission did not land, so the chat
+        // object was never created either (the provider's refused-
+        // before-creation path) — the URL state resets with the row.
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
         state.stop.visible = false;
       }
     },
@@ -1147,7 +1319,11 @@ test("an ABSENT compose control fails closed: the discarded-input-state recovery
         // The submission never lands on ANY attempt: the message
         // evidence never carries the prompt, and nothing ever
         // generates (the "waiting" shape of the live capture).
+        // CONTINUATION 16: the chat object is never created either
+        // (the refused-before-creation semantics).
         state.conversation = state.conversation.filter((t) => t !== PROMPT);
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
         state.stop.visible = false;
       }
     },
@@ -1185,6 +1361,11 @@ test("an AMBIGUOUS compose control (two data-active buttons in the composer form
     beforeRespond: (message, state) => {
       if (message.op === "probe") {
         state.conversation = state.conversation.filter((t) => t !== PROMPT);
+        // CONTINUATION 16: the chat object is never created (the
+        // refused-before-creation semantics — the URL resets with
+        // the filtered row).
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
         state.stop.visible = false;
       }
     },
@@ -1300,6 +1481,11 @@ test("every ok:true Start with a submission carries EXACTLY the popup-free three
         if (state.conversation[state.conversation.length - 1] === PROMPT) {
           state.conversation.pop();
         }
+        // CONTINUATION 16: the submission did not land, so the chat
+        // object was never created either (the provider's refused-
+        // before-creation path) — the URL state resets with the row.
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
         state.stop.visible = false;
       }
     },
@@ -1363,8 +1549,16 @@ test("the operator's captured near-miss run: a user-message row that lost the pr
   });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: GOVERNED });
   assert.equal(result.ok, false, JSON.stringify(result));
-  assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/was not present in the composer/.test(result.error.message), result.error.message);
+  // CONTINUATION 16: the captured surface's turn actually completed
+  // (the captured assistant capacity reply proves it), so the chat
+  // object EXISTS on this surface — the exhaustion routes the
+  // ACCEPTED-NOT-STARTED diagnosis (the compose re-establishment is
+  // chat-state-gated OFF: the input was not discarded; the provider
+  // accepted SOMETHING — the near-miss — and the bounded attempts
+  // re-verify byte-identically through the ordinary gate path, the
+  // provider's own concurrency gate the only duplicate guard).
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/chat object was created/.test(result.error.message), result.error.message);
   // The typed chain is byte-identical INCLUDING the leading
   // character: every bounded attempt typed the FULL governed prompt.
   const typedTexts = built.pages[0].history().filter((c) => c.op === "type").map((c) => c.text);
@@ -1377,10 +1571,13 @@ test("the operator's captured near-miss run: a user-message row that lost the pr
   assert.ok(!built.pages[0].state.conversation.includes(GOVERNED)); // never claimed submitted
   const sends = built.pages[0].history().filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
   assert.equal(sends, 3); // the bounded budget of send attempts
-  // The bounded compose re-establishment ran once per exhausted
-  // attempt (the cleared-but-unconfirmed second failure mode).
+  // CONTINUATION 16: the compose re-establishment is chat-state-gated
+  // OFF on this surface (the chat object exists — the captured
+  // assistant reply proves a completed turn): the input was not
+  // discarded, so the circular-control recovery never fires; the
+  // bounded attempts re-type through the ordinary gate-verified path.
   const composeClicks = built.pages[0].history().filter((c) => c.op === "click" && c.selector === COMPOSE_CONTROL).length;
-  assert.equal(composeClicks, 3);
+  assert.equal(composeClicks, 0);
 });
 
 test("an ASSISTANT echo of the exact prompt in a mixed message REGION is never USER-message acceptance evidence — the region path is removed, and re-adding it fails this regression", async () => {
@@ -1542,7 +1739,13 @@ test("a Start whose exact prompt is ALREADY in the message evidence with a decis
   // fails closed with the queued/completed-unobserved diagnosis —
   // the message evidence is context only, never the acceptance
   // predicate, and never a resend trigger.
-  const { adapter, pages } = build({ conversation: [PROMPT] });
+  const { adapter, pages } = build({
+    conversation: [PROMPT],
+    // CONTINUATION 16: a landed prompt means an accepted submission —
+    // the session's chat object exists (the surface is an EXISTING
+    // chat at /c/<id>, not a fresh session at the origin base).
+    chatUrl: "https://chat.z.ai/c/prior-session-42",
+  });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
@@ -1968,8 +2171,12 @@ test("the control-state channel is part of every observation: a decisively DISAB
         // The adversarial surface: the message row never lands (the
         // send discards the prompt from the evidence surface while
         // the composer reads decisively empty and the send control
-        // stays decisively disabled).
+        // stays decisively disabled). CONTINUATION 16: the chat
+        // object never lands either (the refused-before-creation
+        // semantics).
         state.conversation = state.conversation.filter((t) => t !== PROMPT);
+        state.chatCreated = false;
+        state.url = "https://chat.z.ai/";
       }
     },
   });

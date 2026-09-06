@@ -35,66 +35,93 @@
  *        or unresolvable slot, or a send click that fails, all route
  *        into the AGENT-START WATCH, whose timed Enter cadence is
  *        the recovery;
- *     7. THE AGENT-START WATCH — the new governed acceptance: a
- *        bounded watch for the reliable provider signal that the
- *        Z.ai Agent has ACTUALLY STARTED WORKING on the prompt.
- *        THE DETECTOR (the strongest live-observable provider-owned
- *        signal, chosen from the provider's own bundle-extracted and
- *        live-observed state machine): the Send->Stop ACTION-CONTROL
- *        TRANSITION — the composer action slot swapping from the
- *        send control to the Stop control. The provider's own
- *        reactive render conditional is "no current message or the
- *        current message is done -> send control; otherwise -> Stop
- *        control" (mutually exclusive rendering, LIVE-OBSERVED), and
- *        a current message is not done exactly while an Agent
- *        generation is in flight, so the Stop control rendering
- *        (with the send control absent) is the provider's OWN
- *        computed proof that an Agent turn is actively being
- *        processed — never our inference from popup shape,
- *        conversation text, or a timer. The runner-up signals were
- *        investigated and are NOT used: the chat object's
- *        history.messages/currentId mutation fires at submit time as
- *        a LOCAL optimistic echo (before any network outcome — a
- *        capacity rejection can still withdraw it), lives in a
- *        closure-scoped Svelte store (NOT a window global — not
- *        observable through the supported extension surface), and
- *        its DOM reflections are the eliminated broad/region
- *        surfaces; assistant-generated text is contract-forbidden as
- *        a criterion; network/SSE events are not observable through
- *        the closed page vocabulary.
+ *     6b. THE PROVISIONING WAIT (CONTINUATION 16, PR #6 review
+ *         5125198728 — "IMPLEMENT THE DIRECT Z.AI CHAT-STATE
+ *         WORKFLOW NOW", requirement 1): the creation of the fresh
+ *         Agent-mode chat/session is treated as an ASYNCHRONOUS
+ *         provider operation. The most reliable live-observable that
+ *         provisioning completed: the composer becoming a VISIBLE,
+ *         ENABLED, decisive input (the provider's own readiness —
+ *         the surface it renders only from the provisioned session
+ *         state). A bounded wait after the Agent/model preparation;
+ *         a surface that never readies fails closed with the typed
+ *         provisioning refusal (the exact prompt is never typed into
+ *         an unprovisioned surface);
+ *     7. THE AGENT-START WATCH — the governed acceptance, REVISED by
+ *        CONTINUATION 16 (PR #6 review 5125198728, requirements
+ *        4-6): a bounded watch for the reliable provider signal that
+ *        the Z.ai Agent has ACTUALLY STARTED WORKING. THE DETECTOR —
+ *        the review's three candidates investigated, the smallest
+ *        deterministic live-observable signal chosen, signals
+ *        combined for confidence:
+ *          (c) THE PRIMARY: the Send->Stop ACTION-CONTROL TRANSITION
+ *              — the composer action slot swapping to the Stop
+ *              control (the provider's mutually exclusive render
+ *              conditional "no current message or the current
+ *              message is done -> send control; otherwise -> Stop
+ *              control", LIVE-OBSERVED; a current message is not
+ *              done exactly while an Agent generation is in flight),
+ *              with the composer DECISIVELY EMPTY (the draft
+ *              consumed — a prompt still held in the composer is the
+ *              provider's own proof the submission was NOT consumed);
+ *          (a) THE FRESH-SESSION CONJUNCT: the CHAT OBJECT CREATED —
+ *              the session URL advanced to /c/<chatId>. BUNDLE-PROVEN:
+ *              the provider's submission handler creates the chat
+ *              server-side on the ACCEPTED first submission (the
+ *              chat id from the response -> the current-chat store ->
+ *              REFRESH_AGENT_CHAT_LIST -> history.replaceState) and
+ *              the 429/capacity path returns BEFORE the creation (no
+ *              chat, no URL advance) — the URL advance is the
+ *              provider's own computed proof of an ACCEPTED
+ *              submission. Required only when the chat object did
+ *              NOT exist at dispatch (a fresh session; on an existing
+ *              chat the conjunct is vacuous — its URL is already at
+ *              a chat route). A foreign generation over a discarded
+ *              input on a fresh session has a Stop control and an
+ *              empty composer but NO chat object — never our start
+ *              signal;
+ *          (b) INVESTIGATED, NOT USED as a predicate: the chat
+ *              history/current-turn advancement (the user-message
+ *              row) is a submit-time LOCAL optimistic echo the
+ *              server can withdraw (the observed capacity
+ *              rejection) — CONTEXT ONLY under this contract. The
+ *              chat object's store is closure-scoped (NOT a window
+ *              global), its URL reflection IS the page-observable
+ *              form (the (a) conjunct); assistant-generated text is
+ *              contract-forbidden; network/SSE events are not
+ *              observable through the closed page vocabulary.
  *        THE WATCH LOOP: while the start signal is absent and no
  *        decisive failure surface appears, press Enter ONCE EVERY
  *        agentStartEnterIntervalMs (5 seconds) — Enter is ONLY a
- *        recovery/dismissal nudge (the provider's own composer
- *        keybinding submits the focused composer's non-empty text;
- *        the provider's own submission gate — its submitPrompt
- *        refuses while the last message is not done — prevents a
- *        second prompt while a generation is running; Enter on a
- *        visible dialog confirms/dismisses it; an empty composer
- *        makes it a no-op: the PROVIDER decides what the Enter
- *        does, no artificial duplicate-submission assumptions are
- *        added) — then RE-CHECK the real provider state. The watch
- *        stops pressing Enter IMMEDIATELY when the start signal is
- *        observed, records the session (generation:"working" — the
- *        Stop control visible at the recording read), and returns
- *        for Architect review. A decisive failure surface
+ *        recovery/dismissal nudge, never an intentional second
+ *        submit (the provider's key routing decides: the focused
+ *        composer may submit it — the provider's own
+ *        single-generation constraint is the duplicate guard, no
+ *        artificial client-side race prohibition is invented; an
+ *        obstruction-holding dialog may capture it; an empty
+ *        composer makes it a no-op) — then RE-CHECK the real
+ *        provider state. The watch stops pressing Enter IMMEDIATELY
+ *        when the start signal is observed (requirement 5: the
+ *        control returns for Architect review — the final model
+ *        output is NEVER waited for), records the session
+ *        (generation:"working" — the Stop control visible at the
+ *        recording read), and returns. A decisive failure surface
  *        (authentication required, a provider error) ends the watch
  *        with the typed refusal. The TOTAL retry window is bounded
  *        (agentStartEnters x agentStartEnterIntervalMs); when the
  *        start signal never appears the watch FAILS CLOSED with the
- *        typed agent-start-timeout diagnosis (the exhaustion
- *        analysis routes the final facts: a contradictory or
- *        unresolvable action slot refuses as the untrustworthy
- *        surface; the composer holding the exact prompt routes the
- *        bounded re-send attempt; a decisively empty composer
- *        without message evidence routes the compose
- *        re-establishment; the prompt landed in the message evidence
- *        without a start signal stays fail-closed — the generation
- *        may still be queued or have completed unobserved, and the
- *        operator observes or re-invokes; the message evidence is
- *        CONTEXT ONLY under this contract, never the acceptance
- *        predicate — the review explicitly supersedes "exact
- *        USER-message evidence as the sole acceptance predicate").
+ *        typed agent-start-timeout diagnosis ROUTED THROUGH THE CHAT
+ *        STATE (the provider's own accepted/refused computation):
+ *        the untrustworthy surfaces refuse; the composer holding
+ *        the exact prompt routes the bounded re-send attempt; the
+ *        landed row with NO chat object is diagnosed the provider's
+ *        local optimistic echo of a REFUSED submission (never
+ *        resent); the landed row WITH the chat object is the
+ *        queued/completed-unobserved context-only diagnosis; a
+ *        decisively empty composer with NO chat object routes the
+ *        compose re-establishment (nothing was accepted); with the
+ *        chat object created it stays fail-closed (never a re-typed
+ *        resend that could duplicate an accepted submission).
  *
  *   provider dialogs are NOT a governed signal (continuation 13, PR
  *   #6 review 5124488246 — the ARCHITECT work order "REMOVE POPUP
@@ -475,6 +502,15 @@ export function createZaiAdapter({
     { name: "composerEnabled", selector: ZAI_LOCATORS.composer, mode: "enabled" },
     { name: "composerValue", selector: ZAI_LOCATORS.composer, mode: "value" },
     { name: "sendVisible", selector: ZAI_LOCATORS.send, mode: "visible" },
+    // CONTINUATION 16 (PR #6 review 5125198728 — the DIRECT Z.ai
+    // CHAT-STATE WORKFLOW): the page's own URL — the provider's
+    // routing state (which chat session the page holds). The generic
+    // "location" fact probe (page/zaiPage.js) reports
+    // document.location.href verbatim with NO element and NO
+    // selector; the /c/ interpretation lives HERE (chatObjectCreatedOf
+    // below), never in the page script — the provider boundary holds
+    // (the URL fact itself is generic page execution).
+    { name: "pageLocation", mode: "location" },
     // CONTINUATION 12 (PR #6 comment 5557322324, requirements 2-3): the
     // provider's OWN computed composer-emptiness signal. The provider
     // bundle computes `#send-message-button`.disabled from the composer
@@ -620,6 +656,37 @@ export function createZaiAdapter({
   function sendEnabledOf(facts) {
     const enabled = facts.sendEnabled?.enabled;
     return typeof enabled === "boolean" ? enabled : null;
+  }
+
+  /**
+   * @private — CONTINUATION 16 (PR #6 review 5125198728, requirement 4
+   * candidate (a) — "the appearance/creation of the chat object/session
+   * state after provisioning"): the CHAT-STATE fact, read from the
+   * page's own URL (the provider's routing state). BUNDLE-PROVEN: the
+   * provider's submission handler creates the chat object server-side
+   * on an ACCEPTED first submission (the chat id from the response ->
+   * the current-chat store -> REFRESH_AGENT_CHAT_LIST ->
+   * history.replaceState(`/c/${chatId}`)) and the 429/capacity path
+   * returns BEFORE the creation (no chat, no URL advance) — the URL
+   * advance is the provider's own computed proof that the submission
+   * was accepted and the chat object exists. Returns:
+   *   true  — the page holds a chat object (the URL routed to /c/...);
+   *   false — the fresh-session base URL (no chat object yet);
+   *   null  — the location fact absent or unparsable (never guessed;
+   *           callers fail closed on null wherever the reading is
+   *           load-bearing — a stale page script that never answers
+   *           the location fact can never satisfy the start signal).
+   */
+  function chatObjectCreatedOf(facts) {
+    const href = facts.pageLocation?.href;
+    if (typeof href !== "string" || href.length === 0) {
+      return null;
+    }
+    try {
+      return new URL(href).pathname.startsWith("/c/");
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1309,29 +1376,45 @@ export function createZaiAdapter({
 
       /**
      * CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305 — the
-     * superseded Send-reappearance/message-evidence state machine):
-     * THE AGENT-START WATCH — the bounded watch for the provider-owned
-     * signal that the Z.ai Agent has ACTUALLY STARTED WORKING. The
-     * detector (agentStartedOf): the composer action slot rendering
-     * the Stop control (the send control absent — the provider's
-     * mutually exclusive slot machine) with the composer DECISIVELY
-     * empty (the draft consumed — a prompt still held in the composer
-     * is the provider's own proof the submission was NOT consumed, so
-     * a Stop control over a text-holding composer is a foreign or
-     * unconsumed generation, never our start signal). THE WATCH LOOP:
-     * rounds of bounded observation (the settle budget per round) for
-     * the start signal or a decisive failure surface; while the round
-     * is unresolved, ONE Enter is issued per agentStartEnterIntervalMs
-     * (the contract's exact 5-second cadence — the timed recovery
-     * nudge, never a submission mechanism: whatever the provider's key
-     * routing does with it is the provider's own behavior, re-checked
-     * by the next observation), for at most agentStartEnters rounds.
-     * THE WATCH STOPS PRESSING ENTER IMMEDIATELY when the start signal
-     * is observed (the round's observation ends the watch before the
-     * next Enter). One final observation round runs after the last
-     * Enter (the signal may follow it); the exhaustion then FAILS
-     * CLOSED with the typed agent-start-timeout diagnosis, routing the
-     * final facts:
+     * superseded Send-reappearance/message-evidence state machine),
+     * REVISED by CONTINUATION 16 (PR #6 review 5125198728 — the DIRECT
+     * Z.ai CHAT-STATE WORKFLOW): THE AGENT-START WATCH — the bounded
+     * watch for the provider-owned signal that the Z.ai Agent has
+     * ACTUALLY STARTED WORKING. THE DETECTOR (startSignalOf): the
+     * composer action slot rendering the Stop control (the send control
+     * absent — the provider's mutually exclusive slot machine) with the
+     * composer DECISIVELY EMPTY (the draft consumed — a prompt still
+     * held in the composer is the provider's own proof the submission
+     * was NOT consumed, so a Stop control over a text-holding composer
+     * is a foreign or unconsumed generation, never our start signal)
+     * AND, on a fresh session (the chat object did NOT exist at
+     * dispatch — the session URL was at the origin base), the CHAT
+     * OBJECT CREATED (the session URL advanced to /c/... — the
+     * provider's own computed proof the submission was ACCEPTED: the
+     * bundle-proven chat creation runs on the accepted first
+     * submission and is skipped by the refused one; review requirement
+     * 4 candidate (a), combined with (c) for confidence — a foreign
+     * generation over a discarded input on a fresh session has a Stop
+     * control and an empty composer but NO chat object, and is never
+     * our start signal). On an existing chat (the URL already at
+     * /c/... at dispatch) the chat-state conjunct is vacuous — the
+     * Stop-slot + empty-composer reading carries the signal alone.
+     * THE WATCH LOOP: rounds of bounded observation (the settle budget
+     * per round) for the start signal or a decisive failure surface;
+     * while the round is unresolved, ONE Enter is issued per
+     * agentStartEnterIntervalMs (the contract's exact 5-second cadence —
+     * the timed recovery nudge, never a submission mechanism: whatever
+     * the provider's key routing does with it is the provider's own
+     * behavior, re-checked by the next observation), for at most
+     * agentStartEnters rounds. THE WATCH STOPS PRESSING ENTER
+     * IMMEDIATELY when the start signal is observed (the round's
+     * observation ends the watch before the next Enter; review
+     * requirement 5 — the control returns for Architect review, never
+     * waiting for the final model output). One final observation round
+     * runs after the last Enter (the signal may follow it); the
+     * exhaustion then FAILS CLOSED with the typed agent-start-timeout
+     * diagnosis, routing the final facts THROUGH THE CHAT STATE (the
+     * provider's own accepted/refused computation):
      *   - a decisive failure surface (authentication required / a
      *     provider error) -> the typed refusal;
      *   - a contradictory or unresolvable action slot -> the
@@ -1340,30 +1423,50 @@ export function createZaiAdapter({
      *     bounded RE-SEND attempt (the next outer attempt re-verifies
      *     it byte-identically and re-sends through the send control);
      *   - the correlated text landed in the message evidence with a
-     *     decisively empty composer and NO start signal -> STAYS
-     *     fail-closed: the generation may be queued or have completed
-     *     unobserved, and the message evidence is CONTEXT ONLY under
-     *     this contract (never the acceptance predicate, never a
-     *     resend trigger — a landed message is never duplicated);
+     *     decisively empty composer and NO start signal: with the chat
+     *     object created (the URL advanced) -> the queued or
+     *     completed-unobserved diagnosis (the submission was accepted;
+     *     the evidence is CONTEXT ONLY under this contract — never the
+     *     acceptance predicate, never a resend trigger); with NO chat
+     *     object (the URL never advanced) -> the refused-submission
+     *     diagnosis (the landed row is the provider's local optimistic
+     *     echo of a submission the server REFUSED — the observed
+     *     capacity-rejection modality; the operator observes or
+     *     re-invokes, never a resend);
      *   - the post-response surface (the Regenerate control) with a
      *     decisively empty composer -> the completed-unobserved
      *     diagnosis;
-     *   - a decisively empty composer with no evidence -> the compose
-     *     RE-ESTABLISHMENT (the input state was discarded around the
-     *     send attempt; the next attempt re-types the exact text).
+     *   - a decisively empty composer with no evidence and NO chat
+     *     object -> the compose RE-ESTABLISHMENT (the input state was
+     *     discarded around the send attempt — nothing was accepted;
+     *     the next attempt re-types the exact text); with the chat
+     *     object created (or the chat state unreadable) -> the
+     *     accepted-not-started fail-closed refusal (NEVER the
+     *     re-establishment: the submission may have been accepted, and
+     *     a re-typed resend could duplicate it — the operator observes
+     *     or re-invokes).
      *
      * @param {number} tabId the provider tab
      * @param {string} correlate the exact governed text whose
      *        submission the watch correlates to (the governed prompt
      *        for Start; the fixed recovery message for Recover)
+     * @param {boolean} chatExistedAtDispatch whether the chat object
+     *        already existed when the correlated text was dispatched
+     *        (an existing chat's URL is already at /c/... — the
+     *        chat-state conjunct is vacuous for the watch)
      * @returns {Promise<{ started?: object, refusal: object,
      *                    reestablished?: boolean }>}
      */
-    const watchAgentStart = async (tabId, correlate) => {
+    const watchAgentStart = async (tabId, correlate, chatExistedAtDispatch) => {
+      /** The start signal: the review's combined detector. */
+      const startSignalOf = (f) =>
+        agentStartedOf(f) &&
+        composerValueOf(f) === "" &&
+        (chatExistedAtDispatch || chatObjectCreatedOf(f) === true);
       /** One observation round: decisive on the start signal or a failure surface. */
       const observeRound = async () => {
         const decisive = (f) => {
-          if (agentStartedOf(f) && composerValueOf(f) === "") {
+          if (startSignalOf(f)) {
             return true; // THE START SIGNAL (the provider's own computed proof)
           }
           const verdict = classifySession(f, null);
@@ -1375,7 +1478,7 @@ export function createZaiAdapter({
       for (let round = 0; round < agentStartEnters; round += 1) {
         const observed = await observeRound();
         lastRead = observed;
-        if (observed.ok && agentStartedOf(observed.facts) && composerValueOf(observed.facts) === "") {
+        if (observed.ok && startSignalOf(observed.facts)) {
           return { started: observed.facts, refusal: null };
         }
         if (observed.ok) {
@@ -1415,7 +1518,7 @@ export function createZaiAdapter({
       // may have followed the last Enter.
       const final = await observeRound();
       lastRead = final;
-      if (final.ok && agentStartedOf(final.facts) && composerValueOf(final.facts) === "") {
+      if (final.ok && startSignalOf(final.facts)) {
         return { started: final.facts, refusal: null };
       }
       // EXHAUSTION: the typed agent-start-timeout diagnosis, routed by
@@ -1446,6 +1549,10 @@ export function createZaiAdapter({
       }
       const composerValue = composerValueOf(f);
       const evidence = messageEvidenceContains(f, correlate);
+      // CONTINUATION 16: the chat-state routing — the provider's own
+      // accepted/refused computation (the URL advance is the
+      // bundle-proven chat-object creation on acceptance).
+      const chatCreated = chatObjectCreatedOf(f);
       if (composerValue === correlate) {
         // The correlated text is STILL in the composer: the submission
         // was not consumed (the provider returned it, or the Enter
@@ -1464,8 +1571,25 @@ export function createZaiAdapter({
       }
       if (composerValue === "") {
         if (evidence) {
+          if (chatCreated === false) {
+            // CONTINUATION 16: the landed row with NO chat object —
+            // the provider's own routing state proves the submission
+            // was REFUSED server-side (the 429/capacity path returns
+            // before the chat creation): the row is the provider's
+            // local optimistic echo, not an accepted submission.
+            // CONTEXT ONLY — never resent (a landed row is never
+            // duplicated); the operator observes or re-invokes.
+            return {
+              started: null,
+              refusal: failure(
+                "AMBIGUOUS_STATE",
+                "the agent-start watch exhausted its bounded window without the start signal — the exact text is present in the message evidence with a decisively empty composer, but the chat object was never created (the session URL never advanced to a chat route): the landed row is the provider's local echo of a submission the server REFUSED (the observed capacity-rejection modality), never an accepted one. The message evidence is context only under this contract (never the acceptance predicate), and a landed row is never resent. Observe the session or re-invoke Start to re-observe"
+              ),
+            };
+          }
           // The correlated text LANDED (message evidence) with a
           // decisively empty composer and NO start signal: the
+          // submission was ACCEPTED (the chat object created) and the
           // generation may be queued or have completed unobserved.
           // CONTEXT ONLY — never the acceptance predicate, and never a
           // resend trigger (a landed message is never duplicated).
@@ -1474,7 +1598,11 @@ export function createZaiAdapter({
             started: null,
             refusal: failure(
               "AMBIGUOUS_STATE",
-              `the agent-start watch exhausted its bounded window without the start signal while the exact text is present in the message evidence with a decisively empty composer — the generation may be queued or have completed unobserved; the message evidence is context only under this contract (never the acceptance predicate), and a landed message is never resent. Observe the session or re-invoke Start to re-observe`
+              `the agent-start watch exhausted its bounded window without the start signal while the exact text is present in the message evidence with a decisively empty composer${
+                chatCreated === true
+                  ? " and the chat object was created (the session URL advanced to a chat route — the submission was accepted)"
+                  : " (the chat state could not be read decisively)"
+              } — the generation may be queued or have completed unobserved; the message evidence is context only under this contract (never the acceptance predicate), and a landed message is never resent. Observe the session or re-invoke Start to re-observe`
             ),
           };
         }
@@ -1490,24 +1618,46 @@ export function createZaiAdapter({
             ),
           };
         }
-        // The SECOND observed failure mode (PR #6 review 5123047551,
-        // requirement 3): the input state was discarded around the
-        // send attempt — the composer decisively empty with no
-        // message evidence. The bounded compose re-establishment; the
-        // next attempt re-types the exact text byte-for-byte,
-        // re-reads it byte-for-byte, and only then resends.
-        const reestablished = await reestablishComposer(tabId);
-        if (reestablished.ok) {
-          return {
-            started: null,
-            refusal: failure(
-              "PAGE_MALFORMED",
-              "the agent-start watch exhausted its bounded window without the start signal and the prompt was not present in the composer (submission not confirmed by message evidence) — the composer input state was re-established for a re-typed, re-verified resend"
-            ),
-            reestablished: true,
-          };
+        if (chatCreated === false) {
+          // The SECOND observed failure mode (PR #6 review 5123047551,
+          // requirement 3) — now chat-state-gated (CONTINUATION 16):
+          // the input state was discarded around the send attempt AND
+          // the provider's own routing state proves NOTHING was
+          // accepted (no chat object, the session URL never advanced)
+          // — the bounded compose re-establishment is safe (the next
+          // attempt re-types the exact text byte-for-byte, re-reads it
+          // byte-for-byte, and only then resends).
+          const reestablished = await reestablishComposer(tabId);
+          if (reestablished.ok) {
+            return {
+              started: null,
+              refusal: failure(
+                "PAGE_MALFORMED",
+                "the agent-start watch exhausted its bounded window without the start signal and the prompt was not present in the composer (submission not confirmed by message evidence and the chat object never created — the submission was never accepted) — the composer input state was re-established for a re-typed, re-verified resend"
+              ),
+              reestablished: true,
+            };
+          }
+          return { started: null, refusal: reestablished };
         }
-        return { started: null, refusal: reestablished };
+        // CONTINUATION 16: the chat object EXISTS (or the chat state is
+        // unreadable) with a decisively empty composer, no message
+        // evidence, and no start signal — the submission may have been
+        // ACCEPTED (the chat route proves it; an unreadable chat state
+        // never guesses). The re-establishment is NEVER taken here: a
+        // re-typed resend could duplicate an accepted submission. The
+        // operator observes the session or re-invokes Start.
+        return {
+          started: null,
+          refusal: failure(
+            "AMBIGUOUS_STATE",
+            `the agent-start watch exhausted its bounded window without the start signal — the composer is decisively empty with no message evidence and ${
+              chatCreated === true
+                ? "the chat object was created (the session URL advanced to a chat route: the submission was accepted, the start signal was simply not observed in the bounded window — the generation may be queued or have completed unobserved)"
+                : "the chat state could not be read decisively (the submission's acceptance is unconfirmed — no re-established resend is attempted: a re-typed send could duplicate an accepted submission)"
+            }. Observe the session or re-invoke Start to re-observe`
+          ),
+        };
       }
       return {
         started: null,
@@ -1676,6 +1826,38 @@ export function createZaiAdapter({
           lastRefusal = model;
           continue;
         }
+        // 4b. THE PROVISIONING WAIT (CONTINUATION 16, PR #6 review
+        //     5125198728, requirement 1 — "treat creation of the
+        //     chat/session as an asynchronous provider operation"): the
+        //     fresh Agent-mode chat session mounts asynchronously on
+        //     the provider side (the observed provisioning latency);
+        //     the most reliable live-observable that provisioning
+        //     completed is the composer becoming a VISIBLE, ENABLED,
+        //     decisive input — the provider renders its chat-input
+        //     surface only from the provisioned session state, and the
+        //     enabled computation is the provider's own (its
+        //     connection/role gates). The bounded wait tolerates the
+        //     async window; a surface that NEVER readies within the
+        //     budget fails closed with the typed provisioning refusal
+        //     — the exact prompt is never typed into a surface whose
+        //     session provisioning has not verifiably completed.
+        const provisioned = await settle(tabId, [], (f) =>
+          f.composerVisible?.visible === true && f.composerEnabled?.enabled === true
+        );
+        if (!provisioned.ok) {
+          lastRefusal = provisioned;
+          continue;
+        }
+        if (
+          provisioned.facts.composerVisible?.visible !== true ||
+          provisioned.facts.composerEnabled?.enabled !== true
+        ) {
+          lastRefusal = failure(
+            "RETRY_EXHAUSTED",
+            "the fresh Agent-mode chat session did not complete provisioning within the bounded budget — the composer never became a visible enabled input (the chat/session creation is an asynchronous provider operation). Retry Start when the provider surface is ready"
+          );
+          continue;
+        }
         prepared = true;
       }
       // 5. Exact prompt entry / resend: the byte-identical read-back
@@ -1693,8 +1875,12 @@ export function createZaiAdapter({
         // ONLY under this contract — the landed prompt is NEVER resent,
         // and the AGENT-START WATCH observes for the start signal
         // (queued, active, or unobserved) with the same timed Enter
-        // recovery and the same bounded fail-closed window.
-        const outcome = await watchAgentStart(tabId, prompt);
+        // recovery and the same bounded fail-closed window. CONTINUATION
+        // 16: the watch's chat-state conjunct uses the chat state at
+        // THIS read (a landed accepted submission has created the chat
+        // object — the URL advanced; a locally-echoed refused one has
+        // not, and the watch's exhaustion diagnoses exactly that).
+        const outcome = await watchAgentStart(tabId, prompt, chatObjectCreatedOf(entered.facts) === true);
         if (outcome.started) {
           const recorded = recordSubmission(outcome.started);
           if (recorded.ok) {
@@ -1764,14 +1950,20 @@ export function createZaiAdapter({
       //    provider signal that the Agent has ACTUALLY STARTED
       //    WORKING — the Send->Stop action-control transition (the
       //    Stop control rendered with the send control absent, the
-      //    composer decisively empty), with the timed Enter recovery
+      //    composer decisively empty) combined, on a fresh session,
+      //    with the chat-object creation (the session URL advanced to
+      //    /c/... — the provider's own proof the submission was
+      //    ACCEPTED; CONTINUATION 16), with the timed Enter recovery
       //    (one Enter every 5 seconds while the signal is absent) and
-      //    the bounded fail-closed window. CONTINUATION 13/15: a
+      //    the bounded fail-closed window. CONTINUATION 13/15/16: a
       //    visible dialog is never a signal here — the watch reads
-      //    only the control-state, composer, alert, and auth-marker
-      //    facts; whatever the provider's key routing does with the
-      //    Enter is re-checked by the next observation.
-      const outcome = await watchAgentStart(tabId, prompt);
+      //    only the control-state, composer, chat-state, alert, and
+      //    auth-marker facts; whatever the provider's key routing
+      //    does with the Enter is re-checked by the next observation.
+      //    The chat state at DISPATCH (the pre-send gate read) makes
+      //    the conjunct vacuous on an existing chat and strict on a
+      //    fresh one.
+      const outcome = await watchAgentStart(tabId, prompt, chatObjectCreatedOf(gate.facts) === true);
       if (outcome.started) {
         const recorded = recordSubmission(outcome.started);
         if (recorded.ok) {
@@ -1999,10 +2191,14 @@ export function createZaiAdapter({
       }
 
       // 5. THE AGENT-START WATCH — the SAME start signal as Start
-      //    (CONTINUATION 15, PR #6 review 5124990727): the bounded
-      //    watch for the Stop control REAPPEARING with the composer
-      //    decisively empty (the agent resumed working on the fixed
-      //    message), with the SAME timed Enter recovery and the SAME
+      //    (CONTINUATION 15, PR #6 review 5124990727 + CONTINUATION 16,
+      //    review 5125198728): the bounded watch for the Stop control
+      //    REAPPEARING with the composer decisively empty (the agent
+      //    resumed working on the fixed message), combined with the
+      //    chat state at the continue-dispatch (an existing chat — the
+      //    recovery's session — is already at a chat route, so the
+      //    conjunct is vacuous; a fresh surface requires the chat
+      //    object), with the SAME timed Enter recovery and the SAME
       //    bounded fail-closed window. The acceptance is the start
       //    signal itself, never message-row evidence (superseded —
       //    the `continue` row landing is context).
@@ -2012,7 +2208,7 @@ export function createZaiAdapter({
       //    generation and re-send `continue` — the duplicate the
       //    frozen no-duplicate law exists to prevent. The typed
       //    refusal routes the operator instead.
-      const outcome = await watchAgentStart(tabId, ZAI_RECOVERY_MESSAGE);
+      const outcome = await watchAgentStart(tabId, ZAI_RECOVERY_MESSAGE, chatObjectCreatedOf(readBack.facts) === true);
       if (outcome.started) {
         const record = registered ?? {
           worker,
