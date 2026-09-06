@@ -524,19 +524,18 @@ export function fakeZaiPage({
   sendEnabledLie = false,
   duplicateSend = false,
   generationCompletes = null,
-  // CONTINUATION 14 (PR #6 review 5124542353, requirement 5): the
+  // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
   // `sendInaccessible` knob models the composer action slot rendering
   // NEITHER control — #send-message-button resolves ZERO elements
   // while the composer itself stays a normal enabled input. This is
   // the surface whose Send control cannot be resolved/accessed
-  // decisively: the adapter's Enter fallback fires (exactly once per
-  // bounded attempt), the pressEnter submits the composer's verified
-  // text, and the state machine continues into the
-  // Send-reappearance wait (a test disarms the knob on the Enter to
-  // model the provider's slot re-render — "if Send becomes
-  // resolvable, continue"; a knob that persists models a Send
-  // control that never becomes resolvable — "fail closed after the
-  // bounded retry budget").
+  // decisively: NO send click is issued (the click fires only when
+  // the slot renders the send control) and the surface routes into
+  // the AGENT-START WATCH, whose timed Enter cadence is the recovery
+  // (a test disarms the knob on an Enter to model the provider's
+  // slot re-render; a knob that persists models a Send control that
+  // never becomes resolvable — the watch's bounded window fails
+  // closed).
   sendInaccessible = false,
   // The post-response Regenerate control (CONTINUATION-11,
   // LIVE-OBSERVED in the operator's saved authenticated capture at
@@ -694,6 +693,17 @@ export function fakeZaiPage({
   }
 
   function submit() {
+    // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
+    // provider's OWN concurrency gate — the observed provider safety
+    // property ("Z.ai already prevents a second prompt while a
+    // generation is running"): a submission attempt (the send click
+    // OR the composer Enter) issued while the Stop control is
+    // rendered is REFUSED by the provider — nothing lands, the draft
+    // stays in the composer. The duplicate guard is the provider's,
+    // never an artificial adapter-side assumption.
+    if (state.stop.visible) {
+      return; // the provider refused the submission: the draft stays put
+    }
     if (state.popupOnSend && state.composerValue.length > 0) {
       state.dialog = { text: state.popupText };
       return; // the popup blocked the submission: the prompt stays put
@@ -806,6 +816,7 @@ export function fakeZaiPage({
               state.conversation.pop(); // the submission did not land
             }
             state.composerValue = state.lastSubmitted; // the provider's prompt restore
+            state.stop.visible = false; // CONTINUATION 15: the rejected submission never started a generation — the slot swaps back
           }
         }
       }
@@ -852,21 +863,25 @@ export function fakeZaiPage({
       return { ok: true, typed: true, value: state.composerValue };
     }
     if (message.op === "pressEnter") {
-      // CONTINUATION 14 (PR #6 review 5124542353, requirement 5 — the
-      // work order 5557596159): the Enter primitive's
+      // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305 — the
+      // timed Enter recovery nudge): the Enter primitive's
       // surface-faithful semantics. The real page script dispatches
       // the Enter key sequence on the FOCUSED element (the composer —
       // focused by the type op). A dialog open on the surface
-      // captures the key (the legacy dismissable-popup modeling: the
-      // dialog closes, nothing is submitted — the adapter NEVER
-      // issues the Enter for a dialog, so this only models the
-      // provider's key routing); with no dialog, a composer holding
-      // text SUBMITS it (the provider's composer keybinding — the
-      // same submission semantics as the send control's click).
+      // captures the key (the dialog closes, nothing is submitted);
+      // with no dialog, a composer holding text SUBMITS it (the
+      // provider's composer keybinding — the same submission
+      // semantics as the send control's click), SUBJECT to the
+      // provider's own concurrency gate (submit() refuses while the
+      // Stop control is rendered — a second prompt while a
+      // generation runs is never accepted); an empty composer makes
+      // the Enter a pure no-op. The adapter issues the Enter ONLY on
+      // the agent-start watch's clock, never as a submission
+      // mechanism.
       if (state.dialog) {
         state.dialog = null; // the dialog captured the key
       } else if (state.composerValue.length > 0) {
-        submit(); // the Enter on the focused composer submits
+        submit(); // the Enter on the focused composer submits (the provider's gate decides)
       }
       return { ok: true, pressed: "Enter", target: "TEXTAREA" };
     }

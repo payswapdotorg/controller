@@ -154,12 +154,12 @@ test("typed adapter refusals pass through the router unchanged (no repair)", asy
 // --------------------------------------------------------------------
 
 test("the real adapter serves StartZaiWorkerSession through the router", async () => {
-  // CONTINUATION 14: generationCompletes opens the Send-reappearance
-  // boundary at which the real adapter records the acceptance.
+  // CONTINUATION 15: the start signal (the Stop control rendered with
+  // the composer decisively empty) is the acceptance the real adapter
+  // records through the router.
   const page = fakeZaiPage({
     authenticated: true,
     agent: { present: true, active: false },
-    generationCompletes: 1,
   });
   const tabsApi = fakeMessagingTabsApi({ tabs: [{ id: 7, url: "https://chat.z.ai/", page }] });
   const zai = createZaiAdapter({

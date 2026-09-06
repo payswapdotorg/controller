@@ -1,30 +1,35 @@
 /**
  * Z.ai browser Worker adapter tests (CTRL-014) — the offline/injected
- * matrix over the deterministic page simulator: the governed
- * new-session sequence, submission confirmation-before-success (the
- * continuation-6 correction: the pre-send gate, MESSAGE-EXCLUSIVE
- * acceptance evidence, decisive composer reads, and the bounded
- * compose re-establishment — the operator-described circular
- * control), auth-interrupt/budget fail-closed behavior, the fixed
- * Stop -> continue hung-worker recovery (acceptance proven by
- * conversation evidence — a resumed generation state alone never
- * succeeds), identity preservation, and stale/contradictory reference
- * refusal (including the stale correlated Start fail-closed
- * regression). The CONTINUATION-13 regressions (PR #6 review
- * 5124488246 — "REMOVE POPUP DETECTION/RECOVERY PATH") pin the
- * dialog-blind law: a visible provider dialog never observes, never
- * blocks, never triggers Enter, and never fails any governed flow —
- * Start and Recover proceed on the control-state and
- * message-evidence facts alone, the adapter never issues a
- * pressEnter command, and the submitted record is the popup-free
- * three-field shape. The CONTINUATION-12 regressions (PR #6 comment
- * 5557322324) pin the composer control-state transition as an
- * explicit submission-state observation channel: the provider's own
- * send/Stop slot computation and send-disabled computation are
- * observed on every fact read, cross-check the acceptance recording,
- * fail closed on contradictory or unreadable control states, and
- * the recovery's precondition waits (bounded) for the Stop-visible
- * interval to open.
+ * matrix over the deterministic page simulator. The CONTINUATION-15
+ * regressions (PR #6 review 5124990727 + review 5125102305 — "IMPLEMENT
+ * THE NEW Z.AI SUBMISSION FLOW NOW" / "IMPLEMENT THE ADAPTER CHANGE
+ * NOW") pin the AGENT-START WATCH contract: the acceptance is the
+ * provider-owned START SIGNAL — the composer action slot's
+ * Send->Stop transition (the Stop control rendered with the send
+ * control absent, the composer decisively empty: the draft consumed
+ * — a prompt still held in the composer is the provider's own proof
+ * the submission was NOT consumed, so a Stop control over a
+ * text-holding composer is a foreign generation, never the signal);
+ * Enter is ONLY the timed recovery nudge (one every 5 seconds while
+ * the signal is absent, at most 12, stopping IMMEDIATELY at the
+ * signal — the provider's own concurrency gate is the duplicate
+ * guard); the superseded Send-reappearance boundary,
+ * message-evidence acceptance predicate, and single-Enter-once
+ * fallback are removed; the message evidence is CONTEXT ONLY. The
+ * pinned laws: the provisioning wait; the successful submission
+ * (zero Enters); the signal only after retries (the queued
+ * generation) with the cessation law; the Enter when the Send
+ * control is unavailable; the blocked/persistent-dialog recovery
+ * through the cadence; the false-positive surfaces (contradictory/
+ * unresolvable/enabled-lie/ambiguous slots, the foreign-generation
+ * Stop-over-text) that never count as working; the bounded
+ * no-signal timeout; no duplicate submission while a generation is
+ * already running; the c6 pre-send gate and compose
+ * re-establishment; the dialog-blind law (a visible dialog is never
+ * inspected, classified, or targeted); the recovery WITHOUT a
+ * persistent registry (the service-worker restart — never
+ * SESSION_UNKNOWN) running the same watch; and the recovery's
+ * dropped-row/Regenerate CONTEXT laws.
  */
 
 import { test } from "node:test";
@@ -228,25 +233,26 @@ test("a started session whose tab vanished observes session-missing", async () =
 // --------------------------------------------------------------------
 
 test("the happy path runs the exact governed sequence and confirms submission", async () => {
-  // CONTINUATION 14: the acceptance is recorded at the
-  // SEND-REAPPEARANCE BOUNDARY — the send click swaps the action slot
-  // to the Stop control (the generation entering flight), the bounded
-  // wait tolerates the transient missing Send control, and the
-  // completion transition (the Stop control gone, the send control
-  // back) opens the boundary at which the message-exclusive evidence
-  // is recorded (generation reported as the boundary read: "waiting").
-  const { adapter, pages } = build({ generationCompletes: 1 });
+  // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
+  // acceptance is the AGENT-START SIGNAL — the send click swaps the
+  // action slot to the Stop control (the generation entering flight)
+  // with the composer decisively empty (the draft consumed), and the
+  // AGENT-START WATCH observes it on its first read: zero Enter
+  // nudges (the signal is present before any cadence tick), the
+  // submission recorded with generation:"working" (the signal itself).
+  const { adapter, pages } = build();
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(result.session, { worker: "w1", workItem: "CTRL-014", tabId: 7 });
   assert.equal(result.submitted.attempts, 1);
   assert.equal(result.submitted.composeReestablishments, 0);
-  assert.equal(result.submitted.generation, "waiting"); // the boundary read — the Stop control gone, the send control back
-  // The governed flow never presses Enter (the popup dismissal path
-  // is removed — CONTINUATION 13).
+  assert.equal(result.submitted.generation, "working"); // the start signal itself — the Stop control visible, the composer decisively empty
+  // The governed flow never presses Enter on the happy path (the
+  // start signal is observed before any cadence tick — CONTINUATION 15).
   assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
-  // The submission is confirmed by observation: the conversation holds
-  // the exact prompt and the composer is cleared.
+  // The start signal is the provider's own proof; the landed row and
+  // the cleared composer are CONTEXT facts cross-checked here:
+  // the conversation holds the exact prompt and the composer is empty.
   assert.ok(pages[0].state.conversation.includes(PROMPT));
   assert.equal(pages[0].state.composerValue, "");
   assert.equal(pages[0].state.agent.active, true);
@@ -271,6 +277,122 @@ test("the happy path runs the exact governed sequence and confirms submission", 
     'button[aria-label="model-item"][data-value="glm-5.3"]',
     "#send-message-button",
   ]);
+});
+
+test("the PROVISIONING WAIT: a fresh-session surface that is not yet ready becomes ready within the bounded settle and the governed sequence completes (the fresh-session provisioning latency)", async () => {
+  // CONTINUATION 15 (PR #6 review 5124990727, the required
+  // "provisioning wait" regression): a FRESH Agent session's surface
+  // is not immediately ready for input — the provider provisions the
+  // chat object asynchronously (the operator's observed repeated
+  // GET/polling until the chat exists; the composer surface becomes
+  // an enabled input only when provisioning completes). The adapter's
+  // bounded settle tolerates the not-yet-ready window (the ambiguous
+  // composer-not-enabled reads are retried, never fatal), and the
+  // governed sequence completes on the readied surface: the start
+  // signal is observed and the submission recorded.
+  let probes = 0;
+  const built = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "probe") {
+        probes += 1;
+        if (probes <= 2) {
+          state.composerDisabled = true; // the provisioning window: the composer is not yet an enabled input
+        } else {
+          state.composerDisabled = false; // provisioning completed — the chat surface is ready
+        }
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.generation, "working");
+  assert.equal(built.pages[0].state.conversation.includes(PROMPT), true);
+  assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 0); // the signal arrived before any cadence tick
+});
+
+test("the signal appears only AFTER one or more 5-second Enter retries: the queued generation becomes active mid-watch and ALL Enter retries stop IMMEDIATELY at the signal (the cessation law)", async () => {
+  // CONTINUATION 15 (PR #6 review 5124990727 requirement 4 +
+  // 5125102305 requirement 4): "once a reliable started signal is
+  // observed, ALL Enter retries stop immediately." The queued
+  // surface: the send consumed the prompt (the row landed, the
+  // composer decisively empty) but the generation is NOT yet active
+  // (the provider's queued state — no Stop control). The watch's
+  // timed cadence nudges (no-ops on the empty composer) while the
+  // queue drains; the Stop control appears on a later probe; the
+  // signal is observed and the cadence stops AT THAT ROUND — the
+  // Enter count is frozen at exactly the pre-signal rounds.
+  let probesAfterSend = 0;
+  const built = build({
+    generates: false, // the queued submission: the row lands, the composer clears, but the generation does NOT start yet
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button") {
+        state.__sent = true;
+      }
+      if (message.op === "probe" && state.__sent) {
+        probesAfterSend += 1;
+        if (probesAfterSend === 6) {
+          state.stop.visible = true; // the queued generation becomes active on the 6th post-send probe
+        }
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.generation, "working");
+  const enters = built.pages[0].history().filter((c) => c.op === "pressEnter").length;
+  // The signal fired inside the watch's SECOND round (each round
+  // settles up to 4 probes; the 6th post-send probe is in round 2):
+  // exactly ONE Enter was issued, and the cadence stopped at the
+  // signal — no second nudge ever fires.
+  assert.equal(enters, 1);
+  assert.equal(built.pages[0].state.composerValue, "");
+  assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // landed once, never resent
+});
+
+test("NO DUPLICATE SUBMISSION while a generation is already running: the Stop control over a text-holding composer is NEVER the start signal — zero send clicks, the provider's own concurrency gate refuses the Enter submissions, and the bounded budget fails closed", async () => {
+  // CONTINUATION 15 (PR #6 review 5125102305 requirement 4: "The key
+  // safety property is that Z.ai will not accept a second prompt
+  // while generation is already running"): a generation that was
+  // already active when the pre-send gate read the surface (the
+  // precheck passed on the earlier ready-for-input read; a foreign
+  // generation started during the preparation). The detector REFUSES
+  // the false positive: the composer still holds the exact prompt
+  // (the submission was not consumed — the provider's own proof), so
+  // the Stop control over a text-holding composer is never the start
+  // signal. The gate never clicks the send control (the slot renders
+  // the Stop control), the watch's Enter nudges are REFUSED by the
+  // provider's own concurrency gate (the fixture models the observed
+  // safety property: the draft stays put), the exhaustion routes the
+  // bounded re-send, and the budget fails closed — the prompt is
+  // never submitted twice, the conversation never grows.
+  const built = build({
+    beforeRespond: (message, state) => {
+      if (message.op === "type") {
+        // the foreign generation turned active right after the
+        // precheck: the provider's real mutually exclusive action
+        // slot during an active generation renders the Stop control
+        // with the send control ABSENT (the queued-input draft stays
+        // in the composer).
+        state.stop.visible = true;
+        state.sendInaccessible = true;
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "PAGE_MALFORMED");
+  assert.ok(/remains in the composer/.test(result.error.message), result.error.message);
+  // ZERO send clicks: the gate never clicked (the slot rendered the Stop control all along).
+  assert.equal(built.pages[0].history().filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 0);
+  // ZERO landed rows: the provider's own concurrency gate refused every Enter-routed submission.
+  assert.equal(built.pages[0].state.conversation.length, 0);
+  // The prompt stayed in the composer — the draft was never consumed.
+  assert.equal(built.pages[0].state.composerValue, PROMPT);
+  // The provider's Stop control (the foreign generation) was never clicked by the adapter.
+  const stopClicks = built.pages[0].history().filter(
+    (c) => c.op === "click" && String(c.selector).includes('aria-label="Stop"')
+  );
+  assert.equal(stopClicks.length, 0);
 });
 
 test("the prompt is carried byte-identical into the composer (never rewritten)", async () => {
@@ -323,7 +445,7 @@ test("the collapsed icon-only sidebar resolves the Agent pill structurally (no t
   // Agent pill.
   // CONTINUATION 14: generationCompletes opens the Send-reappearance
   // boundary at which the Start's acceptance is recorded.
-  const { adapter, pages } = build({ sidebar: "collapsed", generationCompletes: 1 });
+  const { adapter, pages } = build({ sidebar: "collapsed" });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 1);
@@ -340,7 +462,7 @@ test("the expanded labeled sidebar resolves the Agent pill and verifies the acti
   // i18n renders Agent_Mode as "Agent") — the structural candidate
   // resolves, the click flips the pill, and data-active="true" is
   // the acceptance evidence.
-  const { adapter, pages } = build({ sidebar: "expanded", generationCompletes: 1 });
+  const { adapter, pages } = build({ sidebar: "expanded" });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(pages[0].state.agent.active, true);
@@ -354,7 +476,7 @@ test("Agent mode already active: no pill click is issued (idempotent preparation
   // Clicking an already-active Agent pill would navigate the
   // provider app to a fresh Agent-mode session for nothing; the
   // marker that resolved BEFORE any click establishes the selection.
-  const { adapter, pages } = build({ agent: { present: true, active: true }, generationCompletes: 1 });
+  const { adapter, pages } = build({ agent: { present: true, active: true } });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   const pillClicks = pages[0].history().filter(
@@ -448,7 +570,7 @@ test("the id-family candidate resolves the model trigger when the aria-label is 
   // A provider surface variant without the trigger aria-label: the
   // second live-observed candidate (the id-prefix/suffix family)
   // must resolve the trigger — never a hardcoded model-specific id.
-  const { adapter, pages } = build({ modelTriggerAria: false, generationCompletes: 1 });
+  const { adapter, pages } = build({ modelTriggerAria: false });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   const triggerClick = pages[0].history().find(
@@ -462,7 +584,7 @@ test("the model already GLM-5.3: no trigger click is issued (idempotent preparat
   // Both selection ground truths already hold (the trigger displays
   // GLM-5.3 and carries #model-selector-glm-5_3-button): re-clicking
   // the trigger would toggle the option menu open for nothing.
-  const { adapter, pages } = build({ selectedValue: "glm-5.3", generationCompletes: 1 });
+  const { adapter, pages } = build({ selectedValue: "glm-5.3" });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   const triggerClicks = pages[0].history().filter(
@@ -554,17 +676,17 @@ test("a disabled GLM-5.3 option row (the live unauthenticated surface) refuses t
   assert.equal(built.pages[0].state.selectedValue, "glm-5.2"); // never selected
 });
 
-test("a provider dialog appearing during preparation NEVER blocks the governed Start and never receives Enter (the dialog-blind law)", async () => {
+test("a provider dialog appearing during preparation NEVER blocks the governed Start and never receives Enter on the happy path (the dialog-blind law)", async () => {
   // CONTINUATION 13 (PR #6 review 5124488246, requirement 2): "a
   // visible dialog must NOT be used as a positive or negative popup
   // signal for the normal CTRL-014 path." A dialog that appears right
   // after the Agent pill click (the pre-correction adapter failed
   // closed UNKNOWN_DIALOG here) is simply not consulted: the governed
-  // sequence runs to completion, the acceptance is the
-  // message-exclusive evidence, and NO Enter is ever issued. The
+  // sequence runs to completion, the acceptance is the AGENT-START
+  // SIGNAL (CONTINUATION 15 — observed on the watch's first read,
+  // before any Enter cadence tick), and NO Enter is ever issued. The
   // dialog is still sitting on the surface at the end — untouched.
   const built = build({
-    generationCompletes: 1, // CONTINUATION 14: the completion opens the Send-reappearance boundary
     beforeRespond: (message, state) => {
       if (message.op === "click" && String(message.selector).includes("nth-of-type(2)")) {
         state.dialog = { text: "An unexpected modal" }; // appears after the Agent pill click
@@ -573,8 +695,8 @@ test("a provider dialog appearing during preparation NEVER blocks the governed S
   });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.generation, "waiting"); // the boundary read — CONTINUATION 14
-  assert.ok(built.pages[0].state.conversation.includes(PROMPT)); // the acceptance evidence
+  assert.equal(result.submitted.generation, "working"); // the start signal itself — CONTINUATION 15
+  assert.ok(built.pages[0].state.conversation.includes(PROMPT)); // the context fact
   assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
   assert.ok(built.pages[0].state.dialog); // never dismissed, never consulted
 });
@@ -603,7 +725,10 @@ test("a send that never confirms submission retries within the budget, then fail
   const result = await suppress.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/not confirmed by observation/.test(result.error.message));
+  // CONTINUATION 15: the never-starting surface exhausts the watch
+  // with the exact text still in the composer — the bounded re-send
+  // route, never a claimed submission.
+  assert.ok(/remains in the composer/.test(result.error.message), result.error.message);
 });
 
 // --------------------------------------------------------------------
@@ -613,81 +738,135 @@ test("a send that never confirms submission retries within the budget, then fail
 // popup-specific recovery, and never blocks a governed flow.
 // --------------------------------------------------------------------
 
-test("a submission-blocking dialog the adapter does not recognize: bounded blind retries of the same send, fail closed, and NEVER an Enter press", async () => {
-  // The popupOnSend modality models the provider surface that blocks
+test("a submission-blocking dialog the adapter does not recognize: the timed Enter cadence recovers the surface — the dialog is dismissed by the provider's own key routing, the prompt submits, and the start signal ends the watch (the dialog-blind law)", async () => {
+  // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
+  // popupOnSend modality models the provider surface that blocks
   // every send behind a modal dialog (the prompt stays in the
-  // composer, the conversation never grows). The dialog-blind adapter
-  // (CONTINUATION 13) has no popup concept: each attempt re-observes
-  // an unconfirmed send (the composer still holds the exact prompt)
-  // and resends within the bounded budget, then fails closed — the
-  // pre-correction adapter pressed Enter here (the popup dismissal
-  // path); re-adding it fails this regression.
+  // composer, the conversation never grows). The dialog-blind
+  // adapter has NO popup concept — it NEVER inspects, classifies, or
+  // targets the dialog: the AGENT-START WATCH's timed Enter cadence
+  // is the recovery. Enter #1 lands on the dialog and the PROVIDER'S
+  // OWN key routing closes it (the fixture models the capture); the
+  // next nudge's Enter reaches the focused composer and the
+  // provider's keybinding submits the verified prompt; the Send->Stop
+  // transition then ends the watch immediately (all Enter retries
+  // stop the moment the start signal appears). The pre-correction
+  // adapter pressed Enter AS a dismissal path (popup semantics);
+  // re-adding any dialog inspection fails this regression.
+  const built = build({
+    popupOnSend: true,
+    popupText: "Confirm submission",
+    beforeRespond: (message, state) => {
+      // The TRANSIENT blocking modality: the capacity dialog blocks
+      // the first submission; once a nudge's Enter has been routed to
+      // it (the provider's own key routing), the provider admits the
+      // next submission (the fixture disarms the re-blocking).
+      if (message.op === "pressEnter" && state.dialog) {
+        state.popupOnSend = false;
+      }
+    },
+  });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 1);
+  assert.equal(result.submitted.generation, "working");
+  const history = built.pages[0].history();
+  const enters = history.filter((c) => c.op === "pressEnter");
+  assert.equal(enters.length, 2); // the dismissal-routing nudge + the composer-submission nudge — then the signal stops the cadence
+  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
+  assert.equal(sends, 1); // the one send click (blocked by the dialog)
+  assert.ok(built.pages[0].state.conversation.includes(PROMPT)); // the prompt landed through the recovery
+  assert.equal(built.pages[0].state.composerValue, "");
+  assert.equal(built.pages[0].state.dialog, null); // closed by the provider's key routing — never inspected by the adapter
+});
+
+test("a PERSISTENTLY blocking dialog the adapter does not recognize: the timed Enter cadence runs its full bounded window and fails closed — the dialog is never inspected, the prompt is never re-typed, and the bounded re-send route is the diagnosis", async () => {
+  // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
+  // persistent variant — every submission attempt (the send click OR
+  // the Enter-routed composer submission) re-triggers the blocking
+  // dialog (the real capacity modality while the condition holds).
+  // The dialog-blind adapter never inspects it: the watch's Enter
+  // cadence runs its full bounded window on the clock (the provider's
+  // key routing alternately closes and re-triggers the dialog), the
+  // start signal never appears, and the watch fails closed with the
+  // re-send route (the exact text remains in the composer). The
+  // bounded outer attempts re-verify and re-send through the send
+  // control; the budget exhausts; never a claimed submission, never
+  // a re-type (the prompt is verified present byte-identically each
+  // attempt).
   const built = build({ popupOnSend: true, popupText: "Confirm submission" });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/not confirmed by observation/.test(result.error.message));
+  assert.ok(/remains in the composer/.test(result.error.message), result.error.message);
   const history = built.pages[0].history();
-  assert.equal(history.filter((c) => c.op === "pressEnter").length, 0); // never an Enter
+  assert.ok(history.filter((c) => c.op === "pressEnter").length > 0); // the timed cadence ran its bounded window
   const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
-  assert.equal(sends, 3); // the bounded budget of blind retries
+  assert.equal(sends, 3); // the bounded budget of re-send attempts
+  assert.equal(history.filter((c) => c.op === "type").length, 1); // never re-typed — the prompt stayed in the composer
   assert.ok(!built.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
-  assert.ok(built.pages[0].state.dialog); // the dialog was never dismissed
 });
 
-test("the asynchronous peak-hours dialog materializing ON the verification read: the adapter stays dialog-blind — the acceptance is the message-exclusive evidence and NO Enter is ever issued", async () => {
+test("the asynchronous peak-hours dialog materializing after the send: the adapter stays dialog-blind — the never-starting generation fails closed with the queued/unobserved diagnosis, the landed message is NEVER resent, and the Enter cadence is the only recovery attempted", async () => {
   // The REAL provider modality (LIVE-OBSERVED, the operator's captured
   // run): the "Currently in peak hours" capacity dialog materializes
   // only when the ASYNC error arrives — after the optimistic landing
   // (the exact user-message row + the cleared composer). CONTINUATION
-  // 13 removed the async-outcome hold that watched for it: the
-  // confirm-shaped verdict IS the acceptance (message-exclusive
-  // evidence, gated on control-state consistency), and the dialog —
-  // materializing on this very read — is invisible to every fact the
-  // adapter probes. The pre-correction adapter caught the popup
-  // through the hold, pressed Enter, and restarted the preparation;
-  // re-adding any of that fails this regression.
+  // 15: the capacity rejection means NO generation started — the
+  // start signal never appears, the watch fails closed with the
+  // queued/completed-unobserved diagnosis (the message evidence is
+  // CONTEXT ONLY — never the acceptance predicate, and a landed
+  // message is never resent: exactly one type, exactly one send). The
+  // dialog is never inspected; the Enter nudges are issued on the
+  // clock, and the provider's own key routing decides what they do
+  // (the fixture models the dialog capturing the first Enter — the
+  // dismissal is the provider's behavior, not adapter popup
+  // semantics).
   const built = build({
     generates: false, // the capacity error means no generation started
-    popupAfterSend: { probes: 1 }, // materializes on the 1st fact read after the send (the verdict read itself)
+    popupAfterSend: { probes: 1 }, // materializes on the 1st fact read after the send
   });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 1); // no preparation restart — there is no popup path
-  assert.equal(result.submitted.generation, "waiting"); // the operator's literal surface shape
-  assert.deepEqual(Object.keys(result.submitted).sort(), ["attempts", "composeReestablishments", "generation"]);
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/queued or have completed unobserved/.test(result.error.message), result.error.message);
+  assert.equal(Object.keys(result.submitted ?? {}).length, 0); // never a claimed submission
   const history = built.pages[0].history();
-  assert.equal(history.filter((c) => c.op === "pressEnter").length, 0); // never an Enter
   assert.equal(history.filter((c) => c.op === "type").length, 1); // typed exactly once
   assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1); // never resent
   assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
-  assert.ok(built.pages[0].state.dialog); // the dialog is sitting on the surface — untouched, unprobed
 });
 
-test("the provider's restored prompt (the async error's sibling outcome) flows through the ORDINARY unconfirmed-retry path — never a popup path, never an Enter", async () => {
+test("the provider's restored prompt (the async error's sibling outcome) is recovered by the timed Enter cadence — never a popup path, never re-typed, and the start signal ends the watch", async () => {
   // The provider's MODEL_CONCURRENCY_LIMIT handler can RESTORE the
-  // submitted prompt into the composer after the optimistic landing.
-  // The dialog-blind adapter sees exactly one thing: the composer
-  // holding text on the verification read — the ordinary "send did
-  // not take" unconfirmed semantics. The bounded retry resends the
-  // restored prompt as-is (never re-typed — ensurePrompt verifies it
-  // byte-for-byte and sends as-is), and the resend's own confirm-
-  // shaped verdict is the acceptance. The pre-correction adapter
-  // routed this through the popup hold (Enter + full restart);
-  // re-adding that fails this regression.
+  // submitted prompt into the composer after the optimistic landing
+  // (the row withdrawn, the slot back to the send control). The
+  // dialog-blind adapter sees exactly one thing on its observations:
+  // the composer holding the exact text with no start signal — the
+  // AGENT-START WATCH's timed Enter cadence is the recovery: the
+  // first nudge's Enter is captured by the still-open capacity
+  // dialog (the provider's own key routing closes it), the next
+  // nudge's Enter reaches the focused composer and the provider's
+  // keybinding submits the restored prompt AS-IS (never re-typed —
+  // the re-send route re-verifies it byte-identically through the
+  // send control when the slot permits, and the Enter path never
+  // re-types either), and the Send->Stop transition ends the watch.
+  // The pre-correction adapter routed this through the popup hold
+  // (popup semantics + full restart); re-adding that fails this
+  // regression.
   const built = build({
-    generates: false,
     popupAfterSend: { probes: 1, restore: true },
   });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 2); // the ordinary bounded retry
+  assert.equal(result.submitted.attempts, 1);
+  assert.equal(result.submitted.generation, "working");
   const history = built.pages[0].history();
-  assert.equal(history.filter((c) => c.op === "pressEnter").length, 0); // never an Enter
-  assert.equal(history.filter((c) => c.op === "type").length, 1); // the restored prompt is sent AS-IS — never re-typed
-  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 2); // the send + the resend
-  assert.ok(built.pages[0].state.conversation.includes(PROMPT)); // the resend landed
-  assert.ok(built.pages[0].state.dialog); // the dialog is still there — untouched
+  assert.equal(history.filter((c) => c.op === "pressEnter").length, 2); // the dismissal-routing nudge + the composer-submission nudge
+  assert.equal(history.filter((c) => c.op === "type").length, 1); // the restored prompt is submitted AS-IS — never re-typed
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1); // the one send click
+  assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // landed exactly once
+  assert.equal(built.pages[0].state.stop.visible, true); // the agent actively working
 });
 
 test("a send that clears the composer without message-evidence confirmation is NEVER success (no popup does not mean accepted)", async () => {
@@ -718,7 +897,7 @@ test("a send that clears the composer without message-evidence confirmation is N
   const result = await swallowed.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/not present in the composer after the send attempt/.test(result.error.message));
+  assert.ok(/was not present in the composer/.test(result.error.message), result.error.message);
   assert.ok(!swallowed.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
   const history = swallowed.pages[0].history();
   const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
@@ -742,7 +921,7 @@ test("a dialog present from the very start NEVER blocks the governed Start (the 
   // preparation). The full governed sequence then runs to the
   // message-exclusive acceptance, with zero Enter presses and the
   // dialog untouched.
-  const built = build({ generationCompletes: 1, dialog: { text: "An unexpected modal" } });
+  const built = build({ dialog: { text: "An unexpected modal" } });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.ok(built.pages[0].state.conversation.includes(PROMPT));
@@ -768,7 +947,7 @@ test("the reproduced live false positive: a weak surface carrying the prompt is 
   // weak surface never shortcuts the submission — the honest path
   // types, verifies at the send gate, sends, and accepts only on
   // the real message evidence.
-  const { adapter, pages } = build({ sidebarHistory: [PROMPT], generationCompletes: 1 });
+  const { adapter, pages } = build({ sidebarHistory: [PROMPT] });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 1);
@@ -804,7 +983,7 @@ test("a weak surface carrying the prompt NEVER confirms an unlanded submission (
   const result = await swallowed.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/not present in the composer after the send attempt/.test(result.error.message));
+  assert.ok(/was not present in the composer/.test(result.error.message), result.error.message);
   assert.ok(!swallowed.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
 });
 
@@ -819,7 +998,6 @@ test("the pre-send gate: a prompt lost between the read-back and the send is NEV
   let readBacks = 0;
   let discards = 0;
   const built = build({
-    generationCompletes: 1, // CONTINUATION 14: the resend's completion opens the boundary
     beforeRespond: (message, state) => {
       if (message.op === "type") {
         readBacks = 0; // the read-back follows the type
@@ -865,7 +1043,6 @@ test("the second observed failure mode: a send that discards the prompt (empty c
   // re-read it byte-for-byte, and only then resend.
   let sendAttempts = 0;
   const built = build({
-    generationCompletes: 1, // CONTINUATION 14: the resend's completion opens the boundary
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button") {
         sendAttempts += 1;
@@ -887,13 +1064,26 @@ test("the second observed failure mode: a send that discards the prompt (empty c
   assert.equal(result.submitted.attempts, 2);
   assert.equal(result.submitted.composeReestablishments, 1);
   const history = built.pages[0].history().filter((c) => c.op !== "probe");
-  assert.deepEqual(history.map((c) => c.op), ["click", "click", "click", "type", "click", "click", "type", "click"]);
+  // CONTINUATION 15: the first attempt's AGENT-START WATCH runs its
+  // full bounded Enter cadence (the discarded-input surface shows no
+  // start signal — every nudge is a no-op on the decisively empty
+  // composer) BEFORE the exhaustion routes the compose
+  // re-establishment. The non-Enter sequence is the c6 chain:
+  // pill -> trigger -> option -> type -> send -> [the watch's 12
+  // nudges] -> compose control -> re-type -> send.
+  assert.deepEqual(
+    history.filter((c) => c.op !== "pressEnter").map((c) => c.op),
+    ["click", "click", "click", "type", "click", "click", "type", "click"]
+  );
+  assert.equal(history.filter((c) => c.op === "pressEnter").length, 12); // the full bounded watch window on the discarded attempt
   assert.equal(history.filter((c) => c.op === "click" && c.selector === COMPOSE_CONTROL).length, 1);
   assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 2);
   const typeTexts = history.filter((c) => c.op === "type").map((c) => c.text);
   assert.deepEqual(typeTexts, [PROMPT, PROMPT]);
-  // Acceptance came only from the message evidence after the RESEND.
+  // Acceptance came only from the START SIGNAL after the RESEND (the
+  // Stop control visible with the composer decisively empty).
   assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
+  assert.equal(built.pages[0].state.stop.visible, true);
 });
 
 test("a compose control whose click never re-establishes an enabled composer fails closed (never success, never a blind resend)", async () => {
@@ -1088,7 +1278,7 @@ test("every ok:true Start with a submission carries EXACTLY the popup-free three
   const THREE_FIELDS = ["attempts", "composeReestablishments", "generation"];
 
   // (1) The direct acceptance path.
-  const happy = build({ generationCompletes: 1 });
+  const happy = build();
   const okResult = await happy.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(okResult.ok, true, JSON.stringify(okResult));
   assert.deepEqual(Object.keys(okResult.submitted).sort(), THREE_FIELDS);
@@ -1098,7 +1288,6 @@ test("every ok:true Start with a submission carries EXACTLY the popup-free three
   // failure mode recovered within the budget).
   let sendAttempts = 0;
   const recovered = build({
-    generationCompletes: 1, // CONTINUATION 14: the resend's completion opens the boundary
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button") {
         sendAttempts += 1;
@@ -1175,7 +1364,7 @@ test("the operator's captured near-miss run: a user-message row that lost the pr
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: GOVERNED });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/not present in the composer after the send attempt/.test(result.error.message));
+  assert.ok(/was not present in the composer/.test(result.error.message), result.error.message);
   // The typed chain is byte-identical INCLUDING the leading
   // character: every bounded attempt typed the FULL governed prompt.
   const typedTexts = built.pages[0].history().filter((c) => c.op === "type").map((c) => c.text);
@@ -1340,26 +1529,30 @@ test("an unreadable composer value is NEVER treated as cleared or present — St
   assert.equal(sends, 0); // never sent
 });
 
-test("a Start whose exact prompt is ALREADY in the message evidence with a decisively-empty composer never resends (no duplicate submission)", async () => {
-  // Requirement 5 (PR #6 review 5123047551): when the provider state
+test("a Start whose exact prompt is ALREADY in the message evidence with a decisively-empty composer never resends — the landed message is CONTEXT ONLY and the absent start signal fails closed (no duplicate submission)", async () => {
+  // Requirement 5 (PR #6 review 5123047551) + CONTINUATION 15 (PR
+  // #6 review 5124990727 + review 5125102305): when the provider state
   // shows the prompt already landed (message rows carry the exact
   // prompt, composer decisively empty — e.g. the in-memory registry
   // was lost on service-worker restart after a landed submission),
   // the re-run Start re-establishes the idempotent preparation and
-  // re-reports the submission WITHOUT typing or sending again. The
-  // SAME result shape (attempts=1, generation=waiting) is now
-  // reachable ONLY through genuine message evidence — contrast the
-  // weak-surface variant above, which types and sends.
+  // re-observes for the AGENT-START signal WITHOUT typing or sending
+  // again (a landed message is never resent). With NO start signal
+  // ever appearing on this surface (nothing generating), the watch
+  // fails closed with the queued/completed-unobserved diagnosis —
+  // the message evidence is context only, never the acceptance
+  // predicate, and never a resend trigger.
   const { adapter, pages } = build({ conversation: [PROMPT] });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 1);
-  assert.equal(result.submitted.composeReestablishments, 0);
-  assert.equal(result.submitted.generation, "waiting");
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/queued or have completed unobserved/.test(result.error.message), result.error.message);
   const history = pages[0].history().filter((c) => c.op !== "probe");
-  assert.deepEqual(history.map((c) => c.op), ["click", "click", "click"]); // preparation only
-  assert.equal(history.filter((c) => c.op === "type").length, 0);
-  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 0);
+  assert.deepEqual(
+    history.filter((c) => c.op !== "pressEnter").map((c) => c.op),
+    ["click", "click", "click"] // preparation only
+  );
+  assert.equal(history.filter((c) => c.op === "type").length, 0); // never typed
   assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
 });
 
@@ -1368,7 +1561,7 @@ test("a Start whose exact prompt is ALREADY in the message evidence with a decis
 // --------------------------------------------------------------------
 
 test("starting the same correlation again re-reports idempotently without a second submission", async () => {
-  const { adapter, pages } = build({ generationCompletes: 1 });
+  const { adapter, pages } = build();
   const first = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(first.ok, true);
   const sendsBefore = pages[0].history().filter((c) => c.op === "type").length;
@@ -1381,7 +1574,7 @@ test("starting the same correlation again re-reports idempotently without a seco
 });
 
 test("a different work item for the same worker is a contradictory session reference", async () => {
-  const { adapter } = build({ generationCompletes: 1 });
+  const { adapter } = build();
   await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-999", prompt: "other" });
   assert.equal(result.ok, false);
@@ -1395,7 +1588,7 @@ test("a registry entry whose correlated tab has closed fails the correlated Star
   // registry entry survives, the tab does not — the same-correlation
   // Start must fail closed with the typed stale-reference failure,
   // with no ok:true / alreadyActive / session result of any kind.
-  const { adapter, tabsApi } = build({ generationCompletes: 1 });
+  const { adapter, tabsApi } = build();
   const first = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(first.ok, true);
   tabsApi._tabs.length = 0; // the correlated browser-session tab closes
@@ -1410,7 +1603,7 @@ test("a registry entry whose correlated tab has closed fails the correlated Star
 test("a registry entry whose tab navigated away from the provider origin fails the correlated Start closed (STALE_REFERENCE)", async () => {
   // The tab still exists but is no longer a chat.z.ai session: the
   // correlation is stale exactly the same way.
-  const { adapter, tabsApi } = build({ generationCompletes: 1 });
+  const { adapter, tabsApi } = build();
   const first = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(first.ok, true);
   tabsApi._tabs[0].url = "https://example.com/"; // navigated away mid-session
@@ -1433,7 +1626,7 @@ async function hungSession(options = {}) {
   // control immediately — the generation-in-flight surface — so the
   // Start needs the completion transition for the boundary). The
   // hung state is then re-armed by the caller-facing line below.
-  const built = build({ generationCompletes: 1, ...options });
+  const built = build({ ...options });
   const started = await built.adapter.startWorkerSession({
     worker: "w1",
     workItem: "CTRL-014",
@@ -1450,7 +1643,7 @@ test("hung-worker recovery performs Stop -> verified stopped -> fixed continue -
   const result = await adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.recovered.message, "continue");
-  assert.equal(result.recovered.acceptance, "conversation-evidence");
+  assert.equal(result.recovered.acceptance, "agent-start"); // CONTINUATION 15: the start signal is the acceptance
   assert.equal(result.recovered.generation, "working");
   assert.deepEqual(result.session, { worker: "w1", workItem: "CTRL-014", tabId: 7 });
   // The acceptance evidence: the exact recovery wording landed in
@@ -1463,13 +1656,16 @@ test("hung-worker recovery performs Stop -> verified stopped -> fixed continue -
   assert.equal(types[0].text, "continue");
 });
 
-test("recovery where generation resumes and the composer clears but 'continue' never lands fails closed", async () => {
-  // Regression (Architect review, finding 3): the provider state
-  // after the recovery send looks healthy — the Stop control
-  // returns (generation resumed) and the composer is cleared — but
-  // the exact fixed message never lands in the conversation
-  // evidence. A resumed generation state is NOT acceptance: the
-  // recovery must fail closed without ever claiming recovery.
+test("recovery where the resumed generation's start signal appears: the acceptance is the START SIGNAL — the `continue` row landing is CONTEXT ONLY (a provider row-drop never fails a started recovery)", async () => {
+  // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
+  // message-row evidence predicate is SUPERSEDED — the acceptance is
+  // the provider-owned start signal (the Stop control visible with
+  // the composer decisively empty: the agent resumed working). A
+  // provider that drops the landed row from the conversation surface
+  // while the generation runs never fails the started recovery: the
+  // row is context, the signal is the proof. (The c14 regression —
+  // "a resumed generation state is not acceptance" — is reversed by
+  // the directive: a resumed generation state IS the acceptance.)
   const built = await hungSession({
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button" && state.composerValue === "continue") {
@@ -1479,7 +1675,7 @@ test("recovery where generation resumes and the composer clears but 'continue' n
         state.__sentRecovery = false;
         // The provider dropped the recovery message from the
         // conversation surface: it never landed as a user message
-        // even though generation resumed and the composer cleared.
+        // even though the generation resumed and the composer cleared.
         if (state.conversation[state.conversation.length - 1] === "continue") {
           state.conversation.pop();
         }
@@ -1487,23 +1683,39 @@ test("recovery where generation resumes and the composer clears but 'continue' n
     },
   });
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
-  assert.equal(result.ok, false, JSON.stringify(result));
-  assert.equal(result.error.code, "AMBIGUOUS_STATE");
-  assert.ok(/not confirmed/.test(result.error.message));
-  assert.ok(/resumed generation state is not acceptance/.test(result.error.message));
-  // The exact fixed message never landed in the conversation evidence.
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.recovered.acceptance, "agent-start");
+  assert.equal(result.recovered.generation, "working");
+  // The exact fixed message never landed in the conversation evidence — context only.
   assert.ok(!built.pages[0].state.conversation.includes("continue"));
-  // Bounded: the fixed message was submitted at most the recovery
-  // attempt budget times (2 by default).
+  // The start signal held: the Stop control visible with the composer decisively empty.
+  assert.equal(built.pages[0].state.stop.visible, true);
+  assert.equal(built.pages[0].state.composerValue, "");
+  // Bounded: the fixed message was typed exactly once (no re-Stop loop after the started signal).
   const recoveriesTyped = built.pages[0].history().filter((c) => c.op === "type" && c.text === "continue").length;
-  assert.ok(recoveriesTyped <= 2, `expected at most 2 recovery submissions, saw ${recoveriesTyped}`);
+  assert.equal(recoveriesTyped, 1);
 });
 
-test("recovery of an unknown session fails closed SESSION_UNKNOWN", async () => {
-  const { adapter } = build();
+test("recovery without a registry entry (the service-worker restart) runs the governed sequence from the request's own correlation — never SESSION_UNKNOWN", async () => {
+  // CONTINUATION 15 (PR #6 review 5124829301, requirement 6: "Do not
+  // require a persistent in-memory session across service-worker
+  // restarts for the operation described above; recovery behavior
+  // must follow the same Send-control rule") — the operator's
+  // SESSION_UNKNOWN live run is the motivating evidence. A LOST
+  // registry no longer refuses: the request itself carries the
+  // Worker/Work-Item/tab correlation and the governed sequence (the
+  // Stop-visible precondition -> the adapter-owned Stop -> verified
+  // stopped -> the exact `continue` -> the agent-start watch) runs
+  // from it, succeeding on the start signal. A registry entry that
+  // CONTRADICTS the request still fails closed STALE_REFERENCE (the
+  // separate regressions below).
+  const { adapter, pages } = build();
+  pages[0].state.stop.visible = true; // the hung generation (the service worker restarted; the registry is gone)
   const result = await adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "SESSION_UNKNOWN");
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.recovered.acceptance, "agent-start");
+  assert.deepEqual(result.session, { worker: "w1", workItem: "CTRL-014", tabId: 7 });
+  assert.ok(pages[0].state.conversation.includes("continue"));
 });
 
 test("a wrong tab correlation is a stale reference", async () => {
@@ -1555,7 +1767,7 @@ test("a provider dialog visible throughout hung recovery NEVER blocks the govern
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.recovered.message, "continue");
-  assert.equal(result.recovered.acceptance, "conversation-evidence"); // the frozen acceptance
+  assert.equal(result.recovered.acceptance, "agent-start"); // CONTINUATION 15: the start signal is the acceptance // the frozen acceptance
   assert.ok(built.pages[0].state.conversation.includes("continue"));
   assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 0); // never an Enter
   assert.ok(built.pages[0].state.dialog); // the dialog was never consulted, never dismissed
@@ -1642,7 +1854,7 @@ test("the Stop control carrying the long-task tooltip label still resolves and c
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.recovered.message, "continue");
-  assert.equal(result.recovered.acceptance, "conversation-evidence");
+  assert.equal(result.recovered.acceptance, "agent-start"); // CONTINUATION 15: the start signal is the acceptance
   assert.ok(built.pages[0].state.conversation.includes("continue"));
   // The adapter's own Stop happened through the long-task-labeled
   // candidate (the real post-stop surface rendered: the Regenerate
@@ -1651,16 +1863,20 @@ test("the Stop control carrying the long-task tooltip label still resolves and c
   assert.ok(!built.pages[0].state.regenerate.clicked, "the Regenerate control must never be clicked");
 });
 
-test("a Regenerate control appearing after the adapter's own Stop is context only — never acceptance", async () => {
+test("a Regenerate control appearing after the adapter's own Stop is CONTEXT ONLY — the acceptance is the start signal; the Regenerate control is never clicked", async () => {
   // Requirement 4 (PR #6 comment 5557087907): "Generation resuming, a
   // cleared composer, or a Regenerate button appearing are context
-  // only and never acceptance by themselves." After the adapter's own
-  // verified Stop, the fixture renders the REAL post-stop surface (the
+  // only and never acceptance by themselves." CONTINUATION 15: the
+  // acceptance IS the provider-owned start signal (the Stop control
+  // visible with the composer decisively empty — the agent resumed
+  // working); the post-stop Regenerate surface and the landed
+  // `continue` row are CONTEXT. After the adapter's own verified
+  // Stop, the fixture renders the REAL post-stop surface (the
   // stopped response's Regenerate control visible, the send control
-  // back) — and this recovery's `continue` NEVER lands in the
-  // conversation evidence, so the recovery must fail closed despite
-  // the healthy-looking post-response context, with the Regenerate
-  // control never clicked as a remedy.
+  // back); the continue-send's start signal then succeeds the
+  // recovery, and this test's hook additionally DROPS the `continue`
+  // row — proving the row was never the predicate. The Regenerate
+  // control is never clicked as a remedy or an acceptance.
   const built = await hungSession({
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button" && state.composerValue === "continue") {
@@ -1669,8 +1885,8 @@ test("a Regenerate control appearing after the adapter's own Stop is context onl
       if (message.op === "probe" && state.__sentRecovery) {
         state.__sentRecovery = false;
         // The provider dropped the recovery message from the
-        // conversation surface: it never landed as a user message even
-        // though the post-response context looks healthy.
+        // conversation surface: it never landed as a user message
+        // even though the post-response context looks healthy.
         if (state.conversation[state.conversation.length - 1] === "continue") {
           state.conversation.pop();
         }
@@ -1678,16 +1894,16 @@ test("a Regenerate control appearing after the adapter's own Stop is context onl
     },
   });
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
-  assert.equal(result.ok, false, JSON.stringify(result));
-  assert.equal(result.error.code, "AMBIGUOUS_STATE");
-  assert.ok(/not confirmed/.test(result.error.message));
-  // The adapter's own Stop happened (the real post-stop surface
-  // rendered: the Regenerate control became visible) ...
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.recovered.acceptance, "agent-start");
+  assert.equal(result.recovered.generation, "working");
+  // The post-response surface rendered and the Regenerate control was never clicked.
   assert.equal(built.pages[0].state.regenerate.visible, true);
-  // ... but the Regenerate control was never clicked as a remedy, and
-  // the exact fixed message never landed.
   assert.ok(!built.pages[0].state.regenerate.clicked, "the Regenerate control must never be clicked");
+  // The dropped row is context only — the start signal held.
   assert.ok(!built.pages[0].state.conversation.includes("continue"));
+  assert.equal(built.pages[0].state.stop.visible, true);
+  assert.equal(built.pages[0].state.composerValue, "");
 });
 
 // --------------------------------------------------------------------
@@ -1703,11 +1919,11 @@ test("a submitted session observes prompt-submitted while generating", async () 
 });
 
 test("a submitted prompt still sitting in the composer observes prompt-unconfirmed", async () => {
-  const built = build({ generates: false });
-  const started = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(started.ok, true);
+  const built = await hungSession();
   // The session's prompt is in the conversation evidence AND back in
-  // the composer un-submitted (a failed retry re-entered it).
+  // the composer un-submitted (a failed retry re-entered it); the
+  // generation has ended (no Stop control).
+  built.pages[0].state.stop.visible = false;
   built.pages[0].state.composerValue = PROMPT;
   const result = await built.adapter.observeSession("w1");
   assert.equal(result.observation.state, "prompt-unconfirmed");
@@ -1802,7 +2018,10 @@ test("an ENABLED send control with the exact prompt present is PREPARATORY ONLY 
   const result = await suppress.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/not confirmed by observation/.test(result.error.message));
+  // CONTINUATION 15: the never-taking send exhausts the watch with
+  // the exact text still in the composer — the bounded re-send
+  // route, never a claimed submission.
+  assert.ok(/remains in the composer/.test(result.error.message), result.error.message);
   // The preparatory control state (the send control computed ENABLED
   // with the exact prompt in the composer) held on every post-typing
   // read — and never produced a submitted record.
@@ -1811,52 +2030,48 @@ test("an ENABLED send control with the exact prompt present is PREPARATORY ONLY 
   assert.equal(result.submitted, undefined);
 });
 
-test("the Stop control replacing the send control is generation-in-progress CONTEXT — the acceptance is recorded ONLY at the Send-reappearance boundary, never while the Stop control is visible (the completion swap back opens the boundary)", async () => {
-  // CONTINUATION 14 (PR #6 review 5124542353, the review's gap 1):
-  // the continuation-12 law — "a 'stop' reading is an acceptable
-  // recording state" — is REVERSED. The provider's slot swap
-  // send -> Stop is the "a current message is in flight"
-  // computation; while it persists the bounded Send-reappearance
-  // wait KEEPS WAITING (the transient missing Send control is not an
-  // error) and the budget's exhaustion fails closed with the typed
-  // mid-generation diagnosis: the submission (the row) may be
-  // CONFIRMED, but the acceptance is recorded only after the Send
-  // control REAPPEARS, and the confirmed submission is NEVER resent
-  // by the retries (the ensurePrompt already-confirmed path
-  // re-observes only — the bounded budget ends in the typed refusal,
-  // one send in the whole history). The completion transition (the
-  // Stop control disappears, the send control returns, the
-  // Regenerate control renders) is the boundary: the acceptance is
-  // recorded there with the observed context (generation:"waiting" —
-  // the boundary read).
-  const { adapter, pages } = build(); // generates: true — the Stop control appears on the send and never completes
+test("the Stop control replacing the send control IS THE AGENT-START SIGNAL — the acceptance is recorded AT THE SIGNAL (the provider's own in-flight computation), and the completion swap-back is CONTEXT", async () => {
+  // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305 — the
+  // "verified Send->Stop/action-control transition" the review names
+  // as the preferred detector): the continuation-14 boundary law is
+  // REVERSED — the provider's slot swap send -> Stop is the
+  // provider's OWN computed proof that a current message is in
+  // flight (an Agent generation actively working), and the
+  // acceptance is recorded AT THE SIGNAL with the composer
+  // decisively empty (the draft consumed): one send click, ZERO
+  // Enter nudges (the signal is present before any cadence tick),
+  // generation:"working". The completion transition (the Stop
+  // control disappears, the send control returns, the Regenerate
+  // control renders) is CONTEXT — a completed-unobserved generation
+  // inside the watch's observation gap fails closed with the
+  // post-response diagnosis (the (b) arm).
+  const { adapter, pages } = build(); // generates: true — the Stop control appears on the send and stays (the generation in flight)
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, false, JSON.stringify(result));
-  assert.equal(result.error.code, "AMBIGUOUS_STATE");
-  assert.ok(/Stop control remains visible/.test(result.error.message));
-  assert.ok(/NEVER resent/.test(result.error.message));
-  // The submission landed ONCE (the row) and was never duplicated by
-  // the bounded retries — the already-confirmed path re-observes only.
-  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
-  // The single send click of the whole run.
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 1);
+  assert.equal(result.submitted.generation, "working"); // the start signal itself
+  assert.equal(result.submitted.composeReestablishments, 0);
+  // The single send click of the whole run; ZERO Enter nudges.
   assert.equal(pages[0].history().filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1);
   assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
+  // The signal held at the recording read: the Stop control visible with the composer decisively empty.
+  assert.equal(pages[0].state.stop.visible, true);
+  assert.equal(pages[0].state.composerValue, "");
+  assert.ok(pages[0].state.conversation.includes(PROMPT)); // the landed row — context
 
-  // (b) The completion transition on the boundary read itself: the
-  // current message completes — the slot swaps back to the send
-  // control and the Regenerate control renders (the REAL
-  // post-response surface). The acceptance is recorded from the
-  // frozen evidence AT THE BOUNDARY; the completion is context.
-  // (A completion arriving AFTER the boundary read is equally
-  // context — unobserved, exactly like the beyond-window async
-  // outcome; the recorded generation simply reports the read.)
-  const completing = build({ generationCompletes: 1 });
+  // (b) The completion INSIDE the watch's observation gap (a short
+  // generation: the Stop control appears and completes between
+  // probes): the start signal is never observed, the watch fails
+  // closed with the post-response/completed-unobserved diagnosis —
+  // never a claimed submission, never a resend.
+  const completing = build({ generationCompletes: 1 }); // completes on the FIRST post-send probe — inside the observation gap
   const completed = await completing.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(completed.ok, true, JSON.stringify(completed));
-  assert.equal(completed.submitted.generation, "waiting"); // the boundary read — the Stop control gone, the send control back
+  assert.equal(completed.ok, false, JSON.stringify(completed));
+  assert.equal(completed.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/queued or have completed unobserved/.test(completed.error.message), completed.error.message);
   assert.equal(completing.pages[0].state.regenerate.visible, true); // the real post-response surface rendered
   assert.ok(!completing.pages[0].state.regenerate.clicked); // the Regenerate control is never automated
-  assert.ok(completing.pages[0].state.conversation.includes(PROMPT));
+  assert.equal(completing.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // landed once, never resent
 });
 
 test("the provider's prompt-restore computed on the send control (ENABLED) while the composer read degrades is caught by the control-state channel — the acceptance is never recorded from an untrustworthy composer read", async () => {
@@ -1912,9 +2127,16 @@ test("a CONTRADICTORY composer action slot (both the send control and the Stop c
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
   assert.ok(/contradictory/.test(result.error.message));
   assert.ok(/both the send control and the Stop control/.test(result.error.message));
-  assert.equal(stuck.pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
+  // CONTINUATION 15: the contradictory slot refuses the send click at
+  // the gate (the click fires only on the "send" control state), the
+  // watch's timed Enter cadence runs its full bounded windows (12
+  // nudges x 3 attempts — the provider decides what the Enter does),
+  // and the exhaustion refuses on the contradictory slot: never a
+  // claimed submission.
+  assert.equal(stuck.pages[0].history().filter((c) => c.op === "pressEnter").length, 36);
   const sends = stuck.pages[0].history().filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
-  assert.equal(sends, 1); // the initial send only — the confirmed submission is never resent
+  assert.equal(sends, 1); // the initial send only — the post-send slot turned contradictory (the stuck surface renders both controls) and the retries never click again
+  assert.ok(!("submitted" in result), "a contradictory control state never produces a submitted record");
 });
 
 test("the send control computed ENABLED while the composer reads decisively EMPTY is the contradictory surface — the acceptance recording fails closed before any recovery path", async () => {
@@ -1934,8 +2156,12 @@ test("the send control computed ENABLED while the composer reads decisively EMPT
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
   assert.ok(/contradicts the composer read/.test(result.error.message));
   assert.ok(/untrustworthy/.test(result.error.message));
-  // Zero recovery automation on the contradictory surface: no Enter,
-  // and no compose-control click after the send.
+  // CONTINUATION 15: the watch's timed Enter cadence runs its full
+  // bounded windows on the untrustworthy surface (12 no-op nudges x 3
+  // attempts on the decisively empty composer — the Enter never
+  // resubmits an empty composer), and NOTHING ELSE runs after the
+  // send: no compose-control click, no resend. The exhaustion refuses
+  // on the enabled-vs-empty contradiction.
   const ops = lying.pages[0].history().filter((c) => c.op !== "probe");
   const postSend = [];
   let sent = false;
@@ -1948,7 +2174,7 @@ test("the send control computed ENABLED while the composer reads decisively EMPT
       postSend.push(op);
     }
   }
-  assert.deepEqual(postSend.map((c) => c.op), []); // nothing after the send — the refusal is purely observational
+  assert.deepEqual(postSend.map((c) => c.op), Array.from({ length: 36 }, () => "pressEnter")); // only the timed cadence — no other automation
 });
 
 test("an AMBIGUOUS send-control resolution (two send controls) on the verification facts fails closed — the acceptance is never recorded from an unreadable control state", async () => {
@@ -1973,8 +2199,12 @@ test("an AMBIGUOUS send-control resolution (two send controls) on the verificati
   const result = await doubled.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
-  assert.ok(/enabled state could not be read decisively/.test(result.error.message));
-  assert.equal(doubled.pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
+  assert.ok(/enabled state could not be read decisively/.test(result.error.message), result.error.message);
+  // CONTINUATION 15: the watch's timed Enter cadence runs its full
+  // bounded windows (the never-starting, ambiguous surface); the
+  // exhaustion refuses on the unreadable control state.
+  assert.equal(doubled.pages[0].history().filter((c) => c.op === "pressEnter").length, 36);
+  assert.ok(!("submitted" in result), "an unreadable control state never produces a submitted record");
 });
 
 test("the operator's literal timing: the recovery invoked immediately after a Start whose recording read shows generation:\"waiting\" now WAITS (bounded) for the Stop-visible interval to open — the frozen recovery then succeeds", async () => {
@@ -1996,13 +2226,13 @@ test("the operator's literal timing: the recovery invoked immediately after a St
   // CONTINUATION 14: generationCompletes: null overrides the helper default — the
   // queued-surface model needs NO completion transition (the Stop interval must stay
   // open for the recovery to find it).
-  const built = await hungSession({ generates: false, generationCompletes: null });
+  const built = await hungSession();
   built.pages[0].state.stop.visible = false; // the queued state — the generation is NOT yet active (no Stop control)
   built.pages[0].state.pendingStop = 2; // the generation becomes active on the 2nd fact read
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.recovered.message, "continue");
-  assert.equal(result.recovered.acceptance, "conversation-evidence"); // STILL the message-exclusive acceptance
+  assert.equal(result.recovered.acceptance, "agent-start"); // CONTINUATION 15: the start signal is the acceptance
   assert.ok(built.pages[0].state.conversation.includes("continue"));
   // The adapter owned the Stop action (the post-stop surface rendered).
   assert.equal(built.pages[0].state.regenerate.visible, true);
@@ -2017,7 +2247,7 @@ test("the queued state that never becomes active within the bounded wait fails c
   // no-prompt state) and the operator guidance (a generation:"
   // "waiting" Start records a confirmed submission whose generation
   // start can lag; invoke while the Stop control is visibly present).
-  const built = await hungSession({ generates: false });
+  const built = await hungSession();
   built.pages[0].state.stop.visible = false; // the queued state persists — the Stop interval never opens
   const historyBefore = built.pages[0].history().length;
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
@@ -2025,7 +2255,7 @@ test("the queued state that never becomes active within the bounded wait fails c
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
   assert.ok(/hung precondition/.test(result.error.message));
   assert.ok(/decisively DISABLED/.test(result.error.message));
-  assert.ok(/generation start can lag/.test(result.error.message));
+  assert.ok(/start signal itself/.test(result.error.message), result.error.message);
   // Zero automation: the refusal is purely observational.
   const ops = built.pages[0].history().slice(historyBefore).filter((c) => c.op !== "probe");
   assert.equal(ops.length, 0, JSON.stringify(ops));
@@ -2038,7 +2268,7 @@ test("a restored prompt sitting in the composer (no Stop control) refuses the re
   // send control is rendered, no Stop control is visible. There is
   // nothing to recover — the refusal says so and points at the
   // governed remedy (re-Start the worker session).
-  const built = await hungSession({ generates: false });
+  const built = await hungSession();
   built.pages[0].state.composerValue = PROMPT; // the restored prompt — the submission was invalidated
   built.pages[0].state.stop.visible = false;
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
@@ -2088,16 +2318,18 @@ test("the Send-control state machine: the send control DISAPPEARS (the Stop cont
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 1);
-  assert.equal(result.submitted.generation, "waiting"); // the boundary read — the send control back
+  assert.equal(result.submitted.generation, "working"); // CONTINUATION 15: the start signal — the Stop control observed BEFORE the completion
   assert.equal(result.submitted.composeReestablishments, 0);
-  // The completion transition rendered the real post-response surface
-  // (the Stop control gone, the Regenerate control visible) — the
-  // disappearance/reappearance machine ran in full.
-  assert.equal(built.pages[0].state.regenerate.visible, true);
-  assert.equal(built.pages[0].state.stop.visible, false);
+  // The watch observed the signal on its FIRST post-send read; the
+  // armed completion transition (the 2nd read) is UNOBSERVED context —
+  // the Start has already returned, so the post-response surface never
+  // rendered during the governed flow.
+  assert.equal(built.pages[0].state.regenerate.visible, false);
+  assert.equal(built.pages[0].state.stop.visible, true); // the signal still holds
   assert.ok(built.pages[0].state.conversation.includes(PROMPT));
   // No Enter in the ordinary machine: the send control was resolvable
-  // at the send step and the click succeeded.
+  // at the send step, the click succeeded, and the signal was present
+  // before any cadence tick.
   assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
 });
 
@@ -2116,7 +2348,6 @@ test("the Send control INACCESSIBLE at the send step: the Enter fallback fires e
   // click failed on the zero-match resolution and the bounded budget
   // exhausted — this regression differentiates them.
   const built = build({
-    generates: false,
     sendInaccessible: true,
     beforeRespond: (message, state) => {
       if (message.op === "pressEnter") {
@@ -2127,16 +2358,21 @@ test("the Send control INACCESSIBLE at the send step: the Enter fallback fires e
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 1);
-  // The Enter fallback: EXACTLY ONE pressEnter in the whole run.
+  // The timed Enter cadence: EXACTLY ONE pressEnter in the whole run —
+  // the first nudge's Enter reached the focused composer, the
+  // provider's keybinding submitted the verified prompt, and the
+  // Send->Stop transition ended the watch before any second nudge.
   const enters = built.pages[0].history().filter((c) => c.op === "pressEnter");
   assert.equal(enters.length, 1);
   // The Send control was never clicked — it never resolved at the
-  // send step (the fallback is the ONLY path).
+  // send step (the Enter cadence was the ONLY recovery path).
   assert.equal(built.pages[0].history().filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 0);
   // The Enter submitted the verified prompt: the exact row landed
-  // exactly once (the message-exclusive acceptance).
+  // exactly once, and the start signal (the Stop control with the
+  // composer decisively empty) is the acceptance.
   assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
-  assert.equal(result.submitted.generation, "waiting");
+  assert.equal(result.submitted.generation, "working"); // the start signal
+  assert.equal(built.pages[0].state.stop.visible, true);
 });
 
 test("the send click itself failing (the slot re-rendering TWO send controls — an ambiguous click target): the Enter fallback fires once and the full state machine succeeds", async () => {
@@ -2148,7 +2384,6 @@ test("the send click itself failing (the slot re-rendering TWO send controls —
   // resolves the slot again, and the Send-reappearance boundary
   // records the acceptance.
   const built = build({
-    generationCompletes: 1,
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button") {
         state.duplicateSend = true; // the surface re-rendered TWO send controls — the click will refuse
@@ -2161,15 +2396,18 @@ test("the send click itself failing (the slot re-rendering TWO send controls —
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 1);
-  // The Enter fallback: exactly one pressEnter (the click failed, the
-  // Enter replaced it for that attempt).
+  assert.equal(result.submitted.generation, "working"); // the start signal
+  // The timed Enter cadence: exactly one pressEnter (the click was
+  // refused, the first nudge's Enter submitted the verified prompt,
+  // and the signal ended the watch).
   assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 1);
   // The failed send click WAS attempted (one click command in the
-  // history) — the refusal routed the fallback.
+  // history) — the refusal routed the watch's recovery.
   assert.equal(built.pages[0].history().filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1);
-  // The submission landed exactly once (the message-exclusive
-  // acceptance at the boundary).
+  // The submission landed exactly once; the start signal held at the
+  // recording read.
   assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1);
+  assert.equal(built.pages[0].state.stop.visible, true);
 });
 
 test("the Send control never becoming resolvable after the Enter fallback: the bounded retry budget fails closed with the typed unresolvable-slot diagnosis (the Enter issued exactly once — the already-confirmed retries never re-Enter)", async () => {
@@ -2185,15 +2423,18 @@ test("the Send control never becoming resolvable after the Enter fallback: the b
   // Enter, never a resend — and the budget ends in the typed failure.
   const built = build({
     generates: false,
-    sendInaccessible: true, // persists — the Send control never becomes resolvable
+    sendInaccessible: true, // persists — the slot never re-renders a control
   });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
-  assert.ok(/neither the send control nor the Stop control/.test(result.error.message));
-  // The Enter was issued EXACTLY ONCE (the first attempt's fallback);
-  // the already-confirmed retries never re-Enter.
-  assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 1);
+  assert.ok(/neither the send control nor the Stop control/.test(result.error.message), result.error.message);
+  // CONTINUATION 15: every bounded attempt's watch runs its FULL
+  // timed Enter cadence (12 nudges x 3 attempts); the first nudge's
+  // Enter submits the verified prompt (the row lands) but the
+  // never-generating, never-resolvable surface never shows the start
+  // signal, and the exhaustion refuses on the unresolvable slot.
+  assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 36);
   // The Send control was never clicked.
   assert.equal(built.pages[0].history().filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 0);
   // The Enter DID submit the verified prompt (the row landed) — but
@@ -2212,8 +2453,6 @@ test("the recovery's continue-send with an INACCESSIBLE Send control: the Enter 
   // fallback submits it — the acceptance is the message-exclusive
   // evidence (the `continue` row + the decisively cleared composer).
   const built = await hungSession({
-    generates: false,
-    generationCompletes: null,
     beforeRespond: (message, state) => {
       if (message.op === "click" && String(message.selector).includes('aria-label="Stop"')) {
         state.sendInaccessible = true; // the post-stop re-render broke the slot — the Send control unresolvable at the continue-send
@@ -2224,7 +2463,7 @@ test("the recovery's continue-send with an INACCESSIBLE Send control: the Enter 
   const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.recovered.message, "continue");
-  assert.equal(result.recovered.acceptance, "conversation-evidence");
+  assert.equal(result.recovered.acceptance, "agent-start"); // CONTINUATION 15: the start signal is the acceptance
   assert.ok(built.pages[0].state.conversation.includes("continue"));
   // The Enter fallback fired exactly once in the recovery.
   const recoveryOps = built.pages[0].history().slice(historyBeforeRecovery).filter((c) => c.op !== "probe");
