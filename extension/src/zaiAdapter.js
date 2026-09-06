@@ -372,6 +372,18 @@ export function createZaiAdapter({
     { name: "composerEnabled", selector: ZAI_LOCATORS.composer, mode: "enabled" },
     { name: "composerValue", selector: ZAI_LOCATORS.composer, mode: "value" },
     { name: "sendVisible", selector: ZAI_LOCATORS.send, mode: "visible" },
+    // CONTINUATION 12 (PR #6 comment 5557322324, requirements 2-3): the
+    // provider's OWN computed composer-emptiness signal. The provider
+    // bundle computes `#send-message-button`.disabled from the composer
+    // text (disabled when the trimmed input is empty — plus its
+    // connection/role gates) and swaps the composer action slot between
+    // the send control and the Stop control on the current-message-done
+    // conditional, so the send control's enabled state is an
+    // independent provider-computed observation of "a prompt is present",
+    // cross-checking the raw #chat-input value read. The page script's
+    // "enabled" probe mode reads exactly this (disabled property +
+    // aria-disabled), degrading to a null fact on a zero/many match.
+    { name: "sendEnabled", selector: ZAI_LOCATORS.send, mode: "enabled" },
     { name: "dialogCount", selector: ZAI_LOCATORS.dialog, mode: "count" },
     { name: "alertVisible", selector: ZAI_LOCATORS.alert, mode: "visible" },
   ];
@@ -509,6 +521,22 @@ export function createZaiAdapter({
       if (value !== null && value.length > 0) {
         return { held: true, facts: read.facts };
       }
+      // CONTINUATION 12 (PR #6 comment 5557322324, requirements 2-3):
+      // the control-state channel's OWN async-outcome observable. The
+      // provider's MODEL_CONCURRENCY_LIMIT handler restores the prompt
+      // into the composer AND recomputes the send control ENABLED in the
+      // SAME reactive update — so an enabled send control during the
+      // hold is the provider's own "a prompt is (back) present"
+      // computation even when the raw #chat-input value read itself
+      // lags or degrades (the restore path focuses and resizes the
+      // textarea before the read stabilizes). The enabled reading fires
+      // the SAME held dispatch as a refilled composer: the unconfirmed
+      // bounded retry path. A decisively disabled send control (the
+      // at-rest/emptied state — the provider's own computed "no prompt")
+      // is NOT an outcome and never fires the hold.
+      if (sendEnabledOf(read.facts) === true) {
+        return { held: true, facts: read.facts };
+      }
     }
     return { held: false, facts: quiet };
   }
@@ -559,6 +587,109 @@ export function createZaiAdapter({
   function composerValueOf(facts) {
     const value = facts.composerValue?.value;
     return typeof value === "string" ? value : null;
+  }
+
+  /**
+   * @private — CONTINUATION 12 (PR #6 comment 5557322324, requirements
+   * 2-3): the provider's own computed composer-emptiness signal, read
+   * from the send control's enabled state. Decisive boolean when the
+   * send control resolved to exactly one visible element, else null
+   * (absent, ambiguous, or a fact the surface did not answer — never
+   * guessed). `true` is the provider computing "a prompt is present";
+   * `false` is the provider computing "no prompt" (the trimmed input
+   * empty, plus its connection/role gates); null is an unreadable
+   * control state — callers fail closed on null wherever the reading
+   * is load-bearing.
+   */
+  function sendEnabledOf(facts) {
+    const enabled = facts.sendEnabled?.enabled;
+    return typeof enabled === "boolean" ? enabled : null;
+  }
+
+  /**
+   * @private — CONTINUATION 12 (PR #6 comment 5557322324, requirements
+   * 2-3): the EXPLICIT submission-state observation channel — the
+   * composer action-slot reading. The provider's own bundle (the
+   * composer action slot) renders the send control when there is no
+   * current message or the current message is done, and swaps the slot
+   * to the Stop control while the current message is in flight — the
+   * two slots are MUTUALLY EXCLUSIVE on the real surface. The channel's
+   * reading:
+   *   "stop"          — the Stop control visible (the send control
+   *                     absent): the provider's current message is in
+   *                     flight — generation/submission ACTIVE. CONTEXT
+   *                     ONLY, never acceptance evidence (requirement 4:
+   *                     acceptance stays the message-exclusive exact-row
+   *                     + decisively-empty-composer evidence).
+   *   "send"          — the send control visible (Stop absent): no
+   *                     in-flight current message. Whether a prompt is
+   *                     present is the sendEnabled/composer reading.
+   *   "contradictory" — BOTH controls visible: a malformed surface (the
+   *                     real slot renders exactly one). Fails closed.
+   *   "unresolvable"  — NEITHER control visible: the composer action
+   *                     slot is absent or unreadable. Fails closed.
+   */
+  function controlStateOf(facts) {
+    const stop = stopVisible(facts);
+    const send = facts.sendVisible?.visible === true;
+    if (stop && send) {
+      return "contradictory";
+    }
+    if (stop) {
+      return "stop";
+    }
+    if (send) {
+      return "send";
+    }
+    return "unresolvable";
+  }
+
+  /**
+   * @private — CONTINUATION 12 (PR #6 comment 5557322324, requirement 7:
+   * "a contradictory/unreadable control state fails closed"): the
+   * submission-acceptance control-state consistency gate. Returns a
+   * typed AMBIGUOUS_STATE refusal when the recording facts carry a
+   * contradictory or unreadable composer action-slot state, or when
+   * the provider's own computed prompt-present signal contradicts the
+   * decisively-empty composer read (send ENABLED while #chat-input
+   * reads "" — the composer read is untrustworthy and the acceptance
+   * is never recorded from it), or when the send control resolved
+   * ambiguously (the enabled probe degraded to null on a zero/many
+   * match while the control is visible). Returns null when the
+   * control state is consistent — the caller records the acceptance.
+   * Context semantics are untouched: a "stop" reading (generation in
+   * progress) and a "send" reading consistent with the composer are
+   * BOTH acceptable recording states (the frozen acceptance rule is
+   * the message-exclusive evidence, not the control state).
+   */
+  function controlStateRefusal(facts) {
+    const control = controlStateOf(facts);
+    if (control === "contradictory") {
+      return failure(
+        "AMBIGUOUS_STATE",
+        "the composer action slot is contradictory — both the send control and the Stop control are visible (the provider's slot renders exactly one); the submission acceptance is not recorded from an unreadable control state"
+      );
+    }
+    if (control === "unresolvable") {
+      return failure(
+        "AMBIGUOUS_STATE",
+        "the composer action slot is unreadable — neither the send control nor the Stop control is visible; the submission acceptance is not recorded from an unreadable control state"
+      );
+    }
+    const sendEnabled = sendEnabledOf(facts);
+    if (control === "send" && facts.sendVisible?.visible === true && sendEnabled === null) {
+      return failure(
+        "AMBIGUOUS_STATE",
+        "the send control's enabled state could not be read decisively (absent or ambiguous) while the control is visible — the submission acceptance is not recorded from an unreadable control state"
+      );
+    }
+    if (sendEnabled === true && composerValueOf(facts) === "") {
+      return failure(
+        "AMBIGUOUS_STATE",
+        "the composer action slot contradicts the composer read — the provider's send control is computed ENABLED (a prompt present) while #chat-input reads decisively empty; the composer read is untrustworthy and the submission acceptance is not recorded from it"
+      );
+    }
+    return null;
   }
 
   /**
@@ -1263,8 +1394,25 @@ export function createZaiAdapter({
     let lastRefusal = null;
     let prepared = false;
 
-    /** Record the CONFIRMED submission (the shared acceptance path). */
+    /**
+     * Record the CONFIRMED submission (the shared acceptance path).
+     * CONTINUATION 12 (PR #6 comment 5557322324, requirements 4-7): the
+     * recording is now GATED on the control-state consistency of the
+     * recording facts — a contradictory or unreadable composer
+     * action-slot state, or an enabled send control contradicting the
+     * decisively-empty composer read, refuses the acceptance (fail
+     * closed) instead of recording from an untrustworthy surface. The
+     * frozen acceptance rule is UNCHANGED: a send/control transition is
+     * context and cross-check only, never acceptance by itself — the
+     * acceptance remains the MESSAGE-EXCLUSIVE exact-prompt evidence
+     * plus the DECISIVELY empty composer, and the `submitted` record
+     * keeps exactly its frozen four-field shape.
+     */
     const recordSubmission = (facts) => {
+      const controlRefusal = controlStateRefusal(facts);
+      if (controlRefusal) {
+        return controlRefusal;
+      }
       const generation = stopVisible(facts) ? "working" : "waiting";
       const record = {
         worker,
@@ -1314,8 +1462,16 @@ export function createZaiAdapter({
       if (entered.confirmed) {
         // The submission was already confirmed by MESSAGE-EXCLUSIVE
         // provider-state evidence (e.g. the dismissed popup had let it
-        // land): never resend the governed prompt.
-        return recordSubmission(entered.facts);
+        // land): never resend the governed prompt. CONTINUATION 12: a
+        // control-state inconsistency on the recording facts refuses
+        // the acceptance — the bounded retry re-observes (never resends
+        // a confirmed submission) and fails closed if it persists.
+        const recorded = recordSubmission(entered.facts);
+        if (recorded.ok) {
+          return recorded;
+        }
+        lastRefusal = recorded;
+        continue;
       }
       // 5b. The PRE-SEND GATE (continuation 6, PR #6 review
       //     5123047551, requirement 1): the exact prompt must be
@@ -1402,14 +1558,41 @@ export function createZaiAdapter({
         const hold = await holdForAsyncSubmissionOutcome(tabId);
         if (hold.held) {
           facts = hold.facts;
+          // CONTINUATION 12 (PR #6 comment 5557322324, requirements 6-7):
+          // the held async outcome is dispatched through the SAME
+          // control-state consistency gate before any recovery path —
+          // an enabled send control observed with a decisively EMPTY
+          // composer is the contradictory surface (the provider's own
+          // computation says a prompt is present while the raw read
+          // says none), and it fails closed IMMEDIATELY. The compose
+          // re-establishment is never invoked on an untrustworthy
+          // composer read, and the acceptance is never recorded from
+          // it — the race in which the optimistic landing is accepted
+          // (or recovered) before the provider can expose a
+          // contradictory composer/control state is closed on every
+          // observable surface.
+          const heldControlRefusal = controlStateRefusal(hold.facts);
+          if (heldControlRefusal) {
+            return heldControlRefusal;
+          }
         } else if (hold.facts) {
           // The confirmation HELD through the async-outcome window:
           // record the acceptance from the freshest quiet read (the
           // message-exclusive exact-row + decisively-empty-composer
           // evidence, held — popup absence itself is never success,
           // and a popup beyond the bounded window is a live-evidence
-          // matter).
-          return recordSubmission(hold.facts);
+          // matter). CONTINUATION 12: the recording is gated on the
+          // control-state consistency of the quiet facts — a
+          // contradictory/unreadable action-slot state or an
+          // enabled-send-vs-empty-composer contradiction fails closed
+          // (the bounded retry re-observes; a confirmed submission is
+          // never resent).
+          const recorded = recordSubmission(hold.facts);
+          if (recorded.ok) {
+            return recorded;
+          }
+          lastRefusal = recorded;
+          continue;
         } else {
           lastRefusal = failure(
             "PAGE_UNAVAILABLE",
@@ -1553,9 +1736,48 @@ export function createZaiAdapter({
     while (attempts < maxRecoveryAttempts) {
       attempts += 1;
       // Observe the hang precondition: generation in progress.
+      // CONTINUATION 12 (PR #6 comment 5557322324, requirement 8 — the
+      // diagnosis of the repeated AMBIGUOUS_STATE immediately after a
+      // successful Start whose result says generation:"waiting"):
+      // Start returns when the SUBMISSION is confirmed (message-
+      // exclusive evidence), which can PRECEDE the generation becoming
+      // ACTIVE — the provider's composer action slot renders the Stop
+      // control only while a current message is in flight, so a
+      // queued-but-not-yet-active generation shows the send control
+      // with no Stop. The pre-correction settle treated the FIRST
+      // non-ambiguous classification as decisive — a "ready-for-input"
+      // reading (composer enabled, no Stop) resolved IMMEDIATELY and
+      // the precondition refusal fired before the Stop-visible
+      // interval could open: exactly the operator's repeated
+      // AMBIGUOUS_STATE. The correction: the precondition's bounded
+      // wait now WAITS for the Stop-visible interval to OPEN (or a
+      // decidable alternative to appear — the post-response surface,
+      // a composer holding text, or a decisive failure surface) within
+      // the same bounded settle budget. The frozen recovery contract
+      // is UNALTERED: the adapter still owns Stop -> verify stopped ->
+      // exact continue -> conversation evidence, the precondition
+      // still requires the Stop control visible before any action,
+      // and an exhaustion still fails closed — the wait only tolerates
+      // the generation-start latency the provider itself exhibits.
       const observed = await settle(tabId, [], (f) => {
         const c = classifySession(f, session, "recovery");
-        return c.state !== "ambiguous";
+        if (
+          ["authentication-required", "provider-error", "unexpected-dialog", "expected-blocking-dialog"].includes(
+            c.state
+          )
+        ) {
+          return true; // a decisive failure surface ends the wait immediately
+        }
+        // The precondition's decidable outcomes: the generation ACTIVE
+        // (Stop visible — both computed label states), the
+        // post-response surface (the Regenerate control — the
+        // generation already ended), or the composer holding text (the
+        // prompt present — no active generation to recover).
+        return (
+          stopVisible(f) ||
+          postResponseRegenerateVisible(f) ||
+          (composerValueOf(f) !== null && composerValueOf(f).length > 0)
+        );
       });
       if (!observed.ok) {
         lastRefusal = observed;
@@ -1593,9 +1815,33 @@ export function createZaiAdapter({
             "the hung precondition (generation in progress) is not established — the provider Stop control is not visible and the post-response state is observed (the Regenerate control is visible and the composer is enabled: the last response is complete or stopped, so there is nothing to recover; if the generation was stopped manually before this call, that is the wrong procedure — invoke the recovery while generation is genuinely active so the adapter can own the governed Stop action)"
           );
         }
+        // CONTINUATION 12 (requirement 8): the control-state-diagnosed
+        // refusals. The composer holding text while no Stop control is
+        // visible means the submission was not accepted or the prompt
+        // was restored (the known popup path) — there is no active
+        // generation to recover and the operator procedure is a
+        // re-Start, not a recovery. Otherwise the bounded wait did not
+        // observe the generation become active: the queued-state
+        // refusal names the control-state reading and the timing
+        // guidance (invoke while the Stop control is visibly present,
+        // not merely immediately after Start returns).
+        const composerValue = composerValueOf(observed.facts);
+        if (composerValue !== null && composerValue.length > 0) {
+          return failure(
+            "AMBIGUOUS_STATE",
+            "the hung precondition (generation in progress) is not established — the composer holds text and the send control is rendered with no Stop control visible: the submission was not accepted or the prompt was restored (the known popup path), so there is no active generation to recover; handle the provider popup state if one is present and re-Start the worker session"
+          );
+        }
+        const sendEnabled = sendEnabledOf(observed.facts);
+        const controlDetail =
+          sendEnabled === null
+            ? "the send control's enabled state could not be read decisively"
+            : sendEnabled
+              ? "the send control is rendered ENABLED while the composer reads decisively empty (the provider computes a prompt present — the composer read is untrustworthy)"
+              : "the send control is rendered decisively DISABLED with a decisively empty composer (the provider's own computed no-prompt state)";
         return failure(
           "AMBIGUOUS_STATE",
-          "the hung precondition (generation in progress) is not established — the provider Stop control is not visible"
+          `the hung precondition (generation in progress) is not established — the provider Stop control is not visible: ${controlDetail}, and the bounded wait did not observe the generation become active. A Start result carrying generation:"waiting" records a CONFIRMED submission whose generation start can lag (the provider's queued state); invoke the recovery while the provider is actively generating (the Stop control visibly present — both computed label states are handled), not merely immediately after Start returns`
         );
       }
 

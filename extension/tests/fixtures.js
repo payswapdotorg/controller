@@ -472,6 +472,35 @@ export function fakeZaiPage({
   // resolves the same inner button).
   stop = { visible: false },
   stopLongTask = false,
+  // CONTINUATION-12 control-state knobs (PR #6 comment 5557322324,
+  // requirements 2-3 and 7 — the provider's own bundle-proven composer
+  // action-slot state machine):
+  //   `sendSlotStuck` models the MALFORMED surface that renders the send
+  //   control AND the Stop control simultaneously (the provider's slot
+  //   renders exactly one — the contradictory control state that must
+  //   fail closed);
+  //   `sendEnabledLie` models the surface whose send control is computed
+  //   ENABLED while the composer reads decisively empty (the provider's
+  //   own prompt-present computation contradicting the raw input read —
+  //   the untrustworthy-composer-read contradiction that must fail
+  //   closed);
+  //   `duplicateSend` models two #send-message-button elements (the
+  //   enabled probe degrades to an ambiguous null while the control is
+  //   visible — the unreadable control state);
+  //   `state.pendingStop` (armed by a test through the exposed state, or
+  //   by any surface transition) models the QUEUED generation becoming
+  //   active: the Stop control appears on the Nth fact read after the
+  //   arming (the submission confirmed but the generation not yet
+  //   active — the operator's literal generation:"waiting" surface, then
+  //   the generation entering flight);
+  //   `generationCompletes` models the provider's completion transition:
+  //   on the Nth fact read with the Stop control visible, the current
+  //   message completes (the slot swaps back to the send control and
+  //   the Regenerate control renders — the real post-response surface).
+  sendSlotStuck = false,
+  sendEnabledLie = false,
+  duplicateSend = false,
+  generationCompletes = null,
   // The post-response Regenerate control (CONTINUATION-11,
   // LIVE-OBSERVED in the operator's saved authenticated capture at
   // main 5d14d90): the bits-ui tooltip wrapper
@@ -573,6 +602,12 @@ export function fakeZaiPage({
     composeStuck,
     duplicateComposer,
     composerDisabled: false,
+    sendSlotStuck,
+    sendEnabledLie,
+    duplicateSend,
+    pendingStop: null,
+    generationCompletes: generationCompletes ? { probes: generationCompletes, fired: false } : null,
+    pendingCompletion: null,
   };
 
   /**
@@ -606,8 +641,13 @@ export function fakeZaiPage({
   const visibleButtons = () => (buttons ? buttons(state) : defaultButtons());
 
   function sendButton() {
-    // The send control is visible whenever the composer is present.
-    return { disabled: state.composerValue.length === 0 };
+    // The send control's own computed state (the provider bundle's
+    // disabled computation: the trimmed composer text empty ->
+    // disabled, plus its connection/role gates — the fixture models
+    // the prompt-emptiness gate, the governed surface's always-passing
+    // gates). `sendEnabledLie` models the surface whose control
+    // computes ENABLED while the composer is decisively empty.
+    return { disabled: sendEnabledLie ? false : state.composerValue.length === 0 };
   }
 
   function submit() {
@@ -674,6 +714,34 @@ export function fakeZaiPage({
       return { ok: false, error: { code: "PAGE_MALFORMED", message: "not a Z.ai page command" } };
     }
     if (message.op === "probe") {
+      // The CONTINUATION-12 control-state transitions (the provider's
+      // own bundle-proven composer action-slot machine):
+      //   - the QUEUED generation becoming active: `state.pendingStop`
+      //     counts down on each fact read and swaps the action slot to
+      //     the Stop control (the current message entering flight);
+      //   - the generation completing: on the Nth fact read with the
+      //     Stop control visible, the current message completes (the
+      //     slot swaps back to the send control and the Regenerate
+      //     control renders — the real post-response surface).
+      if (state.pendingStop !== null) {
+        state.pendingStop -= 1;
+        if (state.pendingStop <= 0) {
+          state.pendingStop = null;
+          state.stop.visible = true;
+        }
+      }
+      if (state.generationCompletes && !state.generationCompletes.fired && state.stop.visible) {
+        state.generationCompletes.fired = true;
+        state.pendingCompletion = state.generationCompletes.probes;
+      }
+      if (state.pendingCompletion !== null) {
+        state.pendingCompletion -= 1;
+        if (state.pendingCompletion <= 0) {
+          state.pendingCompletion = null;
+          state.stop.visible = false;
+          state.regenerate.visible = true;
+        }
+      }
       // The async popup materializes on the Nth fact read after the
       // send (the asynchronous MODEL_CONCURRENCY_LIMIT arrival).
       if (state.pendingPopup !== null) {
@@ -827,7 +895,29 @@ export function fakeZaiPage({
       return state.composeControl ? [{ isComposeControl: true, dataActive: "false", disabled: false }] : [];
     }
     if (selector === "#send-message-button") {
-      return [Object.assign({ isSend: true }, sendButton())];
+      // The CONTINUATION-12 faithful action-slot swap (the provider's
+      // own bundle render conditional): the composer action slot renders
+      // the send control when there is no current message or the current
+      // message is done, and swaps the slot to the Stop control while
+      // the current message is in flight — so #send-message-button is
+      // ABSENT from the surface while the Stop control is visible AND
+      // the composer is decisively EMPTY (the clean in-flight reading
+      // the adapter's control-state channel classifies). A composer
+      // holding text while the Stop control is visible models the
+      // provider's queued-input surface, where the fixture keeps the
+      // send control resolvable for the governed resend mechanics (the
+      // real slot renders the Stop control only — the adapter resends
+      // only from an unconfirmed surface, which on the real machine
+      // carries no in-flight message). `sendSlotStuck` models the
+      // MALFORMED surface that renders BOTH controls with an empty
+      // composer (the contradictory control state that must fail
+      // closed); `duplicateSend` models two send controls (the
+      // ambiguous enabled read).
+      if (state.stop.visible && state.composerValue.length === 0 && !state.sendSlotStuck) {
+        return [];
+      }
+      const button = Object.assign({ isSend: true }, sendButton());
+      return state.duplicateSend ? [button, { ...button }] : [button];
     }
     if (selector === '[role="dialog"], dialog') {
       return state.dialog ? [{ text: state.dialog.text }] : [];
