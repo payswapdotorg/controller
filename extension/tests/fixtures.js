@@ -527,6 +527,33 @@ export function fakeZaiPage({
   sendEnabledLie = false,
   duplicateSend = false,
   generationCompletes = null,
+  // CONTINUATION 23 (the chat-tab baseline, PR #6 comments 5560253287 +
+  // 5560261256 — the LIVE-OBSERVED unauthenticated Chat surface): the
+  // knobs modeling the discovered Chat-surface facts —
+  //   `turnIndexBadge`: the provider renders the CURRENT (in-flight)
+  //   turn's user-message row with a trailing turn-index badge (the
+  //   live row read "... the word OK.         2/2" for the exactly
+  //   submitted prompt — the badge is the provider's rendering of the
+  //   in-flight turn, never a text difference);
+  //   `humanVerification`: the body-level Aliyun captcha popup
+  //   (#aliyunCaptcha-window-popup, invisible to the dialog channel —
+  //   dialogCount reads 0 while it is visible) is present from the
+  //   start (the precheck gate);
+  //   `humanVerificationOnSend`: the popup arms on the send and
+  //   becomes visible on the Nth fact read after it (the LIVE
+  //   observation: visible on the FIRST post-send read, beside the
+  //   landed row, the cleared composer, the advanced URL, and the
+  //   Stop slot — the generation held at the interactive gate);
+  //   `assistantText` / `completionErrorText`: the rendered assistant
+  //   row (.chat-assistant) — the completion-error rendering
+  //   ("No response, Please try again later. SyntaxError: ..." —
+  //   LIVE-OBSERVED) is set on the completion transition when
+  //   `completionErrorText` is given.
+  turnIndexBadge = false,
+  humanVerification = false,
+  humanVerificationOnSend = null,
+  assistantText = null,
+  completionErrorText = null,
   // CONTINUATION 15 (PR #6 review 5124990727 + review 5125102305): the
   // `sendInaccessible` knob models the composer action slot rendering
   // NEITHER control — #send-message-button resolves ZERO elements
@@ -679,6 +706,12 @@ export function fakeZaiPage({
     pendingStop: null,
     generationCompletes: generationCompletes ? { probes: generationCompletes, fired: false } : null,
     pendingCompletion: null,
+    turnIndexBadge,
+    humanVerification: { visible: humanVerification },
+    pendingHumanVerification: null,
+    humanVerificationOnSend,
+    assistantText,
+    completionErrorText,
   };
 
   /**
@@ -739,7 +772,15 @@ export function fakeZaiPage({
     }
     if (state.composerValue.length > 0) {
       state.lastSubmitted = state.composerValue;
-      state.conversation.push(state.composerValue);
+      // CONTINUATION 23: the landed row carries the trailing
+      // turn-index badge on the in-flight turn (the LIVE-OBSERVED
+      // "... the word OK.         2/2" row — the provider's own
+      // rendering of the current message; the exact-row predicate
+      // accepts both the bare and the badge-suffixed form).
+      const turnNumber = state.conversation.length + 1;
+      state.conversation.push(
+        state.composerValue + (state.turnIndexBadge ? `         ${turnNumber}/${turnNumber}` : "")
+      );
       state.composerValue = "";
       // CONTINUATION 16 (PR #6 review 5125198728): the chat-object
       // creation — the provider's own submission handler creates
@@ -765,6 +806,13 @@ export function fakeZaiPage({
       if (state.asyncPopup && !state.asyncPopup.fired) {
         state.asyncPopup.fired = true;
         state.pendingPopup = state.asyncPopup.probes;
+      }
+      // CONTINUATION 23: the human-verification popup arms on the
+      // send (the live observation: the submission's row lands, the
+      // composer clears, the URL advances, the slot swaps to Stop —
+      // and the generation is held at the interactive captcha gate).
+      if (state.humanVerificationOnSend !== null) {
+        state.pendingHumanVerification = state.humanVerificationOnSend;
       }
       if (state.generates) {
         state.stop.visible = true;
@@ -840,6 +888,24 @@ export function fakeZaiPage({
           state.pendingCompletion = null;
           state.stop.visible = false;
           state.regenerate.visible = true;
+          // CONTINUATION 23: the completion transition renders the
+          // assistant row — the COMPLETION-ERROR text when the knob
+          // is set (the LIVE-OBSERVED provider rendering: "No
+          // response, Please try again later. ..." with the action
+          // slot facts IDENTICAL to a successful completion).
+          if (state.completionErrorText !== null) {
+            state.assistantText = state.completionErrorText;
+          }
+        }
+      }
+      // CONTINUATION 23: the human-verification popup appears on the
+      // Nth fact read after the send (the interactive gate holding
+      // the generation).
+      if (state.pendingHumanVerification !== null) {
+        state.pendingHumanVerification -= 1;
+        if (state.pendingHumanVerification <= 0) {
+          state.pendingHumanVerification = null;
+          state.humanVerification.visible = true;
         }
       }
       // The async popup materializes on the Nth fact read after the
@@ -1103,6 +1169,19 @@ export function fakeZaiPage({
     }
     if (selector === '[role="log"]') {
       return state.conversation.length > 0 ? [{ text: state.conversation.join("\n") }] : [];
+    }
+    // CONTINUATION 23 (the chat-tab baseline, LIVE-OBSERVED): the
+    // body-level Aliyun captcha popup — a DIRECT body child OUTSIDE
+    // the provider app DOM, matching NO dialog selector (dialogCount
+    // reads 0 while it is visible). Resolved only by its id.
+    if (selector === "#aliyunCaptcha-window-popup") {
+      return state.humanVerification.visible ? [{ isCaptcha: true, text: "Please complete security verification" }] : [];
+    }
+    // CONTINUATION 23 (LIVE-OBSERVED): the rendered assistant row —
+    // the completion-error surface ("No response, Please try again
+    // later. ...") when the completion failed.
+    if (selector === ".chat-assistant") {
+      return state.assistantText !== null ? [{ text: state.assistantText }] : [];
     }
     if (selector === '[class*="user"][class*="message"]' || selector === '[data-role="user"]' || selector === '[class*="user-message"]') {
       return state.conversation.map((text) => ({ text, value: text }));

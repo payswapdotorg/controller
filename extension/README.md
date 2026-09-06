@@ -429,12 +429,23 @@ composition is CTRL-016 scope).
 
 ### Typed observations
 
-`ObserveZaiSession { worker }` reports the frozen twelve-state
+`ObserveZaiSession { worker }` reports the frozen thirteen-state
 vocabulary: `authentication-required`, `session-missing`,
 `ready-for-input`, `working`, `waiting`, `stopped`,
 `prompt-submitted`, `prompt-unconfirmed`,
-`expected-blocking-dialog`, `unexpected-dialog`, `ambiguous`,
-`provider-error` — each with the observed tab id.
+`expected-blocking-dialog`, `unexpected-dialog`,
+`human-verification-required`, `ambiguous`, `provider-error` —
+each with the observed tab id. The `human-verification-required`
+state (CTRL-014 continuation 23, the chat-tab baseline) is the
+provider's INTERACTIVE human-verification gate — the body-level
+Aliyun captcha popup (a slider puzzle injected as a direct `<body>`
+child, OUTSIDE the provider app DOM, carrying no `role="dialog"` —
+the dialog channel never sees it). It holds the GENERATION of an
+unauthenticated Chat submission (the row lands and the action slot
+swaps, but the completion waits for the human); only the human can
+solve it, so the adapter never tries — the typed operator gate
+(`HUMAN_VERIFICATION_REQUIRED`, terminal: complete the puzzle in
+the provider tab out of band, then re-invoke).
 
 ### Provider observations (locator provenance)
 
@@ -450,6 +461,8 @@ landing state — verified live by the worker probe):
 | Selected-model trigger id | `#model-selector-glm-5_3-button` | the trigger id the live surface carries once GLM-5.3 is selected (the id-family ground truth for post-selection verification, with the trigger displaying the `GLM-5.3` label) |
 | Auth markers | buttons with exact text `Sign in` / `Log in` / `Sign up` | present unauthenticated |
 | Modal dialogs | `[role="dialog"], dialog` | the modal overlay containers |
+| Human-verification gate (c23) | `#aliyunCaptcha-window-popup` | LIVE-OBSERVED 2026-09-06 (the unauthenticated Chat submission flow): a body-level Aliyun captcha popup (direct `<body>` child, no `role="dialog"` — invisible to the dialog channel) holding the generation until the human solves the slider; the adapter never interacts with it |
+| Assistant row (c23) | `.chat-assistant` | LIVE-OBSERVED 2026-09-06: the rendered last provider response — the completion-error surface ("No response, Please try again later. ...") with action-slot facts identical to a successful completion |
 | Sidebar shell | `#sidebar` | the app sidebar root (both sidebar states) |
 | Mode toggle (both sidebar states) | `#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type` | EXACTLY ONE match — the Agent pill, second of the two-button pill pair (LIVE-OBSERVED 2026-09-06: resolves to exactly one element on the real surface) |
 | Mode-pill active marker | `#sidebar button[data-active="true"]:not([id]):nth-of-type(2):last-of-type` | zero matches while Chat is active; flips to exactly one when Agent mode activates |
@@ -479,6 +492,53 @@ becoming the active mode pill (`data-active="true"`) — a click is
 never evidence of the mode switch, and an Agent pill that is
 already active issues no click (clicking it would open a fresh
 provider Agent-mode session for nothing).
+
+### The chat-tab reference baseline (CTRL-014 continuation 23)
+
+The ARCHITECT-directed reference implementation (PR #6 comments
+5560253287 + 5560261256): the ordinary UNAUTHENTICATED Chat surface,
+LIVE-PROVEN end-to-end by the worker's real-browser experiment
+(2026-09-06 15:41-16:09Z). The adapter's `startWorkerSession`
+accepts `mode: "chat"` (the reference path) alongside the absent
+default `mode: "agent"` (the governed Work Order contract above).
+The two modes share the ENTIRE submission/verification/recovery
+lifecycle; the only differences are the explicitly isolated AGENT
+DELTA: the authenticated-session gate, the Agent-pill selection,
+the model selection, and the provisioning wait. The chat reference
+path skips all four — the ordinary Chat tab is ready-for-input at
+rest (LIVE-OBSERVED: a visible enabled composer beside the "Sign
+in" call-to-action; the auth markers are the chat baseline's
+accepted state, never a refusal for `mode: "chat"`, and never
+inferred onto the Agent contract).
+
+The same experiment established four new contract laws (each with
+focused regressions): **(1) the human-verification gate** — every
+unauthenticated Chat submission's generation is held by the
+body-level Aliyun captcha popup described above; a machine-perfect
+slider solve is rejected by the provider's risk engine after the
+first pass, so the gate is human-only BY DESIGN (the adapter's
+typed refusal is the only honest outcome); **(2) the
+completion-error rendering** — after the gate is passed the
+completion can fail server-side, with the assistant row
+(`.chat-assistant`) rendering "No response, Please try again
+later. SyntaxError: ..." while the action-slot facts (the send
+control back, the Stop gone, the Regenerate visible) are
+INDISTINGUISHABLE from a successful completion — the assistant-row
+text is the only completion-outcome discriminator, checked in the
+async-outcome hold before the completed-generation early exit; **(3)
+the turn-index badge** — the provider renders the CURRENT
+(in-flight) turn's user row as the exact prompt followed by
+whitespace and the `N/M` message index (the live row read `"... the
+word OK.         2/2"`); the exact-row predicate accepts both the
+bare and the badge-suffixed forms (a near-miss and a foreign text
+still fail); **(4) the retained-draft Stop surface** — a dispatch
+whose input pipeline did not consume the draft can leave the action
+slot swapped to Stop while the composer retains the text and no row
+lands; the watch's exhaustion reports the slot fact in its typed
+detail (never ok, never a blind resend). The tab itself is STABLE
+through the whole lifecycle — the URL advance to `/c/<chatId>` is a
+`history.replaceState`, not a navigation: no reload, no tab
+replacement, the content-script world persists.
 
 ### Known limitations
 

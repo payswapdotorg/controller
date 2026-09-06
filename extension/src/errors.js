@@ -72,6 +72,7 @@ export const ERROR_CODES = Object.freeze([
   "RETRY_EXHAUSTED", // a bounded retry/recovery budget was exhausted without confirmation
   "SESSION_UNKNOWN", // no active adapter session for the referenced worker/work item
   "PROVIDER_ERROR", // an observed provider-side error surface
+  "HUMAN_VERIFICATION_REQUIRED", // CTRL-014 c23: the provider's interactive human-verification gate (the body-level Aliyun captcha) — solvable only by the human, out of band
   // The closed fallback for unexpected internal failures.
   "INTERNAL_ERROR",
 ]);

@@ -210,6 +210,60 @@
  *   CONTRADICTS the request still fails closed STALE_REFERENCE, but
  *   a lost registry (a service-worker restart) no longer refuses.
  *
+ *   CTRL-014 CONTINUATION 23 — THE CHAT-TAB REFERENCE BASELINE (PR #6
+ *   comments 5560253287 + 5560261256, the ARCHITECT change-of-
+ *   investigation-strategy and correction directives, 2026-09-06):
+ *   the ordinary UNAUTHENTICATED https://chat.z.ai Chat surface is
+ *   the REFERENCE IMPLEMENTATION, LIVE-PROVEN by the worker's
+ *   real-browser experiment (15:41-16:09Z, a single stable tab, the
+ *   full submission lifecycle observed first-hand). The Start MODE
+ *   parameter exposes it: mode "chat" (the reference) and mode
+ *   "agent" (the governed Work Order contract, the absent default).
+ *   THE TWO MODES SHARE THE ENTIRE submission/verification/recovery
+ *   lifecycle above; the ONLY differences are the explicitly
+ *   isolated AGENT DELTA — the authenticated-session gate, the
+ *   Agent-pill selection, the model selection, and the provisioning
+ *   wait (the chat surface is ready-for-input at rest, LIVE-OBSERVED:
+ *   the fresh unauthenticated page renders a visible enabled composer
+ *   beside the "Sign in" call-to-action — the auth markers are the
+ *   chat baseline's ACCEPTED state, never a refusal, and never
+ *   inferred onto the Agent contract). THE DISCOVERED CHAT-SURFACE
+ *   FACTS, now contract laws (each LIVE-OBSERVED, each with focused
+ *   regressions): (1) THE HUMAN-VERIFICATION GATE — every
+ *   unauthenticated Chat submission's generation is held by a
+ *   body-level Aliyun CAPTCHA slider popup (#aliyunCaptcha-window-
+ *   popup, a DIRECT <body> child carrying NO role="dialog" —
+ *   invisible to the dialog channel) that only the human can solve
+ *   (a machine-perfect drag is rejected by the provider's risk
+ *   engine after the first pass); the adapter NEVER solves it, NEVER
+ *   presses Enter on it, NEVER treats it as the known popup — the
+ *   typed HUMAN_VERIFICATION_REQUIRED operator gate, terminal at
+ *   every phase; (2) THE COMPLETION-ERROR RENDERING — after the gate
+ *   is passed the completion can FAIL server-side with the assistant
+ *   row rendering "No response, Please try again later. SyntaxError:
+ *   ..." while the action-slot facts (the send control back, the
+ *   Stop gone, the Regenerate visible) are INDISTINGUISHABLE from a
+ *   successful completion — the assistant-row text is the only
+ *   completion-outcome discriminator, checked in the async-outcome
+ *   hold BEFORE the completed-generation early exit; (3) THE
+ *   TURN-INDEX BADGE — the provider renders the CURRENT (in-flight)
+ *   turn's user row as the exact prompt followed by whitespace and
+ *   the "N/M" message index ("... the word OK.         2/2"); the
+ *   exact-row predicate accepts both the bare and the badge-suffixed
+ *   forms (the near-miss and the foreign text still fail); (4) THE
+ *   RETAINED-DRAFT STOP SURFACE — a dispatch whose input pipeline
+ *   did not consume the draft can leave the action slot swapped to
+ *   Stop while the composer retains the text and no row lands (the
+ *   observed non-trusted-dispatch modality; the exhaustion reports
+ *   the slot fact in its typed detail — never ok, never a blind
+ *   resend); and the stop-recovery on the real surface PRESERVES the
+ *   retained draft through the verified Stop (the provider's own
+ *   stopTaskResponse), which the recovery's re-entry re-verifies.
+ *   THE TAB-STABILITY FACT: the entire chat lifecycle runs in ONE
+ *   tab — the URL advance to /c/<chatId> is history.replaceState
+ *   (no navigation, no reload, no tab replacement; the content
+ *   script's world persists).
+ *
  * Layering:
  *   - every provider locator lives in ZAI_LOCATORS below (with its
  *     observation provenance); nothing Z.ai-specific leaks into the
@@ -260,6 +314,7 @@ export const ZAI_SESSION_OBSERVATIONS = Object.freeze([
   "prompt-unconfirmed",
   "expected-blocking-dialog",
   "unexpected-dialog",
+  "human-verification-required",
   "ambiguous",
   "provider-error",
 ]);
@@ -344,6 +399,37 @@ const ZAI_LOCATORS = Object.freeze({
   // submission-blocking popup ever receives the Enter action.
   dialog: '[role="dialog"], dialog',
   alert: '[role="alert"]',
+  // The provider's INTERACTIVE HUMAN-VERIFICATION surface (CTRL-014
+  // continuation 23, the ARCHITECT chat-tab-baseline directives PR #6
+  // comments 5560253287 + 5560261256 — LIVE-OBSERVED 2026-09-06 on the
+  // real UNAUTHENTICATED https://chat.z.ai Chat surface, the worker's
+  // real-browser experiment): the Aliyun CAPTCHA slider popup injected
+  // as a DIRECT <body> child (#aliyunCaptcha-window-popup, carrying
+  // #aliyunCaptcha-certifyId and #aliyunCaptcha-sliding-slider inside) —
+  // OUTSIDE the provider app DOM, carrying NO role="dialog" and NO
+  // native <dialog>, so it is INVISIBLE to the dialog observation
+  // channel (the dialogCount fact read 0 the entire time the popup was
+  // visible). It gates the GENERATION of unauthenticated Chat
+  // submissions (the exact observed sequence: the row lands, the
+  // composer clears, the URL advances to /c/<chatId>, the action slot
+  // swaps to Stop — and the completion is held until the human solves
+  // the slider; a failed solve refreshes the puzzle, and repeated
+  // machine-perfect solves are rejected by the provider's risk engine —
+  // the interactive gate is human-only BY DESIGN). The adapter NEVER
+  // solves human verification and NEVER presses Enter on it: it is a
+  // typed operator gate (HUMAN_VERIFICATION_REQUIRED), distinct from
+  // the dialog channel's known submission-blocking popup.
+  humanVerificationPopup: "#aliyunCaptcha-window-popup",
+  // The assistant message row (LIVE-OBSERVED 2026-09-06, the same
+  // experiment): the rendered last provider response (.chat-assistant)
+  // — including the provider's COMPLETION-ERROR rendering ("No
+  // response, Please try again later. SyntaxError: Unexpected token
+  // '<', \"<!doctypeh\"... is not valid JSON" — observed after the
+  // human-verification gate was passed), the ONLY surface fact that
+  // distinguishes a FAILED completion from a successful one: the
+  // action-slot facts (the send control back, the Stop control gone,
+  // the Regenerate control visible) are IDENTICAL on both surfaces.
+  assistantRow: ".chat-assistant",
   allButtons: "button",
   authButtonTexts: Object.freeze(["Sign in", "Log in", "Sign up"]),
   // AUTHENTICATED-SURFACE — the sidebar mode toggle (LIVE-OBSERVED
@@ -472,6 +558,27 @@ const ERROR_DIALOG_PATTERN = /error|went\s*wrong|rate\s*limit|too\s*many|unavail
 /** The alert-surface text pattern that classifies a provider error. */
 const PROVIDER_ALERT_PATTERN = /error|went\s*wrong|rate\s*limit|too\s*many|unavailable|failed|forbidden|denied/i;
 
+/**
+ * CONTINUATION 23 (the chat-tab baseline, LIVE-OBSERVED 2026-09-06):
+ * the trailing turn-index badge the provider renders on the CURRENT
+ * (in-flight) user-message row — the exact prompt followed by
+ * whitespace and the "N/M" message index (the live row read
+ * "... the word OK.         2/2"). Accepted by the exact-row
+ * predicate as the verbatim submission (userRowTextIsExact).
+ */
+const TURN_INDEX_BADGE_PATTERN = /^\s+\d+\/\d+$/;
+
+/**
+ * CONTINUATION 23 (LIVE-OBSERVED 2026-09-06, the real unauthenticated
+ * Chat surface): the provider's COMPLETION-ERROR rendering on the
+ * assistant row ("No response, Please try again later. SyntaxError:
+ * Unexpected token '<', \"<!doctypeh\"... is not valid JSON") — the
+ * asynchronous chat-completion failure surfaced as the last assistant
+ * message. The action-slot facts alone cannot distinguish this
+ * failed completion from a successful one.
+ */
+const PROVIDER_COMPLETION_ERROR_PATTERN = /no\s+response,\s*please\s+try\s+again\s+later/i;
+
 /** Frozen default budgets (all constructor-injectable for tests). */
 const DEFAULTS = Object.freeze({
   settlePolls: 8, // post-action observation polls per step
@@ -572,6 +679,12 @@ export function createZaiAdapter({
     // classified known popup ever receives the Enter action.
     { name: "dialogCount", selector: ZAI_LOCATORS.dialog, mode: "count" },
     { name: "alertVisible", selector: ZAI_LOCATORS.alert, mode: "visible" },
+    // CTRL-014 continuation 23 (the chat-tab baseline): the
+    // human-verification channel (the body-level Aliyun popup — a
+    // DISTINCT surface from the dialog channel, read independently)
+    // and the assistant-row text (the completion-error surface).
+    { name: "humanVerificationVisible", selector: ZAI_LOCATORS.humanVerificationPopup, mode: "visible" },
+    { name: "assistantRowText", selector: ZAI_LOCATORS.assistantRow, mode: "texts" },
   ];
 
   const STOP_PROBES = ZAI_LOCATORS.stopControl.map((selector, i) => ({
@@ -678,6 +791,47 @@ export function createZaiAdapter({
   function dialogCount(facts) {
     const count = facts.dialogCount?.count;
     return typeof count === "number" ? count : 0;
+  }
+
+  /**
+   * @private — CONTINUATION 23 (PR #6 comments 5560253287 + 5560261256,
+   * the ARCHITECT chat-tab-baseline directives): the provider's
+   * INTERACTIVE HUMAN-VERIFICATION gate — the body-level Aliyun
+   * CAPTCHA popup, LIVE-OBSERVED on the real unauthenticated Chat
+   * surface. A DISTINCT channel from the dialog surface (it carries
+   * no role="dialog"; dialogCount reads 0 while it is visible) and a
+   * DISTINCT classification from the known submission-blocking
+   * popup: the known popup is Enter-dismissable by the frozen Work
+   * Order's bounded recovery, while the human-verification gate is
+   * solvable ONLY by the human (the operator) — the adapter never
+   * presses a key on it, never clicks it, never retries it, and
+   * never treats its presence as the known popup. The typed refusal
+   * surfaces the operator's out-of-band action.
+   */
+  function humanVerificationVisible(facts) {
+    return facts.humanVerificationVisible?.visible === true;
+  }
+
+  /**
+   * @private — CONTINUATION 23: the provider's COMPLETION-ERROR
+   * rendering on the assistant row, LIVE-OBSERVED on the real Chat
+   * surface after the human-verification gate was passed: "No
+   * response, Please try again later. SyntaxError: Unexpected token
+   * '<', \"<!doctypeh\"... is not valid JSON". The completion-error
+   * text arrives on the ASYNCHRONOUS chat-completion error — the
+   * same late-observable class as the capacity popup — but rendered
+   * through the assistant row instead of a dialog. The action-slot
+   * facts alone (the send control back, the Stop control gone, the
+   * Regenerate control visible) are IDENTICAL for a successful and a
+   * FAILED completion, so this text is the only completion-outcome
+   * discriminator available at the provider boundary.
+   */
+  function completionErrorTextOf(facts) {
+    const texts = facts.assistantRowText?.texts;
+    if (!Array.isArray(texts)) {
+      return null;
+    }
+    return texts.find((t) => typeof t === "string" && PROVIDER_COMPLETION_ERROR_PATTERN.test(t)) ?? null;
   }
 
   /**
@@ -884,12 +1038,42 @@ export function createZaiAdapter({
     for (const probe of EVIDENCE_PROBES) {
       if (probe.name.startsWith("userMessageCandidate")) {
         const texts = facts[probe.name]?.texts;
-        if (Array.isArray(texts) && texts.includes(text)) {
+        if (Array.isArray(texts) && texts.some((t) => userRowTextIsExact(t, text))) {
           return true;
         }
       }
     }
     return false;
+  }
+
+  /**
+   * @private — CONTINUATION 23 (the chat-tab baseline, LIVE-OBSERVED
+   * 2026-09-06): the user-message row's text is the verbatim
+   * submission, EXCEPT that the provider renders the CURRENT
+   * (in-flight) turn's row with a trailing turn-index badge — the
+   * exact prompt followed by whitespace and the "N/M" message index
+   * (the live observation: the row read "Second diagnostic: please
+   * reply with exactly the word OK.         2/2" for the exactly
+   * submitted "Second diagnostic: please reply with exactly the word
+   * OK."). The badge is the provider's own rendering of the in-flight
+   * turn; the row is still the verbatim submission. The exact-row
+   * predicate accepts BOTH forms (the bare exact text — the completed
+   * row — and the badge-suffixed form — the in-flight row): a
+   * leading-character near-miss still fails (no prefix), a foreign
+   * turn still fails (different text), and a stale exact row is
+   * still refused by the turn-count-delta conjunct (the count did
+   * not advance).
+   */
+  function userRowTextIsExact(rowText, text) {
+    if (rowText === text) {
+      return true;
+    }
+    return (
+      typeof rowText === "string" &&
+      typeof text === "string" &&
+      rowText.startsWith(text) &&
+      TURN_INDEX_BADGE_PATTERN.test(rowText.slice(text.length))
+    );
   }
 
   /**
@@ -969,13 +1153,28 @@ export function createZaiAdapter({
    * reporting), alongside the alert/auth-marker/composer/control/
    * message facts.
    */
-  function classifySession(facts, session, phase = "idle") {
+  function classifySession(facts, session, phase = "idle", { authMarkersBaseline = false } = {}) {
     const composerVisible = facts.composerVisible?.visible === true;
     const composerEnabled = facts.composerEnabled?.enabled === true;
     const composerValue = typeof facts.composerValue?.value === "string" ? facts.composerValue.value : null;
     const alertVisible = facts.alertVisible?.visible === true;
     const alertText = String(facts.alertText?.text ?? "");
 
+    // CONTINUATION 23 (the chat-tab baseline): the INTERACTIVE
+    // HUMAN-VERIFICATION gate is checked FIRST — before the dialog
+    // branches and before every surface-state branch. It is NOT a
+    // dialog (the body-level popup is invisible to the dialog
+    // channel) and NOT the known submission-blocking popup (never
+    // Enter-dismissable). Whatever else the surface shows, a visible
+    // human-verification demand is the dominant fact: the adapter
+    // can do nothing further on this surface.
+    if (humanVerificationVisible(facts)) {
+      return {
+        state: "human-verification-required",
+        detail:
+          "the provider is demanding interactive human verification (a body-level Aliyun captcha slider surface, invisible to the dialog channel) — the adapter never solves human verification; complete the puzzle in the provider tab out of band, then re-invoke",
+      };
+    }
     const dialog = classifyDialog(facts, phase);
     if (dialog.kind === "auth") {
       return { state: "authentication-required", detail: dialog.reason };
@@ -994,7 +1193,20 @@ export function createZaiAdapter({
     if (alertVisible && PROVIDER_ALERT_PATTERN.test(alertText)) {
       return { state: "provider-error", detail: "an alerting error surface is visible" };
     }
-    if (authMarkerCount(facts) > 0) {
+    // CONTINUATION 23 (the chat-tab baseline, PR #6 comment 5560261256
+    // — "the real Z.ai Chat tab baseline does NOT require
+    // authentication"): on the ordinary UNAUTHENTICATED Chat surface
+    // the provider renders a fully functional composer BESIDE the
+    // "Sign in" call-to-action (LIVE-OBSERVED 2026-09-06: the auth
+    // CTA count read 1 the entire session while the composer was
+    // ready, the prompt typed, the submission accepted, the chat
+    // created, and the generation gated only by human verification).
+    // For the CHAT reference mode the auth markers are the ACCEPTED
+    // BASELINE, never a refusal; an auth-shaped DIALOG is still a
+    // typed refusal (the dialog branch above, mode-independent).
+    // The AGENT mode keeps the authenticated-session contract
+    // unchanged (the explicitly-isolated Agent delta).
+    if (authMarkerCount(facts) > 0 && !authMarkersBaseline) {
       return { state: "authentication-required", detail: "the provider is presenting authentication controls" };
     }
     if (!composerVisible) {
@@ -1659,7 +1871,7 @@ export function createZaiAdapter({
      *         caller owns the Enter, the dismissal verification, and
      *         the full preparation restart.
      */
-    const watchAgentStart = async (tabId, correlate, chatExistedAtDispatch, baselineUserTurns, { popupRecovery = false } = {}) => {
+    const watchAgentStart = async (tabId, correlate, chatExistedAtDispatch, baselineUserTurns, { popupRecovery = false, authMarkersBaseline = false } = {}) => {
       /**
        * The start signal: the combined provider-state detector.
        * CONTINUATION 20 (PR #6 comment 5559533083, the superseding
@@ -1759,6 +1971,24 @@ export function createZaiAdapter({
             continue; // a transport failure is not a submission outcome
           }
           const quiet = read.facts;
+          // CONTINUATION 23 (the chat-tab baseline): the INTERACTIVE
+          // HUMAN-VERIFICATION gate observed inside the hold window —
+          // the LIVE-OBSERVED unauthenticated-Chat modality where the
+          // start signal's legs ALL fire (the row landed, the composer
+          // consumed, the chat object created, the slot swapped to
+          // Stop) while the GENERATION is actually held at the
+          // provider's interactive captcha gate. The acceptance is
+          // refused: the typed HUMAN_VERIFICATION_REQUIRED gate (the
+          // operator's out-of-band action — never Enter, never the
+          // known popup, never a retry).
+          if (humanVerificationVisible(quiet)) {
+            return {
+              refusal: failure(
+                "HUMAN_VERIFICATION_REQUIRED",
+                "the provider demanded interactive human verification after the accepted-shaped reading: the submission's row landed and the action slot swapped, but the generation is held at the provider's interactive captcha gate (LIVE-OBSERVED on the unauthenticated Chat surface). The adapter never solves human verification — complete the puzzle in the provider tab out of band, then re-invoke Start"
+              ),
+            };
+          }
           const dialog = dispatchDialog(quiet);
           if (dialog) {
             return dialog;
@@ -1768,6 +1998,30 @@ export function createZaiAdapter({
           // a generation that ran to completion was accepted — no
           // late popup can follow it. The completion is CONTEXT ONLY
           // (the recording still describes the signal moment).
+          // CONTINUATION 23 (the chat-tab baseline): the COMPLETED
+          // surface is checked for the provider's COMPLETION-ERROR
+          // rendering FIRST — LIVE-OBSERVED on the real Chat surface:
+          // the assistant row reads "No response, Please try again
+          // later. SyntaxError: ..." while the action-slot facts (the
+          // send control back, the Stop gone, the Regenerate control
+          // visible) are IDENTICAL to a successful completion. A
+          // completion that the provider itself reports as failed is
+          // a typed refusal, never an accepted outcome (the same
+          // asynchronous chat-completion error class as the capacity
+          // popup — rendered through the assistant row instead of a
+          // dialog).
+          if (
+            postResponseRegenerateVisible(quiet) &&
+            !stopVisible(quiet) &&
+            completionErrorTextOf(quiet) !== null
+          ) {
+            return {
+              refusal: failure(
+                "PROVIDER_ERROR",
+                "the provider completed the exchange with an error surface: the assistant row renders the provider's completion error (\"No response, Please try again later. ...\" — LIVE-OBSERVED on the real Chat surface) while the action-slot facts are indistinguishable from a successful completion. The submission was accepted but the generation failed server-side; observe the session or re-invoke Start"
+              ),
+            };
+          }
           if (postResponseRegenerateVisible(quiet) && !stopVisible(quiet)) {
             return { accepted: signalFacts };
           }
@@ -1797,10 +2051,13 @@ export function createZaiAdapter({
           if (startSignalOf(f)) {
             return true; // THE START SIGNAL (the provider's own computed proof)
           }
+          if (humanVerificationVisible(f)) {
+            return true; // CONTINUATION 23: the human-verification gate is decisive (typed refusal)
+          }
           if (classifyDialog(f, phase).kind !== "none") {
             return true; // a visible dialog is dispatched (never ignored)
           }
-          const verdict = classifySession(f, null, phase);
+          const verdict = classifySession(f, null, phase, { authMarkersBaseline });
           return verdict.state === "authentication-required" || verdict.state === "provider-error";
         };
         return settle(tabId, [], decisive);
@@ -1818,6 +2075,20 @@ export function createZaiAdapter({
           return { started: null, refusal: held.refusal ?? null, popup: held.popup ?? null };
         }
         if (observed.ok) {
+          // CONTINUATION 23 (the chat-tab baseline): the interactive
+          // human-verification gate observed DURING the watch — the
+          // typed refusal, terminal for Start (the operator's
+          // out-of-band action; never Enter, never retried, never the
+          // known popup).
+          if (humanVerificationVisible(observed.facts)) {
+            return {
+              started: null,
+              refusal: failure(
+                "HUMAN_VERIFICATION_REQUIRED",
+                "the provider demanded interactive human verification while observing the submission outcome: the body-level Aliyun captcha surface is visible (the submission's row landed and the generation is held at the provider's interactive gate). The adapter never solves human verification — complete the puzzle in the provider tab out of band, then re-invoke Start"
+              ),
+            };
+          }
           const dialog = dispatchDialog(observed.facts);
           if (dialog) {
             if (dialog.refusal) {
@@ -1825,7 +2096,7 @@ export function createZaiAdapter({
             }
             return { started: null, refusal: null, popup: dialog.popup };
           }
-          const verdict = classifySession(observed.facts, null, phase);
+          const verdict = classifySession(observed.facts, null, phase, { authMarkersBaseline });
           if (verdict.state === "authentication-required") {
             return {
               started: null,
@@ -1878,7 +2149,19 @@ export function createZaiAdapter({
         }
         return { started: null, refusal: null, popup: exhaustedDialog.popup };
       }
-      const verdict = classifySession(f, null, phase);
+      // CONTINUATION 23 (the chat-tab baseline): the human-verification
+      // gate on the exhausted surface — the typed refusal (terminal,
+      // the operator's out-of-band action).
+      if (humanVerificationVisible(f)) {
+        return {
+          started: null,
+          refusal: failure(
+            "HUMAN_VERIFICATION_REQUIRED",
+            "the agent-start watch exhausted its bounded window with the provider demanding interactive human verification: the body-level Aliyun captcha surface is visible (the generation is held at the provider's interactive gate). The adapter never solves human verification — complete the puzzle in the provider tab out of band, then re-invoke Start"
+          ),
+        };
+      }
+      const verdict = classifySession(f, null, phase, { authMarkersBaseline });
       if (verdict.state === "authentication-required") {
         return {
           started: null,
@@ -1913,11 +2196,25 @@ export function createZaiAdapter({
         // re-sends through the send control. Never a blind re-type,
         // never a keypress (the Enter is reserved for the observed
         // known popup alone).
+        // CONTINUATION 23 (the chat-tab baseline, LIVE-OBSERVED): the
+        // retained-draft exhaustion surface may ALSO carry the action
+        // slot swapped to Stop — the provider reporting a task in
+        // progress while the input was never consumed (the observed
+        // non-trusted-dispatch modality: the submission's input
+        // pipeline did not take the event, or the submission is held
+        // at the provider's pre-acceptance gate). The slot state is
+        // reported in the typed detail (the fail-closed law is
+        // unchanged: never ok, never resent blind).
+        const slotWorking = stopVisible(f);
         return {
           started: null,
           refusal: failure(
             "PAGE_MALFORMED",
-            "the agent-start watch exhausted its bounded window without the start signal — the exact text remains in the composer (the submission was not consumed; the provider's own concurrency gate refuses a second prompt while a generation runs). The bounded retry re-verifies the exact text byte-identically and re-sends through the send control"
+            `the agent-start watch exhausted its bounded window without the start signal — the exact text remains in the composer (the submission was not consumed; the provider's own concurrency gate refuses a second prompt while a generation runs${
+              slotWorking
+                ? ", and the action slot is swapped to the Stop control while the draft is retained — the LIVE-OBSERVED unauthenticated-Chat modality where the dispatch reported a task without consuming the input (a dispatch the provider's input pipeline did not accept, or a submission held at the provider's interactive gate)"
+                : ""
+            }). The bounded retry re-verifies the exact text byte-identically and re-sends through the send control`
           ),
         };
       }
@@ -2031,7 +2328,37 @@ export function createZaiAdapter({
    * @returns {Promise<{ ok: true, session: object, submitted: object } |
    *           { ok: false, error: object }>}
    */
-  async function startWorkerSession({ worker, workItem, prompt }) {
+  async function startWorkerSession({ worker, workItem, prompt, mode = "agent" }) {
+    // CONTINUATION 23 (PR #6 comments 5560253287 + 5560261256, the
+    // ARCHITECT chat-tab-baseline directives): the MODE parameter —
+    // "agent" (the default: the frozen Work Order's governed
+    // authenticated Agent-mode Worker session, the contract
+    // UNCHANGED) or "chat" (THE CHAT-TAB REFERENCE PATH — the
+    // ARCHITECT-directed reference implementation, the
+    // LIVE-PROVEN unauthenticated Chat lifecycle from which the
+    // Agent behavior is derived). The two paths share the ENTIRE
+    // submission/verification/recovery lifecycle (the prompt
+    // entry, the send gate, the dispatch, the advancement-based
+    // start signal, the async-outcome hold, the dialog law, the
+    // hung-worker recovery); the ONLY differences are the
+    // explicitly-isolated preparation steps and the
+    // authentication posture — the minimal Agent delta this
+    // continuation exists to expose:
+    //   CHAT (the reference): the ordinary Chat tab, UNAUTHENTICATED
+    //   by design (the "Sign in" call-to-action coexists with a
+    //   fully functional composer — LIVE-OBSERVED), NO Agent-pill
+    //   selection, NO model selection, NO provisioning wait (the
+    //   fresh Chat surface is ready-for-input at rest).
+    //   AGENT (the delta): the authenticated session gate, the
+    //   Agent-pill selection, the model selection, the provisioning
+    //   wait.
+    if (mode !== "chat" && mode !== "agent") {
+      return failure(
+        "AMBIGUOUS_STATE",
+        `the Z.ai adapter Start mode must be "chat" or "agent" (received: ${JSON.stringify(mode)})`
+      );
+    }
+    const authMarkersBaseline = mode === "chat";
     // Registry gate: one active session per Worker. The same
     // correlation re-reports idempotently; a different Work Item
     // contradicts the active correlation and fails closed.
@@ -2081,20 +2408,30 @@ export function createZaiAdapter({
       return focused;
     }
 
-    // 2. verify the authenticated state (and that the surface is
+    // 2. verify the session state (and that the surface is
     // ready for the preparation sequence). CONTINUATION 22 (PR #6
     // review 5125571572, path (b)): a dialog visible on the target
     // session before preparation fails closed UNKNOWN_DIALOG (the
     // frozen Work Order's dialog law — never a preparation through
     // a modal); auth-shaped dialogs read authentication-required.
+    // CONTINUATION 23: the interactive human-verification gate
+    // fails closed before preparation in BOTH modes (the operator's
+    // out-of-band action); the auth MARKERS are the accepted
+    // baseline for the CHAT reference mode (the LIVE-PROVEN
+    // unauthenticated Chat surface) and the typed authenticated-
+    // session refusal for the AGENT mode (the Work Order's
+    // contract, unchanged).
     const settled = await settle(tabId, [], (f) => {
-      const c = classifySession(f, null, "preparing");
+      const c = classifySession(f, null, "preparing", { authMarkersBaseline });
       return c.state !== "ambiguous";
     });
     if (!settled.ok) {
       return settled;
     }
-    const precheck = classifySession(settled.facts, null, "preparing");
+    const precheck = classifySession(settled.facts, null, "preparing", { authMarkersBaseline });
+    if (precheck.state === "human-verification-required") {
+      return failure("HUMAN_VERIFICATION_REQUIRED", `the provider is demanding interactive human verification before preparation: ${precheck.detail}`);
+    }
     if (precheck.state === "authentication-required") {
       return failure(
         "AUTHORIZATION_REQUIRED",
@@ -2164,6 +2501,7 @@ export function createZaiAdapter({
         workItem,
         tabId,
         prompt,
+        mode,
         attempts,
         popupDismissals,
         composeReestablishments,
@@ -2237,25 +2575,40 @@ export function createZaiAdapter({
       refusal !== null &&
       refusal !== undefined &&
       !refusal.ok &&
-      ["AUTHENTICATION_INTERRUPTED", "AUTHORIZATION_REQUIRED", "PROVIDER_ERROR", "UNKNOWN_DIALOG"].includes(
+      ["AUTHENTICATION_INTERRUPTED", "AUTHORIZATION_REQUIRED", "HUMAN_VERIFICATION_REQUIRED", "PROVIDER_ERROR", "UNKNOWN_DIALOG"].includes(
         refusal.error?.code
       );
 
     while (attempts < maxSubmissionAttempts) {
       attempts += 1;
       if (!prepared) {
-        // 3. Agent selection (idempotent on the established mode).
-        const agent = await selectAgent(tabId);
-        if (!agent.ok) {
-          lastRefusal = agent;
-          continue;
-        }
-        // 4. Model selection (idempotent on the established model).
-        const model = await selectModel(tabId);
-        if (!model.ok) {
-          lastRefusal = model;
-          continue;
-        }
+        // 3-4b. THE PREPARATION SEQUENCE — mode-dependent (CONTINUATION
+        // 23, the chat-tab baseline): the AGENT mode runs the frozen
+        // Work Order's governed preparation (the Agent-pill selection,
+        // the model selection, the provisioning wait — the
+        // explicitly-isolated Agent delta); the CHAT reference mode
+        // runs NONE of them — the ordinary unauthenticated Chat
+        // surface is ready-for-input AT REST (LIVE-OBSERVED: the
+        // composer visible and enabled on the fresh surface before any
+        // interaction; the precheck above already settled the
+        // ready-for-input state). The popup-recovery restart resets
+        // `prepared`; the CHAT restart re-marks prepared directly (no
+        // mode/model ground truth to re-establish — the restart's
+        // prompt re-entry and send gate re-verify everything the
+        // popup interaction may have disturbed).
+        if (mode === "agent") {
+          // 3. Agent selection (idempotent on the established mode).
+          const agent = await selectAgent(tabId);
+          if (!agent.ok) {
+            lastRefusal = agent;
+            continue;
+          }
+          // 4. Model selection (idempotent on the established model).
+          const model = await selectModel(tabId);
+          if (!model.ok) {
+            lastRefusal = model;
+            continue;
+          }
         // 4b. THE PROVISIONING WAIT (CONTINUATION 16, PR #6 review
         //     5125198728, requirement 1 — "treat creation of the
         //     chat/session as an asynchronous provider operation"): the
@@ -2288,7 +2641,16 @@ export function createZaiAdapter({
           );
           continue;
         }
-        prepared = true;
+          prepared = true;
+        } else {
+          // THE CHAT REFERENCE PATH (CONTINUATION 23): no Agent-pill
+          // selection, no model selection, no provisioning wait — the
+          // precheck already settled the ready-for-input surface (the
+          // ordinary Chat tab renders its composer ready at rest,
+          // LIVE-OBSERVED). The shared lifecycle takes over at the
+          // prompt entry below.
+          prepared = true;
+        }
       }
       // 5. Exact prompt entry / resend: the byte-identical read-back
       //    is verified before any send; an already-confirmed
@@ -2314,7 +2676,7 @@ export function createZaiAdapter({
           prompt,
           chatObjectCreatedOf(entered.facts) === true,
           userTurnCountOf(entered.facts) ?? 0,
-          { popupRecovery: true }
+          { popupRecovery: true, authMarkersBaseline }
         );
         if (outcome.started) {
           const recorded = recordSubmission(outcome.started);
@@ -2430,7 +2792,7 @@ export function createZaiAdapter({
         prompt,
         chatObjectCreatedOf(gate.facts) === true,
         userTurnCountOf(gate.facts) ?? 0,
-        { popupRecovery: true }
+        { popupRecovery: true, authMarkersBaseline }
       );
       if (outcome.started) {
         const recorded = recordSubmission(outcome.started);
@@ -2528,9 +2890,9 @@ export function createZaiAdapter({
       // holding text, or a decisive failure surface) within the same
       // bounded settle budget.
       const observed = await settle(tabId, [], (f) => {
-        const c = classifySession(f, registered, "recovery");
+        const c = classifySession(f, registered, "recovery", { authMarkersBaseline: (registered?.mode ?? "agent") === "chat" });
         if (
-          ["authentication-required", "provider-error", "unexpected-dialog", "expected-blocking-dialog", "ambiguous"].includes(
+          ["authentication-required", "human-verification-required", "provider-error", "unexpected-dialog", "expected-blocking-dialog", "ambiguous"].includes(
             c.state
           )
         ) {
@@ -2554,9 +2916,16 @@ export function createZaiAdapter({
         lastRefusal = observed;
         continue;
       }
-      const precheck = classifySession(observed.facts, registered, "recovery");
+      const precheck = classifySession(observed.facts, registered, "recovery", { authMarkersBaseline: (registered?.mode ?? "agent") === "chat" });
       if (precheck.state === "authentication-required") {
         return failure("AUTHENTICATION_INTERRUPTED", `authentication was required during recovery: ${precheck.detail}`);
+      }
+      if (precheck.state === "human-verification-required") {
+        // CONTINUATION 23 (the chat-tab baseline): the interactive
+        // human-verification gate during recovery — the typed
+        // operator gate (never Enter, never the known popup, never
+        // a retry).
+        return failure("HUMAN_VERIFICATION_REQUIRED", `the provider demanded interactive human verification during recovery: ${precheck.detail}`);
       }
       if (precheck.state === "provider-error") {
         return failure("PROVIDER_ERROR", `the provider surfaced an error during recovery: ${precheck.detail}`);
@@ -2714,7 +3083,8 @@ export function createZaiAdapter({
         tabId,
         ZAI_RECOVERY_MESSAGE,
         chatObjectCreatedOf(readBack.facts) === true,
-        userTurnCountOf(readBack.facts) ?? 0
+        userTurnCountOf(readBack.facts) ?? 0,
+        { authMarkersBaseline: (registered?.mode ?? "agent") === "chat" }
       );
       if (outcome.started) {
         const record = registered ?? {
@@ -2818,13 +3188,18 @@ export function createZaiAdapter({
    * failure detail.
    */
   async function observePage(tabId, session) {
+    // CONTINUATION 23: the session's mode carries the
+    // authentication posture (a CHAT reference session treats the
+    // auth markers as its accepted baseline; an AGENT session keeps
+    // the authenticated contract).
+    const authMarkersBaseline = session?.mode === "chat";
     const facts = await settle(tabId, [], (f) =>
-      classifySession(f, session ?? null).state !== "ambiguous"
+      classifySession(f, session ?? null, "idle", { authMarkersBaseline }).state !== "ambiguous"
     );
     if (!facts.ok) {
       return { state: "ambiguous", detail: facts.error.message };
     }
-    return classifySession(facts.facts, session ?? null);
+    return classifySession(facts.facts, session ?? null, "idle", { authMarkersBaseline });
   }
 
   /**
