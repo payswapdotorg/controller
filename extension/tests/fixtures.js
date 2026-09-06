@@ -413,9 +413,19 @@ export function fakeMessagingTabsApi({ tabs = [] } = {}) {
  * pressEnter), including the null-fact degradation for absent
  * surfaces and the refusal semantics for ambiguous actions.
  *
+ * CONTINUATION 13 (PR #6 review 5124488246): the dialog modeling
+ * stays SURFACE-FAITHFUL (the real provider renders dialogs — the
+ * fixtures keep the dialog state, the popupOnSend blocking modality,
+ * and the popupAfterSend async materialization with optional prompt
+ * restore, plus the pressEnter page primitive) so the dialog-blind
+ * regressions can place a visible dialog on the surface and prove
+ * the adapter never probes, classifies, or dismisses it. The
+ * adapter's probe vocabulary carries NO dialog probe — the dialog
+ * is invisible to every fact read, by construction.
+ *
  * `beforeRespond(command, state, history)` lets a test mutate the
  * page state at a precise point in the sequence (authentication
- * dropping, a popup surviving Enter, a send that does not take).
+ * dropping, a send that does not take).
  */
 export function fakeZaiPage({
   authenticated = false,
@@ -533,7 +543,12 @@ export function fakeZaiPage({
   // `{ probes: N, text: "...", restore: true }` customizes it. This
   // is the modality the operator's continuation-10 run reproduced:
   // Start returned ok:true / popupDismissals:0 while the popup was
-  // visibly present — the async-outcome hold exists for it.
+  // visibly present. CONTINUATION 13: the async-outcome hold that
+  // watched for this modality is REMOVED — the dialog now lands
+  // wherever it lands and the adapter stays blind to it (the
+  // dialog-blind regressions pin exactly that), while the prompt
+  // restore (when it precedes the verification read) flows through
+  // the ordinary unconfirmed-retry path.
   popupAfterSend = null,
   // The composer Agent/compose control (LIVE-OBSERVED 2026-09-06,
   // real origin: the composer FORM containing #chat-input renders

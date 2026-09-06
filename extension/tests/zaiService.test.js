@@ -93,7 +93,7 @@ test("StartZaiWorkerSession carries the exact worker/workItem/prompt and maps th
     startWorkerSession: (arg) => ({
       ok: true,
       session: { worker: arg.worker, workItem: arg.workItem, tabId: 7 },
-      submitted: { attempts: 1, popupDismissals: 0, generation: "working" },
+      submitted: { attempts: 1, composeReestablishments: 0, generation: "working" },
     }),
   });
   const { service } = await startedService({ adapter });
@@ -106,7 +106,7 @@ test("StartZaiWorkerSession carries the exact worker/workItem/prompt and maps th
   });
   assert.equal(result.ok, true);
   assert.deepEqual(result.session, { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 });
-  assert.deepEqual(result.submitted, { attempts: 1, popupDismissals: 0, generation: "working" });
+  assert.deepEqual(result.submitted, { attempts: 1, composeReestablishments: 0, generation: "working" });
   assert.equal(adapter.calls[0].arg.prompt, prompt);
   assert.equal(adapter.calls[0].arg.workItem, "CTRL-014");
 });

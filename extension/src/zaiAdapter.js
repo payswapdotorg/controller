@@ -37,18 +37,21 @@
  *         acceptance predicate. Broad region matches are never
  *         acceptance evidence.
  *
- *   known submission-blocking popup: press `Enter` exactly once for
- *   that retry, verify the dismissal by post-action observation,
- *   then RESTART THE FULL PREPARATION SEQUENCE (Agent -> model ->
- *   prompt — the idempotent re-selection re-establishes every
- *   governed ground truth the popup interaction may have disturbed;
- *   continuation 9, PR #6 review 5123260890, requirement 3) and only
- *   then permit the same decisive submission acceptance. Never a
- *   bare resend on an unverified surface, never a resend of an
- *   already-confirmed submission, and never popup absence as
- *   success (acceptance is always the verified provider-state
- *   confirmation of step 7). Unknown/differently-shaped dialogs
- *   fail closed — the adapter never blindly presses keys.
+ *   provider dialogs are NOT a governed signal (continuation 13, PR
+ *   #6 review 5124488246 — the ARCHITECT work order "REMOVE POPUP
+ *   DETECTION/RECOVERY PATH"): the adapter performs NO dialog
+ *   recognition, NO provider-specific popup shape matching, NO
+ *   submission hold watching for a delayed/async popup, NO
+ *   Enter-based popup dismissal, NO popup resend path, and NO
+ *   popupDismissals accounting. A visible dialog is never used as a
+ *   positive or negative signal on the normal CTRL-014 path — the
+ *   governed Start and Recover flows proceed on the control-state
+ *   and message-evidence facts alone (a dialog that physically
+ *   blocks the surface expresses itself through those facts: an
+ *   unreadable composer, a send that does not take, a bounded
+ *   budget exhaustion — every one of them fails closed through the
+ *   ordinary bounded paths). The adapter never presses Enter in
+ *   any governed flow.
  *
  *   the second observed failure mode (continuation 6, PR #6 review
  *   5123047551): the input state can be discarded around a send
@@ -61,9 +64,8 @@
  *   circular control of the composer form), verifies the composer
  *   is visible and enabled, re-types the exact prompt
  *   byte-for-byte, re-reads it byte-for-byte, and only then resends
- *   — a second bounded submission-recovery path alongside the
- *   known-popup path, never a blind resend, and never a duplicate
- *   of an already-confirmed submission.
+ *   — a bounded submission-recovery path, never a blind resend, and
+ *   never a duplicate of an already-confirmed submission.
  *
  *   hung worker: `Stop` -> verified stopped -> the FIXED message
  *   `continue` -> verified acceptance (the exact message confirmed
@@ -105,6 +107,13 @@ import { failure } from "./errors.js";
 /**
  * The frozen typed observation vocabulary — exactly the states the
  * work order requires the Controller to be able to distinguish.
+ * The two dialog-shaped states ("expected-blocking-dialog",
+ * "unexpected-dialog") are part of the spec-pinned vocabulary and
+ * remain DECLARED, but since continuation 13 (PR #6 review
+ * 5124488246) removed dialog recognition they are no longer
+ * PRODUCED: no classification path observes dialogs, so a visible
+ * provider dialog can never surface as (or influence) a session
+ * observation.
  */
 export const ZAI_SESSION_OBSERVATIONS = Object.freeze([
   "authentication-required",
@@ -126,10 +135,10 @@ export const ZAI_SESSION_OBSERVATIONS = Object.freeze([
  *
  * LIVE-OBSERVED (2026-09-05, supported Chromium against the real
  * https://chat.z.ai origin): the composer textarea, the send button,
- * the model-selector trigger, the model option rows, the modal
- * dialog containers, the alert surface, and the authentication
- * call-to-action button texts were all observed on the live provider
- * surface (unauthenticated landing state).
+ * the model-selector trigger, the model option rows, the alert
+ * surface, and the authentication call-to-action button texts were
+ * all observed on the live provider surface (unauthenticated
+ * landing state).
  *
  * AUTHENTICATED-SURFACE — the sidebar mode toggle (LIVE-OBSERVED
  * 2026-09-06 on the real https://chat.z.ai origin, both in the live
@@ -189,7 +198,10 @@ const ZAI_LOCATORS = Object.freeze({
   modelOption: 'button[aria-label="model-item"]',
   modelOptionExact: 'button[aria-label="model-item"][data-value="glm-5.3"]',
   modelTriggerSelected: "#model-selector-glm-5_3-button",
-  dialog: '[role="dialog"], dialog',
+  // CONTINUATION 13 (PR #6 review 5124488246): the dialog locator is
+  // REMOVED — the adapter performs no dialog recognition at all; a
+  // visible provider dialog is never probed, never classified, and
+  // never a signal on the governed paths.
   alert: '[role="alert"]',
   allButtons: "button",
   authButtonTexts: Object.freeze(["Sign in", "Log in", "Sign up"]),
@@ -312,16 +324,13 @@ const ZAI_MODEL = Object.freeze({
 /** The FIXED hung-worker recovery message — no alternate wording. */
 const ZAI_RECOVERY_MESSAGE = "continue";
 
-/** Dialog text patterns that reclassify a dialog as auth or error. */
-const AUTH_DIALOG_PATTERN = /sign\s*in|log\s*in|sign\s*up|authenticate|login/i;
-const ERROR_DIALOG_PATTERN = /error|went\s*wrong|rate\s*limit|too\s*many|unavailable|failed|forbidden/i;
+/** The alert-surface text pattern that classifies a provider error. */
 const PROVIDER_ALERT_PATTERN = /error|went\s*wrong|rate\s*limit|too\s*many|unavailable|failed|forbidden|denied/i;
 
 /** Frozen default budgets (all constructor-injectable for tests). */
 const DEFAULTS = Object.freeze({
   settlePolls: 8, // post-action observation polls per step
   settleIntervalMs: 400, // delay between polls
-  confirmationHoldPolls: 10, // the post-confirmation async-outcome watch (continuation 10)
   maxSubmissionAttempts: 3, // bounded preparation/send/verify attempts
   maxRecoveryAttempts: 2, // bounded Stop/continue recovery attempts
 });
@@ -331,7 +340,7 @@ const DEFAULTS = Object.freeze({
  *
  * @param {{ tabsApi: object, pageBridge: object, providerUrl?: string,
  *           sleep?: Function, now?: Function, settlePolls?: number,
- *           settleIntervalMs?: number, confirmationHoldPolls?: number,
+ *           settleIntervalMs?: number,
  *           maxSubmissionAttempts?: number, maxRecoveryAttempts?: number }} wiring
  *        `pageBridge` is the typed channel to the content script
  *        (createZaiPageBridge); tests inject a scriptable fake.
@@ -344,7 +353,6 @@ export function createZaiAdapter({
   now = () => Date.now(),
   settlePolls = DEFAULTS.settlePolls,
   settleIntervalMs = DEFAULTS.settleIntervalMs,
-  confirmationHoldPolls = DEFAULTS.confirmationHoldPolls,
   maxSubmissionAttempts = DEFAULTS.maxSubmissionAttempts,
   maxRecoveryAttempts = DEFAULTS.maxRecoveryAttempts,
 } = {}) {
@@ -384,7 +392,6 @@ export function createZaiAdapter({
     // "enabled" probe mode reads exactly this (disabled property +
     // aria-disabled), degrading to a null fact on a zero/many match.
     { name: "sendEnabled", selector: ZAI_LOCATORS.send, mode: "enabled" },
-    { name: "dialogCount", selector: ZAI_LOCATORS.dialog, mode: "count" },
     { name: "alertVisible", selector: ZAI_LOCATORS.alert, mode: "visible" },
   ];
 
@@ -405,7 +412,6 @@ export function createZaiAdapter({
   ];
 
   const EVIDENCE_PROBES = [
-    { name: "dialogText", selector: ZAI_LOCATORS.dialog, mode: "text" },
     { name: "alertText", selector: ZAI_LOCATORS.alert, mode: "text" },
     ...ZAI_LOCATORS.userMessage.map((selector, i) => ({
       name: `userMessageCandidate${i}`,
@@ -454,92 +460,13 @@ export function createZaiAdapter({
     return last;
   }
 
-  /**
-   * The ASYNC SUBMISSION-OUTCOME HOLD (continuation 10, PR #6 review
-   * 5123872434, requirements 1-3). The REAL known blocking popup is
-   * the provider's "Currently in peak hours" capacity dialog —
-   * LIVE-OBSERVED in the operator's captured run (repository of
-   * record, main 5d14d90): a bits-ui modal carrying role="dialog",
-   * aria-modal="true" and data-state="open" that IS matched by the
-   * adapter's `[role="dialog"], dialog` observation channel (the
-   * modality is an accessible in-page DOM dialog — NOT a native or
-   * browser-level modal). The provider's own bundle code (the
-   * MODEL_CONCURRENCY_LIMIT error handler) proves the TIMING: the
-   * prompt is optimistically landed and the composer cleared FIRST,
-   * and the popup materializes only when the asynchronous
-   * chat-completion error arrives — the same handler also RESTORES
-   * the submitted prompt into the composer. The submission-
-   * verification settle therefore observes the confirm-shaped state
-   * (decisively-empty composer + the exact user-message row) BEFORE
-   * the popup exists and closes its window: exactly the operator's
-   * continuation-10 run — Start returned ok:true with attempts=1,
-   * popupDismissals=0 while the popup was visibly present and never
-   * dismissed (the Enter path was never REACHED, not never invoked).
-   *
-   * This hold re-opens the window: after the confirm-shaped state is
-   * observed, the surface is watched for the bounded
-   * confirmationHoldPolls budget for exactly the two observables of
-   * that asynchronous outcome — a dialog (classified in the
-   * verifying-submission phase: the known popup, or an auth/error/
-   * unknown dialog that fails closed) and a composer that has been
-   * refilled (the provider's own prompt restore — the unconfirmed
-   * resend path). Outcomes:
-   *   { held: true, facts }  — an async outcome observable appeared;
-   *                           the caller dispatches on these fresher
-   *                           facts (the known-popup Enter path, the
-   *                           fail-closed dialog refusals, or the
-   *                           unconfirmed bounded retry);
-   *   { held: false, facts } — the confirmation HELD for the whole
-   *                           budget (facts = the freshest quiet
-   *                           read; null when no read succeeded);
-   *                           the acceptance is recorded from it;
-   *   { held: false, facts: null } — the outcome window was
-   *                           UNWATCHABLE (every read failed): the
-   *                           acceptance is NOT asserted without the
-   *                           bounded popup watch — fail closed.
-   * The hold never treats popup ABSENCE as success by itself: the
-   * acceptance it returns is still the message-exclusive exact-row +
-   * decisively-empty-composer evidence already observed, merely held
-   * through the async-outcome window; a popup that materializes
-   * beyond the bounded window is a live-evidence matter, never a
-   * code-side guess.
-   */
-  async function holdForAsyncSubmissionOutcome(tabId) {
-    let quiet = null;
-    for (let i = 0; i < confirmationHoldPolls; i++) {
-      await sleep(settleIntervalMs);
-      const read = await readFacts(tabId);
-      if (!read.ok) {
-        continue; // a transport failure is not a submission outcome
-      }
-      quiet = read.facts;
-      const dialog = classifyDialog(read.facts, "verifying-submission");
-      if (dialog.kind !== "none") {
-        return { held: true, facts: read.facts };
-      }
-      const value = composerValueOf(read.facts);
-      if (value !== null && value.length > 0) {
-        return { held: true, facts: read.facts };
-      }
-      // CONTINUATION 12 (PR #6 comment 5557322324, requirements 2-3):
-      // the control-state channel's OWN async-outcome observable. The
-      // provider's MODEL_CONCURRENCY_LIMIT handler restores the prompt
-      // into the composer AND recomputes the send control ENABLED in the
-      // SAME reactive update — so an enabled send control during the
-      // hold is the provider's own "a prompt is (back) present"
-      // computation even when the raw #chat-input value read itself
-      // lags or degrades (the restore path focuses and resizes the
-      // textarea before the read stabilizes). The enabled reading fires
-      // the SAME held dispatch as a refilled composer: the unconfirmed
-      // bounded retry path. A decisively disabled send control (the
-      // at-rest/emptied state — the provider's own computed "no prompt")
-      // is NOT an outcome and never fires the hold.
-      if (sendEnabledOf(read.facts) === true) {
-        return { held: true, facts: read.facts };
-      }
-    }
-    return { held: false, facts: quiet };
-  }
+  // CONTINUATION 13 (PR #6 review 5124488246): the async
+  // submission-outcome hold (continuation 10) is REMOVED together
+  // with the whole popup recognition mechanism — no submission
+  // window watches for a delayed/async dialog or the provider's
+  // prompt restore. The acceptance follows the frozen rule directly:
+  // the message-exclusive exact-row evidence + the decisively empty
+  // composer, gated on control-state consistency.
 
   // ------------------------------------------------------------------
   // Fact interpretation (all provider semantics live below this line).
@@ -552,12 +479,6 @@ export function createZaiAdapter({
       return 0;
     }
     return texts.filter((text) => ZAI_LOCATORS.authButtonTexts.includes(text)).length;
-  }
-
-  /** @private */
-  function dialogCount(facts) {
-    const count = facts.dialogCount?.count;
-    return typeof count === "number" ? count : 0;
   }
 
   /** @private */
@@ -725,63 +646,21 @@ export function createZaiAdapter({
   }
 
   /**
-   * Classify the dialog surface (exactly one dialog) during a given
-   * phase. The KNOWN submission-blocking popup is the modal dialog
-   * observed while verifying a submission: not an auth surface, not
-   * an error surface. Anything else — a dialog during preparation or
-   * recovery, multiple simultaneous dialogs, auth-shaped or
-   * error-shaped dialogs — is NOT the known popup and fails closed.
-   */
-  function classifyDialog(facts, phase) {
-    const count = dialogCount(facts);
-    if (count === 0) {
-      return { kind: "none" };
-    }
-    if (count > 1) {
-      return { kind: "unknown", reason: `${count} dialogs are visible simultaneously — an ambiguous dialog surface` };
-    }
-    // Auth/error-shaped dialogs are classified by their CONTENT at any
-    // phase: they are never the known popup and never press Enter.
-    const text = facts.dialogText?.text ?? "";
-    if (AUTH_DIALOG_PATTERN.test(text)) {
-      return { kind: "auth", reason: "the dialog is an authentication surface" };
-    }
-    if (ERROR_DIALOG_PATTERN.test(text)) {
-      return { kind: "error", reason: "the dialog is an error surface" };
-    }
-    if (phase !== "verifying-submission") {
-      return { kind: "unknown", reason: "a dialog is visible outside the submission-verification window" };
-    }
-    return { kind: "known-popup" };
-  }
-
-  /**
    * The typed session-state classifier. `session` is the registry
    * record when the observation belongs to an active worker session
-   * (null for a standalone observation).
+   * (null for a standalone observation). CONTINUATION 13 (PR #6
+   * review 5124488246): dialogs are NEVER classified — a visible
+   * provider dialog is not a signal; the classifier reads only the
+   * alert surface, the auth markers, and the composer/control/message
+   * facts.
    */
-  function classifySession(facts, session, phase = "idle") {
+  function classifySession(facts, session) {
     const composerVisible = facts.composerVisible?.visible === true;
     const composerEnabled = facts.composerEnabled?.enabled === true;
     const composerValue = typeof facts.composerValue?.value === "string" ? facts.composerValue.value : null;
     const alertVisible = facts.alertVisible?.visible === true;
     const alertText = String(facts.alertText?.text ?? "");
 
-    const dialog = classifyDialog(facts, phase);
-    if (dialog.kind === "auth") {
-      return { state: "authentication-required", detail: dialog.reason };
-    }
-    if (dialog.kind === "error") {
-      return { state: "provider-error", detail: dialog.reason };
-    }
-    if (dialog.kind === "unknown") {
-      return dialog.reason.includes("ambiguous dialog")
-        ? { state: "ambiguous", detail: dialog.reason }
-        : { state: "unexpected-dialog", detail: dialog.reason };
-    }
-    if (dialog.kind === "known-popup") {
-      return { state: "expected-blocking-dialog", detail: "the known submission-blocking popup is visible" };
-    }
     if (alertVisible && PROVIDER_ALERT_PATTERN.test(alertText)) {
       return { state: "provider-error", detail: "an alerting error surface is visible" };
     }
@@ -918,10 +797,6 @@ export function createZaiAdapter({
     return pageBridge.send(tabId, { zaiPage: true, op: "type", selector, text });
   }
 
-  async function pressEnter(tabId) {
-    return pageBridge.send(tabId, { zaiPage: true, op: "pressEnter" });
-  }
-
   /**
    * Step: select the Agent control — the sidebar mode-toggle Agent
    * pill (LIVE-OBSERVED structure: two <button> pills, Chat first,
@@ -936,8 +811,8 @@ export function createZaiAdapter({
    * Verification: the Agent pill carries data-active="true" after
    * the action — a click is never evidence of the mode switch; a
    * marker that never appears fails closed (no weak acceptance).
-   * No dialog is expected while preparing — any dialog at this point
-   * fails closed UNKNOWN_DIALOG.
+   * CONTINUATION 13: a visible dialog is not consulted here — the
+   * preparation proceeds on the control facts alone.
    */
   async function selectAgent(tabId) {
     const agentProbes = ZAI_LOCATORS.agentControl.map((selector, i) => ({
@@ -962,10 +837,6 @@ export function createZaiAdapter({
     ]);
     if (!facts.ok) {
       return facts;
-    }
-    const dialog = classifyDialog(facts.facts, "preparing");
-    if (dialog.kind !== "none") {
-      return failure("UNKNOWN_DIALOG", `no dialog is expected during preparation: ${dialog.reason}`);
     }
     // Idempotence: the Agent pill is already the active mode pill —
     // clicking it would navigate the provider app to a fresh
@@ -1041,8 +912,9 @@ export function createZaiAdapter({
    * NO trigger click is issued (re-clicking would toggle the option
    * menu open for nothing). A disabled option row (the live
    * unauthenticated surface keeps GLM-5.3 disabled) refuses the click
-   * and fails closed. No dialog is expected while preparing — any
-   * dialog at this point fails closed UNKNOWN_DIALOG.
+   * and fails closed. CONTINUATION 13: a visible dialog is not
+   * consulted here — the preparation proceeds on the control facts
+   * alone.
    */
   async function selectModel(tabId) {
     const triggerCountProbes = ZAI_LOCATORS.modelTrigger.map((selector, i) => ({
@@ -1073,10 +945,6 @@ export function createZaiAdapter({
     const facts = await readFacts(tabId, [...triggerCountProbes, ...triggerTextProbes, selectedIdProbe]);
     if (!facts.ok) {
       return facts;
-    }
-    const dialog = classifyDialog(facts.facts, "preparing");
-    if (dialog.kind !== "none") {
-      return failure("UNKNOWN_DIALOG", `no dialog is expected during preparation: ${dialog.reason}`);
     }
     // Idempotence: both ground truths already hold — the model is
     // already the frozen model; no trigger click (re-clicking would
@@ -1173,11 +1041,11 @@ export function createZaiAdapter({
   /**
    * Step: ensure the exact governed prompt is present in the
    * composer, byte-identical, before (re)sending — the operator's
-   * recovery loop: after the known-popup Enter (or an unconfirmed
-   * send), the exact prompt is RESENT; the preparation is never
-   * restarted for a resend. Three observed states:
+   * recovery loop: after an unconfirmed send, the exact prompt is
+   * RESENT; the preparation is never restarted for a resend. Three
+   * observed states:
    *   - the composer already holds the exact prompt (an unconfirmed
-   *     send, or the popup blocked the submission): it is sent as-is
+   *     send, or the submission was not accepted): it is sent as-is
    *     — the provider surface is not disturbed with a re-type;
    *   - the composer is DECISIVELY empty and the message evidence
    *     already contains the exact prompt: the submission is ALREADY
@@ -1189,20 +1057,13 @@ export function createZaiAdapter({
    *     truncated prompt is never submitted).
    * An ABSENT or AMBIGUOUS composer read is never "empty" and never
    * "present" — it fails closed (an unreadable input state is never
-   * sent). A dialog visible at this point fails closed — never type
-   * through a modal.
+   * sent). CONTINUATION 13: a visible dialog is not consulted here —
+   * the decision is made on the composer/message facts alone.
    */
   async function ensurePrompt(tabId, prompt) {
     const facts = await readFacts(tabId);
     if (!facts.ok) {
       return facts;
-    }
-    const dialog = classifyDialog(facts.facts, "preparing");
-    if (dialog.kind !== "none") {
-      return failure(
-        "UNKNOWN_DIALOG",
-        `a dialog is visible while preparing the prompt submission: ${dialog.reason}`
-      );
     }
     const composerValue = composerValueOf(facts.facts);
     if (composerValue === null) {
@@ -1348,23 +1209,22 @@ export function createZaiAdapter({
     }
 
     // 2. verify the authenticated state (and that the surface is
-    // ready for the preparation sequence).
+    // ready for the preparation sequence). CONTINUATION 13: a visible
+    // dialog is never consulted — the precheck reads the
+    // alert/auth-marker/composer facts only.
     const settled = await settle(tabId, [], (f) => {
-      const c = classifySession(f, null, "preparing");
+      const c = classifySession(f, null);
       return c.state !== "ambiguous";
     });
     if (!settled.ok) {
       return settled;
     }
-    const precheck = classifySession(settled.facts, null, "preparing");
+    const precheck = classifySession(settled.facts, null);
     if (precheck.state === "authentication-required") {
       return failure(
         "AUTHORIZATION_REQUIRED",
         `the chat.z.ai session is not authenticated: ${precheck.detail}. Human authentication is out of band — authenticate in the provider tab, then start the worker session again`
       );
-    }
-    if (precheck.state === "unexpected-dialog" || precheck.state === "expected-blocking-dialog") {
-      return failure("UNKNOWN_DIALOG", `a dialog is visible on the target session before preparation: ${precheck.detail}`);
     }
     if (precheck.state === "provider-error") {
       return failure("PROVIDER_ERROR", `the target session is presenting an error surface: ${precheck.detail}`);
@@ -1378,18 +1238,14 @@ export function createZaiAdapter({
 
     // 3-7. bounded preparation/send/verification attempts. The first
     // attempt runs the full preparation (Agent -> model -> prompt).
-    // CONTINUATION 9 (PR #6 review 5123260890, requirement 3):
-    // after the known-popup Enter and its VERIFIED dismissal, the
-    // next attempt RESTARTS THE FULL PREPARATION SEQUENCE — the
-    // popup interaction can disturb the governed surface state, and
-    // the idempotent re-selection (Agent, model) re-establishes
-    // every governed ground truth before the prompt is (re)entered
-    // and (re)sent. An unconfirmed send whose composer still holds
-    // the exact prompt resends as-is (the pre-send gate re-verifies
-    // it byte-for-byte); an already-confirmed submission is never
-    // resent.
+    // CONTINUATION 13 (PR #6 review 5124488246): the popup recovery
+    // branch is REMOVED — an unconfirmed send whose composer still
+    // holds the exact prompt resends as-is (the pre-send gate
+    // re-verifies it byte-for-byte); an already-confirmed submission
+    // is never resent; a send that appears not to take (or a surface
+    // a dialog renders unreadable) exhausts the bounded budget and
+    // fails closed through the ordinary paths.
     let attempts = 0;
-    let popupDismissals = 0;
     let composeReestablishments = 0;
     let lastRefusal = null;
     let prepared = false;
@@ -1397,7 +1253,7 @@ export function createZaiAdapter({
     /**
      * Record the CONFIRMED submission (the shared acceptance path).
      * CONTINUATION 12 (PR #6 comment 5557322324, requirements 4-7): the
-     * recording is now GATED on the control-state consistency of the
+     * recording is GATED on the control-state consistency of the
      * recording facts — a contradictory or unreadable composer
      * action-slot state, or an enabled send control contradicting the
      * decisively-empty composer read, refuses the acceptance (fail
@@ -1405,8 +1261,10 @@ export function createZaiAdapter({
      * frozen acceptance rule is UNCHANGED: a send/control transition is
      * context and cross-check only, never acceptance by itself — the
      * acceptance remains the MESSAGE-EXCLUSIVE exact-prompt evidence
-     * plus the DECISIVELY empty composer, and the `submitted` record
-     * keeps exactly its frozen four-field shape.
+     * plus the DECISIVELY empty composer. CONTINUATION 13: the
+     * `submitted` record carries exactly the three popup-free fields
+     * (attempts, composeReestablishments, generation) — the
+     * popupDismissals accounting is removed with the popup mechanism.
      */
     const recordSubmission = (facts) => {
       const controlRefusal = controlStateRefusal(facts);
@@ -1420,7 +1278,6 @@ export function createZaiAdapter({
         tabId,
         prompt,
         attempts,
-        popupDismissals,
         composeReestablishments,
         submittedAt: now(),
         wasWorking: generation === "working",
@@ -1430,7 +1287,7 @@ export function createZaiAdapter({
       return {
         ok: true,
         session: { worker, workItem, tabId },
-        submitted: { attempts, popupDismissals, composeReestablishments, generation },
+        submitted: { attempts, composeReestablishments, generation },
       };
     };
 
@@ -1461,11 +1318,12 @@ export function createZaiAdapter({
       }
       if (entered.confirmed) {
         // The submission was already confirmed by MESSAGE-EXCLUSIVE
-        // provider-state evidence (e.g. the dismissed popup had let it
-        // land): never resend the governed prompt. CONTINUATION 12: a
-        // control-state inconsistency on the recording facts refuses
-        // the acceptance — the bounded retry re-observes (never resends
-        // a confirmed submission) and fails closed if it persists.
+        // provider-state evidence (e.g. the send landed while the
+        // verification was reading): never resend the governed prompt.
+        // CONTINUATION 12: a control-state inconsistency on the
+        // recording facts refuses the acceptance — the bounded retry
+        // re-observes (never resends a confirmed submission) and fails
+        // closed if it persists.
         const recorded = recordSubmission(entered.facts);
         if (recorded.ok) {
           return recorded;
@@ -1485,14 +1343,6 @@ export function createZaiAdapter({
       const gate = await readFacts(tabId);
       if (!gate.ok) {
         lastRefusal = gate;
-        continue;
-      }
-      const gateDialog = classifyDialog(gate.facts, "preparing");
-      if (gateDialog.kind !== "none") {
-        lastRefusal = failure(
-          "UNKNOWN_DIALOG",
-          `a dialog is visible at the send gate: ${gateDialog.reason}`
-        );
         continue;
       }
       if (composerValueOf(gate.facts) !== prompt) {
@@ -1515,17 +1365,16 @@ export function createZaiAdapter({
         continue;
       }
       // 7. Verify ACTUAL submission from the resulting provider
-      //    state. Decisive outcomes only: a dialog, a DECISIVELY
-      //    cleared composer WITH message-exclusive evidence of the
-      //    exact prompt (confirmed), or a composer that still HOLDS
-      //    the prompt (the send did not take). An absent/ambiguous
+      //    state. Decisive outcomes only: a DECISIVELY cleared
+      //    composer WITH message-exclusive evidence of the exact
+      //    prompt (confirmed), or a composer that still HOLDS the
+      //    prompt (the send did not take). An absent/ambiguous
       //    composer read is NOT decisive — the budget bounds the
       //    wait and the final classification fails closed.
+      //    CONTINUATION 13 (PR #6 review 5124488246): a visible
+      //    dialog is never a decisive signal here — the verdict
+      //    reads only the composer and the message evidence.
       const verdict = await settle(tabId, [], (f) => {
-        const dialog = classifyDialog(f, "verifying-submission");
-        if (dialog.kind !== "none") {
-          return true;
-        }
         const composerValue = composerValueOf(f);
         if (composerValue === null) {
           return false; // an unreadable composer is NOT decisive
@@ -1539,122 +1388,32 @@ export function createZaiAdapter({
         lastRefusal = verdict;
         continue;
       }
-      let facts = verdict.facts;
-      // CONTINUATION 10 (PR #6 review 5123872434, requirements 1-3):
-      // the confirm-shaped verdict is NOT yet final on this provider.
-      // The real known blocking popup ("Currently in peak hours",
-      // MODEL_CONCURRENCY_LIMIT) materializes ASYNCHRONOUSLY — after
-      // the optimistic landing the settle just observed — so the
-      // acceptance is recorded only after the bounded async-outcome
-      // hold. A popup (or the provider's prompt restore) observed
-      // during the hold replaces the facts and dispatches below: the
-      // frozen known-popup contract (Enter exactly once -> verified
-      // dismissal -> FULL preparation restart -> re-enter/re-verify
-      // -> resend only under the governed preconditions), the
-      // fail-closed dialog refusals, or the unconfirmed bounded
-      // retry. An unwatchable hold fails closed: the acceptance is
-      // never asserted without the bounded popup watch.
+      const facts = verdict.facts;
       if (composerValueOf(facts) === "" && messageEvidenceContains(facts, prompt)) {
-        const hold = await holdForAsyncSubmissionOutcome(tabId);
-        if (hold.held) {
-          facts = hold.facts;
-          // CONTINUATION 12 (PR #6 comment 5557322324, requirements 6-7):
-          // the held async outcome is dispatched through the SAME
-          // control-state consistency gate before any recovery path —
-          // an enabled send control observed with a decisively EMPTY
-          // composer is the contradictory surface (the provider's own
-          // computation says a prompt is present while the raw read
-          // says none), and it fails closed IMMEDIATELY. The compose
-          // re-establishment is never invoked on an untrustworthy
-          // composer read, and the acceptance is never recorded from
-          // it — the race in which the optimistic landing is accepted
-          // (or recovered) before the provider can expose a
-          // contradictory composer/control state is closed on every
-          // observable surface.
-          const heldControlRefusal = controlStateRefusal(hold.facts);
-          if (heldControlRefusal) {
-            return heldControlRefusal;
-          }
-        } else if (hold.facts) {
-          // The confirmation HELD through the async-outcome window:
-          // record the acceptance from the freshest quiet read (the
-          // message-exclusive exact-row + decisively-empty-composer
-          // evidence, held — popup absence itself is never success,
-          // and a popup beyond the bounded window is a live-evidence
-          // matter). CONTINUATION 12: the recording is gated on the
-          // control-state consistency of the quiet facts — a
-          // contradictory/unreadable action-slot state or an
-          // enabled-send-vs-empty-composer contradiction fails closed
-          // (the bounded retry re-observes; a confirmed submission is
-          // never resent).
-          const recorded = recordSubmission(hold.facts);
-          if (recorded.ok) {
-            return recorded;
-          }
-          lastRefusal = recorded;
-          continue;
-        } else {
-          lastRefusal = failure(
-            "PAGE_UNAVAILABLE",
-            "the post-confirmation outcome watch could not read the provider surface — the submission acceptance is not asserted without the bounded popup watch"
-          );
-          continue;
+        // The confirm-shaped verdict: record the acceptance from the
+        // MESSAGE-EXCLUSIVE evidence (the exact row + the decisively
+        // empty composer), GATED on the control-state consistency of
+        // the recording facts (continuation 12) — a contradictory or
+        // unreadable composer action-slot state, or an enabled send
+        // control contradicting the decisively-empty composer read,
+        // refuses the acceptance and the bounded retry re-observes
+        // (never resends a confirmed submission). CONTINUATION 13:
+        // no async-outcome hold runs after this — a popup (or the
+        // provider's prompt restore) materializing beyond the verdict
+        // is a live-evidence matter, never a code-side guess.
+        const recorded = recordSubmission(facts);
+        if (recorded.ok) {
+          return recorded;
         }
-      }
-      const dialog = classifyDialog(facts, "verifying-submission");
-      if (dialog.kind === "auth") {
-        return failure("AUTHENTICATION_INTERRUPTED", `authentication was required during submission: ${dialog.reason}`);
-      }
-      if (dialog.kind === "error") {
-        return failure("PROVIDER_ERROR", `the provider surfaced an error during submission: ${dialog.reason}`);
-      }
-      if (dialog.kind === "unknown") {
-        return failure("UNKNOWN_DIALOG", `a differently-shaped dialog blocked submission: ${dialog.reason}`);
-      }
-      if (dialog.kind === "known-popup") {
-        if (attempts >= maxSubmissionAttempts) {
-          return failure(
-            "RETRY_EXHAUSTED",
-            `the known submission-blocking popup persisted beyond the bounded attempt budget (${maxSubmissionAttempts} attempts, ${popupDismissals} dismissals)`
-          );
-        }
-        // The ONE bounded Enter press for this attempt. CONTINUATION 9
-        // (PR #6 review 5123260890, requirement 3): after the VERIFIED
-        // dismissal, the next attempt RESTARTS THE FULL PREPARATION
-        // SEQUENCE (Agent -> model -> prompt) — the popup interaction
-        // can disturb the governed surface state (mode, model, input),
-        // and the idempotent re-selection re-establishes every
-        // governed ground truth before the resend. The dismissal
-        // itself is NEVER success ("never treat popup absence as
-        // success"); only the decisive submission acceptance of step
-        // 7 can confirm, and an already-confirmed submission (the
-        // popup let it land) is still never resent.
-        // CONTINUATION 10 (PR #6 review 5123872434, requirement 3):
-        // popupDismissals increments ONLY AFTER the known popup was
-        // actually observed AND the Enter action was actually issued —
-        // a refused or failed press never counts a dismissal.
-        const pressed = await pressEnter(tabId);
-        if (!pressed.ok) {
-          lastRefusal = pressed;
-          continue;
-        }
-        popupDismissals += 1;
-        const dismissed = await settle(tabId, [], (f) => dialogCount(f) === 0);
-        if (!dismissed.ok) {
-          lastRefusal = dismissed;
-          continue;
-        }
-        if (dialogCount(dismissed.facts) !== 0) {
-          lastRefusal = failure("UNKNOWN_DIALOG", "the known popup did not dismiss after the Enter press");
-          continue;
-        }
-        prepared = false; // the next attempt restarts the FULL preparation sequence
+        lastRefusal = recorded;
         continue;
       }
       const composerValue = composerValueOf(facts);
       if (composerValue !== null && composerValue.length > 0) {
         // Unconfirmed: the send did not take (the composer still holds
-        // the prompt). The bounded retry resends the exact prompt.
+        // the prompt — a provider surface a dialog renders busy
+        // expresses itself exactly this way). The bounded retry
+        // resends the exact prompt.
         lastRefusal = failure(
           "PAGE_MALFORMED",
           "the prompt remained unsubmitted after the send (submission was not confirmed by observation)"
@@ -1665,12 +1424,11 @@ export function createZaiAdapter({
         // The SECOND observed failure mode (PR #6 review
         // 5123047551, requirement 3): the composer is decisively
         // empty, the submission is NOT confirmed by message
-        // evidence, and no dialog explains it — the provider
-        // discarded the input state around the send attempt (the
-        // operator's captured post-run DOM: an empty composer with
-        // a disabled send control). Fail-closed remediation: the
-        // bounded compose re-establishment; the next attempt
-        // re-types the exact prompt byte-for-byte, re-reads it
+        // evidence — the provider discarded the input state around
+        // the send attempt (the operator's captured post-run DOM: an
+        // empty composer with a disabled send control). Fail-closed
+        // remediation: the bounded compose re-establishment; the next
+        // attempt re-types the exact prompt byte-for-byte, re-reads it
         // byte-for-byte, and only then resends.
         const reestablished = await reestablishComposer(tabId);
         if (reestablished.ok) {
@@ -1760,12 +1518,8 @@ export function createZaiAdapter({
       // and an exhaustion still fails closed — the wait only tolerates
       // the generation-start latency the provider itself exhibits.
       const observed = await settle(tabId, [], (f) => {
-        const c = classifySession(f, session, "recovery");
-        if (
-          ["authentication-required", "provider-error", "unexpected-dialog", "expected-blocking-dialog"].includes(
-            c.state
-          )
-        ) {
+        const c = classifySession(f, session);
+        if (["authentication-required", "provider-error"].includes(c.state)) {
           return true; // a decisive failure surface ends the wait immediately
         }
         // The precondition's decidable outcomes: the generation ACTIVE
@@ -1773,6 +1527,8 @@ export function createZaiAdapter({
         // post-response surface (the Regenerate control — the
         // generation already ended), or the composer holding text (the
         // prompt present — no active generation to recover).
+        // CONTINUATION 13: a visible dialog is never a failure surface
+        // here — the wait reads the control/message facts only.
         return (
           stopVisible(f) ||
           postResponseRegenerateVisible(f) ||
@@ -1783,15 +1539,22 @@ export function createZaiAdapter({
         lastRefusal = observed;
         continue;
       }
-      const precheck = classifySession(observed.facts, session, "recovery");
+      const precheck = classifySession(observed.facts, session);
       if (precheck.state === "authentication-required") {
         return failure("AUTHENTICATION_INTERRUPTED", `authentication was required during recovery: ${precheck.detail}`);
       }
       if (precheck.state === "provider-error") {
         return failure("PROVIDER_ERROR", `the provider surfaced an error during recovery: ${precheck.detail}`);
       }
-      if (precheck.state === "unexpected-dialog" || precheck.state === "expected-blocking-dialog" || precheck.state === "ambiguous") {
-        return failure("UNKNOWN_DIALOG", `a dialog or ambiguous surface is visible during recovery — the bounded popup recovery applies only to submission: ${precheck.detail}`);
+      if (precheck.state === "ambiguous") {
+        // CONTINUATION 13: the dialog-driven UNKNOWN_DIALOG refusal is
+        // removed (a visible dialog is never a signal in this flow —
+        // PR #6 review 5124488246, requirement 6); only the genuinely
+        // ambiguous CONTROL surface still fails closed.
+        return failure(
+          "AMBIGUOUS_STATE",
+          `an ambiguous control surface is visible during recovery (the composer is not a decidable input surface): ${precheck.detail}`
+        );
       }
       if (!stopVisible(observed.facts)) {
         // The CONTINUATION-11 post-response diagnostic (PR #6 comment
@@ -1818,18 +1581,18 @@ export function createZaiAdapter({
         // CONTINUATION 12 (requirement 8): the control-state-diagnosed
         // refusals. The composer holding text while no Stop control is
         // visible means the submission was not accepted or the prompt
-        // was restored (the known popup path) — there is no active
-        // generation to recover and the operator procedure is a
-        // re-Start, not a recovery. Otherwise the bounded wait did not
-        // observe the generation become active: the queued-state
-        // refusal names the control-state reading and the timing
-        // guidance (invoke while the Stop control is visibly present,
-        // not merely immediately after Start returns).
+        // was returned to the composer (the provider's own restore) —
+        // there is no active generation to recover and the operator
+        // procedure is a re-Start, not a recovery. Otherwise the bounded
+        // wait did not observe the generation become active: the
+        // queued-state refusal names the control-state reading and the
+        // timing guidance (invoke while the Stop control is visibly
+        // present, not merely immediately after Start returns).
         const composerValue = composerValueOf(observed.facts);
         if (composerValue !== null && composerValue.length > 0) {
           return failure(
             "AMBIGUOUS_STATE",
-            "the hung precondition (generation in progress) is not established — the composer holds text and the send control is rendered with no Stop control visible: the submission was not accepted or the prompt was restored (the known popup path), so there is no active generation to recover; handle the provider popup state if one is present and re-Start the worker session"
+            "the hung precondition (generation in progress) is not established — the composer holds text and the send control is rendered with no Stop control visible: the submission was not accepted or the prompt was returned to the composer, so there is no active generation to recover; re-Start the worker session"
           );
         }
         const sendEnabled = sendEnabledOf(observed.facts);
@@ -1902,6 +1665,9 @@ export function createZaiAdapter({
       // resumed generation state — the Stop control returning, the
       // composer clearing — is observed context, NEVER acceptance
       // evidence: it does not identify the recovery message.
+      // CONTINUATION 13: a visible dialog never ends this wait and
+      // never fails it — the acceptance is decided on the
+      // message/composer facts alone.
       const accepted = await settle(tabId, [], (f) => {
         const composerValue = composerValueOf(f);
         const cleared = composerValue === ""; // decisive only
@@ -1909,17 +1675,11 @@ export function createZaiAdapter({
           return true; // acceptance confirmed by post-action evidence
         }
         // Decisive contradictions end the wait early (classified
-        // below): authentication dropping, a dialog surface, an
-        // error alert, an ambiguous surface. Anything else keeps
-        // waiting within the bounded budget.
-        const verdict = classifySession(f, session, "recovery-acceptance");
-        return [
-          "authentication-required",
-          "provider-error",
-          "unexpected-dialog",
-          "expected-blocking-dialog",
-          "ambiguous",
-        ].includes(verdict.state);
+        // below): authentication dropping, an error alert, an
+        // ambiguous control surface. Anything else keeps waiting
+        // within the bounded budget.
+        const verdict = classifySession(f, session);
+        return ["authentication-required", "provider-error", "ambiguous"].includes(verdict.state);
       });
       if (!accepted.ok) {
         lastRefusal = accepted;
@@ -1931,7 +1691,7 @@ export function createZaiAdapter({
       const confirmed = messageEvidenceContains(f, ZAI_RECOVERY_MESSAGE);
       if (!(cleared && confirmed)) {
         // Classify a decisive contradiction if one ended the wait.
-        const verdict = classifySession(f, session, "recovery-acceptance");
+        const verdict = classifySession(f, session);
         if (verdict.state === "authentication-required") {
           return failure(
             "AUTHENTICATION_INTERRUPTED",
@@ -1944,14 +1704,13 @@ export function createZaiAdapter({
             `the provider surfaced an error while verifying recovery-message acceptance: ${verdict.detail}`
           );
         }
-        if (
-          verdict.state === "unexpected-dialog" ||
-          verdict.state === "expected-blocking-dialog" ||
-          verdict.state === "ambiguous"
-        ) {
+        if (verdict.state === "ambiguous") {
+          // CONTINUATION 13: the dialog-driven UNKNOWN_DIALOG refusal is
+          // removed (a visible dialog is never a signal in this flow);
+          // only the genuinely ambiguous CONTROL surface fails closed.
           return failure(
-            "UNKNOWN_DIALOG",
-            `a dialog or ambiguous surface is visible while verifying recovery-message acceptance: ${verdict.detail}`
+            "AMBIGUOUS_STATE",
+            `an ambiguous control surface is visible while verifying recovery-message acceptance: ${verdict.detail}`
           );
         }
         lastRefusal = failure(
@@ -2027,14 +1786,14 @@ export function createZaiAdapter({
    * classifies as the typed ambiguous observation with the channel
    * failure detail.
    */
-  async function observePage(tabId, session, phase = "idle") {
+  async function observePage(tabId, session) {
     const facts = await settle(tabId, [], (f) =>
-      classifySession(f, session ?? null, phase).state !== "ambiguous"
+      classifySession(f, session ?? null).state !== "ambiguous"
     );
     if (!facts.ok) {
       return { state: "ambiguous", detail: facts.error.message };
     }
-    return classifySession(facts.facts, session ?? null, phase);
+    return classifySession(facts.facts, session ?? null);
   }
 
   /**

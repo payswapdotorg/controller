@@ -175,7 +175,7 @@ test("startResultCorrelation extracts the exact session a successful start repor
   const correlation = startResultCorrelation({
     ok: true,
     session: { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 },
-    submitted: { attempts: 1, popupDismissals: 0, generation: "working" },
+    submitted: { attempts: 1, composeReestablishments: 0, generation: "working" },
   });
   assert.deepEqual(correlation, { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 });
 });
@@ -216,7 +216,7 @@ test("buildEvidenceRecord produces the deterministic record with fixed key order
   const response = {
     ok: true,
     session: { worker: "Z.ai", workItem: "CTRL-014", tabId: 7 },
-    submitted: { attempts: 2, popupDismissals: 1, generation: "working" },
+    submitted: { attempts: 2, composeReestablishments: 1, generation: "working" },
   };
   const built = buildEvidenceRecord({
     sequence: 1,

@@ -5,21 +5,26 @@
  * continuation-6 correction: the pre-send gate, MESSAGE-EXCLUSIVE
  * acceptance evidence, decisive composer reads, and the bounded
  * compose re-establishment — the operator-described circular
- * control), the bounded known-popup Enter recovery with full
- * preparation restart, unknown-dialog/auth-interrupt/budget
- * fail-closed behavior, the async submission-outcome hold (the
- * continuation-10 peak-hours modality), the fixed Stop -> continue
- * hung-worker recovery (acceptance proven by conversation evidence —
- * a resumed generation state alone never succeeds), identity
- * preservation, and stale/contradictory reference refusal (including
- * the stale correlated Start fail-closed regression). The
- * CONTINUATION-12 regressions (PR #6 comment 5557322324) pin the
- * composer control-state transition as an explicit submission-state
- * observation channel: the provider's own send/Stop slot computation
- * and send-disabled computation are observed on every fact read,
- * cross-check the acceptance recording, fail closed on contradictory
- * or unreadable control states, and the recovery's precondition
- * waits (bounded) for the Stop-visible interval to open.
+ * control), auth-interrupt/budget fail-closed behavior, the fixed
+ * Stop -> continue hung-worker recovery (acceptance proven by
+ * conversation evidence — a resumed generation state alone never
+ * succeeds), identity preservation, and stale/contradictory reference
+ * refusal (including the stale correlated Start fail-closed
+ * regression). The CONTINUATION-13 regressions (PR #6 review
+ * 5124488246 — "REMOVE POPUP DETECTION/RECOVERY PATH") pin the
+ * dialog-blind law: a visible provider dialog never observes, never
+ * blocks, never triggers Enter, and never fails any governed flow —
+ * Start and Recover proceed on the control-state and
+ * message-evidence facts alone, the adapter never issues a
+ * pressEnter command, and the submitted record is the popup-free
+ * three-field shape. The CONTINUATION-12 regressions (PR #6 comment
+ * 5557322324) pin the composer control-state transition as an
+ * explicit submission-state observation channel: the provider's own
+ * send/Stop slot computation and send-disabled computation are
+ * observed on every fact read, cross-check the acceptance recording,
+ * fail closed on contradictory or unreadable control states, and
+ * the recovery's precondition waits (bounded) for the Stop-visible
+ * interval to open.
  */
 
 import { test } from "node:test";
@@ -113,7 +118,6 @@ function build({
     now: () => 1725500000000,
     settlePolls: 4,
     settleIntervalMs: 0,
-    confirmationHoldPolls: 4,
   });
   return { adapter, tabsApi, pages, tabs };
 }
@@ -178,22 +182,28 @@ test("a generating session observes working", async () => {
   assert.equal(result.observation.state, "working");
 });
 
-test("a visible unknown dialog observes unexpected-dialog (outside submission verification)", async () => {
-  const { adapter } = build({ dialog: { text: "Some unprompted modal" } });
-  const result = await adapter.observeSession("w1");
-  assert.equal(result.observation.state, "unexpected-dialog");
-});
-
-test("a visible auth-shaped dialog observes authentication-required", async () => {
-  const { adapter } = build({ dialog: { text: "Please sign in to continue" } });
-  const result = await adapter.observeSession("w1");
-  assert.equal(result.observation.state, "authentication-required");
-});
-
-test("a visible error-shaped dialog observes provider-error", async () => {
-  const { adapter } = build({ dialog: { text: "Something went wrong. Rate limit reached." } });
-  const result = await adapter.observeSession("w1");
-  assert.equal(result.observation.state, "provider-error");
+test("a visible provider dialog is NEVER an observation signal — the surface classifies by its composer/control facts (the dialog-blind law)", async () => {
+  // CONTINUATION 13 (PR #6 review 5124488246, requirements 1-2): the
+  // adapter performs NO dialog recognition, so a dialog-bearing
+  // authenticated surface classifies by its non-dialog facts exactly
+  // as it would without the dialog. The dialog is neither a positive
+  // nor a negative signal: an idle enabled composer still observes
+  // ready-for-input, and a generating surface (the Stop control
+  // visible) still observes working. The pre-correction adapter
+  // classified these same surfaces unexpected-dialog /
+  // authentication-required / provider-error from the dialog's shape
+  // and text — re-adding any dialog classification fails this
+  // regression.
+  const idle = build({ dialog: { text: "Some unprompted modal" } });
+  const observed = await idle.adapter.observeSession("w1");
+  assert.equal(observed.ok, true);
+  assert.equal(observed.observation.state, "ready-for-input");
+  const generating = build({ dialog: { text: "Some unprompted modal" }, stop: { visible: true } });
+  const working = await generating.adapter.observeSession("w1");
+  assert.equal(working.observation.state, "working");
+  // The dialog is still sitting on the (simulated) provider surface —
+  // untouched, unprobed, unclassified.
+  assert.ok(generating.pages[0].state.dialog);
 });
 
 test("a visible alerting error surface observes provider-error", async () => {
@@ -220,8 +230,11 @@ test("the happy path runs the exact governed sequence and confirms submission", 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(result.session, { worker: "w1", workItem: "CTRL-014", tabId: 7 });
   assert.equal(result.submitted.attempts, 1);
-  assert.equal(result.submitted.popupDismissals, 0);
+  assert.equal(result.submitted.composeReestablishments, 0);
   assert.equal(result.submitted.generation, "working");
+  // The governed flow never presses Enter (the popup dismissal path
+  // is removed — CONTINUATION 13).
+  assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
   // The submission is confirmed by observation: the conversation holds
   // the exact prompt and the composer is cleared.
   assert.ok(pages[0].state.conversation.includes(PROMPT));
@@ -529,10 +542,15 @@ test("a disabled GLM-5.3 option row (the live unauthenticated surface) refuses t
   assert.equal(built.pages[0].state.selectedValue, "glm-5.2"); // never selected
 });
 
-test("a dialog appearing between Agent selection and model selection fails closed UNKNOWN_DIALOG", async () => {
-  // The popup Enter path is submission-only: any dialog that appears
-  // during preparation (here: right after the Agent pill click) must
-  // fail closed BEFORE the model menu is ever opened.
+test("a provider dialog appearing during preparation NEVER blocks the governed Start and never receives Enter (the dialog-blind law)", async () => {
+  // CONTINUATION 13 (PR #6 review 5124488246, requirement 2): "a
+  // visible dialog must NOT be used as a positive or negative popup
+  // signal for the normal CTRL-014 path." A dialog that appears right
+  // after the Agent pill click (the pre-correction adapter failed
+  // closed UNKNOWN_DIALOG here) is simply not consulted: the governed
+  // sequence runs to completion, the acceptance is the
+  // message-exclusive evidence, and NO Enter is ever issued. The
+  // dialog is still sitting on the surface at the end — untouched.
   const built = build({
     beforeRespond: (message, state) => {
       if (message.op === "click" && String(message.selector).includes("nth-of-type(2)")) {
@@ -541,13 +559,11 @@ test("a dialog appearing between Agent selection and model selection fails close
     },
   });
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "UNKNOWN_DIALOG");
-  const triggerClicks = built.pages[0].history().filter(
-    (c) => c.op === "click" && (c.selector === 'button[aria-label="Select a model"]' || c.selector === 'button[id^="model-selector-"][id$="-button"]')
-  ).length;
-  assert.equal(triggerClicks, 0); // the model menu was never opened
-  assert.ok(built.pages[0].history().every((c) => c.op !== "type" && c.op !== "pressEnter"));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.generation, "working");
+  assert.ok(built.pages[0].state.conversation.includes(PROMPT)); // the acceptance evidence
+  assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
+  assert.ok(built.pages[0].state.dialog); // never dismissed, never consulted
 });
 
 test("a send that never confirms submission retries within the budget, then fails closed", async () => {
@@ -576,235 +592,87 @@ test("a send that never confirms submission retries within the budget, then fail
 });
 
 // --------------------------------------------------------------------
-// The known submission-blocking popup recovery.
+// The CONTINUATION-13 regressions (PR #6 review 5124488246 — the
+// ARCHITECT work order "REMOVE POPUP DETECTION/RECOVERY PATH"): a
+// visible provider dialog never triggers Enter, never triggers
+// popup-specific recovery, and never blocks a governed flow.
 // --------------------------------------------------------------------
 
-test("the known popup triggers one Enter, then the FULL PREPARATION RESTART and the resend of the exact prompt", async () => {
-  const { adapter, pages } = build({
-    popupOnSend: true,
-    popupText: "Confirm your submission",
-    beforeRespond: (message, state) => {
-      if (message.op === "pressEnter") {
-        state.popupOnSend = false; // dismissed for good on the first Enter
-      }
-    },
-  });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 2);
-  assert.equal(result.submitted.popupDismissals, 1);
-  // CONTINUATION 9 (PR #6 review 5123260890, requirement 3): Enter
-  // exactly once, verify the dismissal, then RESTART THE FULL
-  // PREPARATION SEQUENCE before the resend. The preparation steps
-  // are idempotent: the restart RE-VERIFIES the Agent mode and the
-  // GLM-5.3 selection (each already established — the re-selection
-  // no-ops, so each control is still clicked EXACTLY ONCE), the
-  // prompt still sits in the composer byte-identical (the popup
-  // blocked the submission, so it is sent AS-IS with no re-type),
-  // and the decisive submission acceptance follows. The popup
-  // restart-regression below models the disturbed-surface case this
-  // re-verification exists for.
-  const history = pages[0].history();
-  const clicks = history.filter((c) => c.op === "click").length;
-  const types = history.filter((c) => c.op === "type").length;
-  const enters = history.filter((c) => c.op === "pressEnter").length;
-  const pillClicks = history.filter(
-    (c) => c.op === "click" && c.selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type"
-  ).length;
-  const triggerClicks = history.filter(
-    (c) => c.op === "click" && c.selector === 'button[aria-label="Select a model"]'
-  ).length;
-  const optionClicks = history.filter(
-    (c) => c.op === "click" && c.selector === 'button[aria-label="model-item"][data-value="glm-5.3"]'
-  ).length;
+test("a submission-blocking dialog the adapter does not recognize: bounded blind retries of the same send, fail closed, and NEVER an Enter press", async () => {
+  // The popupOnSend modality models the provider surface that blocks
+  // every send behind a modal dialog (the prompt stays in the
+  // composer, the conversation never grows). The dialog-blind adapter
+  // (CONTINUATION 13) has no popup concept: each attempt re-observes
+  // an unconfirmed send (the composer still holds the exact prompt)
+  // and resends within the bounded budget, then fails closed — the
+  // pre-correction adapter pressed Enter here (the popup dismissal
+  // path); re-adding it fails this regression.
+  const built = build({ popupOnSend: true, popupText: "Confirm submission" });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "PAGE_MALFORMED");
+  assert.ok(/not confirmed by observation/.test(result.error.message));
+  const history = built.pages[0].history();
+  assert.equal(history.filter((c) => c.op === "pressEnter").length, 0); // never an Enter
   const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
-  assert.equal(pillClicks, 1); // the Agent pill clicked exactly once
-  assert.equal(triggerClicks, 1); // the model trigger clicked exactly once
-  assert.equal(optionClicks, 1); // the exact option clicked exactly once
-  assert.equal(sends, 2); // the initial send + the resend
-  assert.equal(clicks, 5); // pill + trigger + option + send + resend
-  assert.equal(types, 1); // the exact prompt typed ONCE — resent, never re-typed
-  assert.equal(enters, 1); // exactly one Enter per popup observation
+  assert.equal(sends, 3); // the bounded budget of blind retries
+  assert.ok(!built.pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
+  assert.ok(built.pages[0].state.dialog); // the dialog was never dismissed
 });
 
-test("a popup that never dismisses exhausts the bounded budget without pretending success", async () => {
-  const { adapter, pages } = build({ popupOnSend: true, popupText: "Confirm submission" });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "RETRY_EXHAUSTED");
-  // Bounded: with 3 attempts, at most 2 Enter presses (one per
-  // restartable attempt; the final attempt fails without pressing).
-  const enters = pages[0].history().filter((c) => c.op === "pressEnter").length;
-  assert.ok(enters <= 2, `expected at most 2 Enter presses, saw ${enters}`);
-  assert.ok(!pages[0].state.conversation.includes(PROMPT)); // never claimed submitted
-});
-
-test("an auth-shaped popup during submission fails closed AUTHENTICATION_INTERRUPTED (no Enter)", async () => {
-  const { adapter, pages } = build({ popupOnSend: true, popupText: "Please log in to submit" });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "AUTHENTICATION_INTERRUPTED");
-  assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
-});
-
-test("an error-shaped popup during submission fails closed PROVIDER_ERROR (no Enter)", async () => {
-  const { adapter, pages } = build({ popupOnSend: true, popupText: "Submission failed: rate limit" });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "PROVIDER_ERROR");
-  assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
-});
-
-test("a popup whose Enter reveals the submission already landed NEVER resends the governed prompt", async () => {
-  // The popup blocked a send that had in fact already been accepted:
-  // after the Enter dismissal the provider state shows the exact
-  // prompt in the conversation with the composer cleared — that IS
-  // the acceptance evidence, and a resend would duplicate the
-  // governed prompt. Exactly one send, one type, one Enter.
-  const { adapter, pages } = build({
-    popupOnSend: true,
-    popupText: "Confirm your submission",
-    beforeRespond: (message, state) => {
-      if (message.op === "pressEnter") {
-        state.popupOnSend = false;
-        state.conversation.push(state.composerValue); // the submission had already landed
-        state.composerValue = "";
-      }
-    },
-  });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 2);
-  assert.equal(result.submitted.popupDismissals, 1);
-  const history = pages[0].history();
-  assert.equal(history.filter((c) => c.op === "type").length, 1);
-  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1);
-  assert.equal(history.filter((c) => c.op === "pressEnter").length, 1);
-  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
-});
-
-test("a popup that clears the composer re-types the exact prompt before the resend (byte-identical read-back first)", async () => {
-  // The popup consumed the prompt (the composer no longer holds it
-  // and it never reached the conversation): the resend path re-types
-  // the exact prompt, re-verifies the byte-identical read-back, and
-  // only then sends — never a blind resend of an empty composer.
-  const { adapter, pages } = build({
-    popupOnSend: true,
-    popupText: "Confirm your submission",
-    beforeRespond: (message, state) => {
-      if (message.op === "pressEnter") {
-        state.popupOnSend = false;
-        state.composerValue = ""; // the popup swallowed the prompt
-      }
-    },
-  });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 2);
-  assert.equal(result.submitted.popupDismissals, 1);
-  const history = pages[0].history();
-  assert.equal(history.filter((c) => c.op === "type").length, 2); // re-typed after the popup
-  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 2);
-  assert.ok(pages[0].state.conversation.includes(PROMPT));
-  // The re-typed prompt is byte-identical (the type op carries the exact text).
-  const typeTexts = history.filter((c) => c.op === "type").map((c) => c.text);
-  assert.deepEqual(typeTexts, [PROMPT, PROMPT]);
-});
-
-test("the REAL peak-hours modality: the popup arrives ASYNCHRONOUSLY after the confirm-shaped state — the hold catches it and the Enter path runs", async () => {
-  // CONTINUATION 10 (PR #6 review 5123872434, requirement 5 — the
-  // real failure mode): the provider's "Currently in peak hours"
-  // capacity dialog (LIVE-OBSERVED in the operator's captured run,
-  // main 5d14d90; the provider bundle's MODEL_CONCURRENCY_LIMIT
-  // handler) materializes only when the ASYNC error arrives — AFTER
-  // the prompt has optimistically landed (the exact user-message row
-  // + the cleared composer) and AFTER the verification settle would
-  // have closed its window. This is the operator's literal
-  // continuation-10 run reproduced: pre-correction, Start returned
-  // ok:true / attempts=1 / popupDismissals:0 while the popup was
-  // visibly present (the Enter path was never REACHED — the
-  // classification window closed before the popup existed). The
-  // async-outcome hold re-opens the window: the popup is observed,
-  // Enter is pressed exactly once, the dismissal is verified, the
-  // FULL preparation restarts, and the landed row is the acceptance
-  // (the already-confirmed submission is never resent).
-  const { adapter, pages } = build({
+test("the asynchronous peak-hours dialog materializing ON the verification read: the adapter stays dialog-blind — the acceptance is the message-exclusive evidence and NO Enter is ever issued", async () => {
+  // The REAL provider modality (LIVE-OBSERVED, the operator's captured
+  // run): the "Currently in peak hours" capacity dialog materializes
+  // only when the ASYNC error arrives — after the optimistic landing
+  // (the exact user-message row + the cleared composer). CONTINUATION
+  // 13 removed the async-outcome hold that watched for it: the
+  // confirm-shaped verdict IS the acceptance (message-exclusive
+  // evidence, gated on control-state consistency), and the dialog —
+  // materializing on this very read — is invisible to every fact the
+  // adapter probes. The pre-correction adapter caught the popup
+  // through the hold, pressed Enter, and restarted the preparation;
+  // re-adding any of that fails this regression.
+  const built = build({
     generates: false, // the capacity error means no generation started
-    popupAfterSend: true, // materializes on the 2nd fact read after the send
+    popupAfterSend: { probes: 1 }, // materializes on the 1st fact read after the send (the verdict read itself)
   });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 2); // the preparation restart after the dismissal
-  assert.equal(result.submitted.popupDismissals, 1); // the Enter was actually issued
+  assert.equal(result.submitted.attempts, 1); // no preparation restart — there is no popup path
   assert.equal(result.submitted.generation, "waiting"); // the operator's literal surface shape
-  const history = pages[0].history();
-  const enters = history.filter((c) => c.op === "pressEnter").length;
-  assert.equal(enters, 1); // exactly one Enter per observed popup
-  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
-  assert.equal(sends, 1); // the landed row IS the confirmation — never resent
+  assert.deepEqual(Object.keys(result.submitted).sort(), ["attempts", "composeReestablishments", "generation"]);
+  const history = built.pages[0].history();
+  assert.equal(history.filter((c) => c.op === "pressEnter").length, 0); // never an Enter
   assert.equal(history.filter((c) => c.op === "type").length, 1); // typed exactly once
-  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
-  assert.equal(pages[0].state.dialog, null); // the popup was actually dismissed
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 1); // never resent
+  assert.equal(built.pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
+  assert.ok(built.pages[0].state.dialog); // the dialog is sitting on the surface — untouched, unprobed
 });
 
-test("the peak-hours popup WITH the provider's prompt restore: the restored prompt is resent as-is after the dismissal and the restart, and the resend's own outcome is held", async () => {
-  // The provider's error handler also RESTORES the submitted prompt
-  // into the composer (bundle-proven): after the Enter dismissal and
-  // the FULL preparation restart, the restored prompt is sent AS-IS
-  // (never re-typed, never rewritten), and the resend's own
-  // submission outcome passes through the same async-outcome hold
-  // before acceptance.
-  const { adapter, pages } = build({
+test("the provider's restored prompt (the async error's sibling outcome) flows through the ORDINARY unconfirmed-retry path — never a popup path, never an Enter", async () => {
+  // The provider's MODEL_CONCURRENCY_LIMIT handler can RESTORE the
+  // submitted prompt into the composer after the optimistic landing.
+  // The dialog-blind adapter sees exactly one thing: the composer
+  // holding text on the verification read — the ordinary "send did
+  // not take" unconfirmed semantics. The bounded retry resends the
+  // restored prompt as-is (never re-typed — ensurePrompt verifies it
+  // byte-for-byte and sends as-is), and the resend's own confirm-
+  // shaped verdict is the acceptance. The pre-correction adapter
+  // routed this through the popup hold (Enter + full restart);
+  // re-adding that fails this regression.
+  const built = build({
     generates: false,
-    popupAfterSend: { probes: 2, restore: true },
+    popupAfterSend: { probes: 1, restore: true },
   });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 2);
-  assert.equal(result.submitted.popupDismissals, 1);
-  const history = pages[0].history();
+  assert.equal(result.submitted.attempts, 2); // the ordinary bounded retry
+  const history = built.pages[0].history();
+  assert.equal(history.filter((c) => c.op === "pressEnter").length, 0); // never an Enter
   assert.equal(history.filter((c) => c.op === "type").length, 1); // the restored prompt is sent AS-IS — never re-typed
-  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
-  assert.equal(sends, 2); // the initial send + the resend after the restart
-  assert.equal(history.filter((c) => c.op === "pressEnter").length, 1); // exactly one Enter
-  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 2); // the optimistic row + the resent row
-  assert.equal(pages[0].state.dialog, null); // the popup was actually dismissed
-});
-
-test("a popup that materializes BEYOND the bounded hold budget does not retroactively fail the recorded acceptance (the hold is bounded; live evidence decides popup recovery)", async () => {
-  // The honest bound (the review's requirement 7): the hold watches a
-  // bounded window; a popup whose asynchronous arrival exceeds it is
-  // the operator's live-evidence matter — a run without an observed
-  // popup can establish happy-path submission evidence but NOT
-  // popup-recovery evidence, and the code never hangs waiting for a
-  // popup that may never come. The popup then materializes on the
-  // next observation — exactly the operator's post-run view.
-  const { adapter, pages } = build({
-    generates: false,
-    popupAfterSend: { probes: 6 }, // the settle read (1) + the hold (4) pass first
-  });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 1);
-  assert.equal(result.submitted.popupDismissals, 0); // no popup was observed within the bounded window
-  const observed = await adapter.observeSession("w1");
-  assert.equal(observed.observation.state, "unexpected-dialog"); // the popup IS visibly present now
-  assert.ok(pages[0].state.dialog); // the dialog materialized after the window
-});
-
-test("an auth-shaped dialog materializing during the hold fails closed AUTHENTICATION_INTERRUPTED (no Enter, no acceptance)", async () => {
-  // The hold observes dialogs in the verifying-submission phase and
-  // dispatches them through the SAME fail-closed classification: an
-  // auth-shaped dialog NEVER receives the Enter action and the
-  // acceptance is never recorded.
-  const { adapter, pages } = build({
-    generates: false,
-    popupAfterSend: { probes: 2, text: "Please sign in to continue" },
-  });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "AUTHENTICATION_INTERRUPTED");
-  assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0); // auth dialogs NEVER receive Enter
+  assert.equal(history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length, 2); // the send + the resend
+  assert.ok(built.pages[0].state.conversation.includes(PROMPT)); // the resend landed
+  assert.ok(built.pages[0].state.dialog); // the dialog is still there — untouched
 });
 
 test("a send that clears the composer without message-evidence confirmation is NEVER success (no popup does not mean accepted)", async () => {
@@ -842,83 +710,20 @@ test("a send that clears the composer without message-evidence confirmation is N
   assert.equal(composeClicks, 3);
 });
 
-test("a dialog during preparation (before any send) fails closed UNKNOWN_DIALOG", async () => {
-  const { adapter, pages } = build({ dialog: { text: "An unexpected modal" } });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "UNKNOWN_DIALOG");
-  const ops = pages[0].history().filter((c) => c.op !== "probe").map((c) => c.op);
-  assert.deepEqual(ops, []); // nothing was pressed
-});
-
-test("two simultaneous dialogs during submission fail closed without pressing anything", async () => {
-  // A scriptable page bridge serving canned facts: a normal ready
-  // surface until the send, then TWO dialogs visible at once.
-  const tabs = [{ id: 7, url: "https://chat.z.ai/" }];
-  const tabsApi = fakeMessagingTabsApi({ tabs });
-  let sent = false;
-  let typed = "";
-  const readyFacts = () => ({
-    authButtons: { texts: ["New Chat", "Agent"] },
-    composerVisible: { visible: true, count: 1 },
-    composerEnabled: { enabled: true },
-    composerValue: { value: sent ? "" : "" },
-    sendVisible: { visible: true, count: 1 },
-    sendEnabled: { enabled: false },
-    dialogCount: { count: sent ? 2 : 0 },
-    alertVisible: { visible: false, count: 0 },
-    stopCandidate0: { visible: false, count: 0 },
-    stopCandidate1: { visible: false, count: 0 },
-    dialogText: { text: null },
-    alertText: { text: null },
-    conversationCandidate0: { text: null },
-    userMessageCandidate0: { texts: [] },
-    userMessageCandidate1: { texts: [] },
-    userMessageCandidate2: { texts: [] },
-    composeControl0: { count: 1 },
-  });
-  const agentFacts = () => ({
-    agentCandidate0: { count: 1 },
-    agentActive0: { count: 1 },
-    agentActive1: { count: 0 },
-    agentActive2: { count: 0 },
-    agentActive3: { count: 0 },
-  });
-  const modelFacts = () => ({
-    modelTriggerCount0: { count: 1 },
-    modelTriggerCount1: { count: 1 },
-    modelTriggerText0: { text: "GLM-5.3" },
-    modelTriggerText1: { text: "GLM-5.3" },
-    modelTriggerSelectedId: { count: 1 },
-  });
-  const bridge = {
-    send: async (_tabId, command) => {
-      if (command.op === "probe") {
-        const facts = {
-          ...readyFacts(),
-          ...agentFacts(),
-          ...modelFacts(),
-          composerValue: { value: typed },
-        };
-        return { ok: true, facts };
-      }
-      if (command.op === "type") {
-        typed = command.text;
-        return { ok: true, typed: true, value: command.text };
-      }
-      if (command.op === "click" && command.selector === "#send-message-button") {
-        sent = true;
-        typed = "";
-        return { ok: true, clicked: true };
-      }
-      return { ok: true, clicked: true, pressed: "Enter" };
-    },
-  };
-  const adapter = createZaiAdapter({ tabsApi, pageBridge: bridge, sleep: async () => {}, settlePolls: 2, settleIntervalMs: 0 });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: "p" });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "UNKNOWN_DIALOG");
-  assert.ok(/simultaneously/.test(result.error.message));
+test("a dialog present from the very start NEVER blocks the governed Start (the precheck itself is dialog-blind)", async () => {
+  // The from-the-start variant of the dialog-blind law: the initial
+  // authenticated-state precheck sees the dialog-bearing surface and
+  // classifies it by its composer facts (ready-for-input — the
+  // pre-correction adapter failed closed UNKNOWN_DIALOG before any
+  // preparation). The full governed sequence then runs to the
+  // message-exclusive acceptance, with zero Enter presses and the
+  // dialog untouched.
+  const built = build({ dialog: { text: "An unexpected modal" } });
+  const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(built.pages[0].state.conversation.includes(PROMPT));
+  assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
+  assert.ok(built.pages[0].state.dialog); // untouched
 });
 
 // --------------------------------------------------------------------
@@ -943,7 +748,6 @@ test("the reproduced live false positive: a weak surface carrying the prompt is 
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 1);
-  assert.equal(result.submitted.popupDismissals, 0);
   assert.equal(result.submitted.composeReestablishments, 0);
   const history = pages[0].history().filter((c) => c.op !== "probe");
   // The honest path: the prompt WAS typed and sent (the weak surface
@@ -1006,7 +810,6 @@ test("the pre-send gate: a prompt lost between the read-back and the send is NEV
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 2);
-  assert.equal(result.submitted.popupDismissals, 0);
   assert.equal(result.submitted.composeReestablishments, 1);
   const history = built.pages[0].history().filter((c) => c.op !== "probe");
   // pill -> trigger -> option -> type -> [gate refuses] -> compose
@@ -1055,7 +858,6 @@ test("the second observed failure mode: a send that discards the prompt (empty c
   const result = await built.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 2);
-  assert.equal(result.submitted.popupDismissals, 0);
   assert.equal(result.submitted.composeReestablishments, 1);
   const history = built.pages[0].history().filter((c) => c.op !== "probe");
   assert.deepEqual(history.map((c) => c.op), ["click", "click", "click", "type", "click", "click", "type", "click"]);
@@ -1242,27 +1044,27 @@ test("the operator's literal capture reproduced: the prompt NEVER enters the com
   assert.deepEqual(typeTexts, [PROMPT, PROMPT, PROMPT]);
 });
 
-test("every ok:true Start with a submission carries EXACTLY the four-field submitted record — the cited three-field legacy shape is structurally unreachable at this tip", async () => {
-  // PR #6 comment 5555093252: the operator's cited JSON carries
-  // `submitted = {attempts, popupDismissals, generation}` — exactly
-  // three fields, no `composeReestablishments`. That is the a22febe
-  // (continuation-5) result shape, git-verifiable
-  // (`git show a22febe:extension/src/zaiAdapter.js`). At the
-  // corrected tip there are exactly TWO ok:true Start shapes: the
+test("every ok:true Start with a submission carries EXACTLY the popup-free three-field submitted record — a result carrying popupDismissals identifies a stale service worker", async () => {
+  // CONTINUATION 13 (PR #6 review 5124488246, requirement 1): the
+  // popupDismissals accounting is removed with the whole popup
+  // mechanism. The operator-cited legacy records carried
+  // `submitted = {attempts, popupDismissals, generation}` (and the
+  // continuation-8 four-field shape added composeReestablishments) —
+  // at this tip there are exactly TWO ok:true Start shapes: the
   // idempotent alreadyActive re-report (NO submitted record at all)
-  // and recordSubmission — the only submission path, which ALWAYS
-  // reports composeReestablishments. A Start result carrying a
-  // three-field submitted record therefore cannot have been produced
+  // and recordSubmission — the only submission path, which reports
+  // exactly {attempts, composeReestablishments, generation}. A Start
+  // result carrying a popupDismissals field cannot have been produced
   // by this code: it identifies a stale service worker. This
   // regression pins the invariant on BOTH the direct-acceptance path
   // and the compose-re-establishment path.
-  const FOUR_FIELDS = ["attempts", "composeReestablishments", "generation", "popupDismissals"];
+  const THREE_FIELDS = ["attempts", "composeReestablishments", "generation"];
 
   // (1) The direct acceptance path.
   const happy = build();
   const okResult = await happy.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(okResult.ok, true, JSON.stringify(okResult));
-  assert.deepEqual(Object.keys(okResult.submitted).sort(), FOUR_FIELDS);
+  assert.deepEqual(Object.keys(okResult.submitted).sort(), THREE_FIELDS);
   assert.equal(okResult.submitted.composeReestablishments, 0);
 
   // (2) The compose-re-establishment path (the second observed
@@ -1287,12 +1089,12 @@ test("every ok:true Start with a submission carries EXACTLY the four-field submi
   });
   const recoveredResult = await recovered.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(recoveredResult.ok, true, JSON.stringify(recoveredResult));
-  assert.deepEqual(Object.keys(recoveredResult.submitted).sort(), FOUR_FIELDS);
+  assert.deepEqual(Object.keys(recoveredResult.submitted).sort(), THREE_FIELDS);
   assert.equal(recoveredResult.submitted.composeReestablishments, 1);
 
   // (3) The idempotent alreadyActive re-report carries NO submitted
   // record at all — every result WITH a submitted record went
-  // through recordSubmission (the four-field shape).
+  // through recordSubmission (the three-field shape).
   const again = await happy.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(again.ok, true, JSON.stringify(again));
   assert.equal(again.alreadyActive, true);
@@ -1386,11 +1188,9 @@ test("an ASSISTANT echo of the exact prompt in a mixed message REGION is never U
     composerValue: { value: typed },
     sendVisible: { visible: true, count: 1 },
     sendEnabled: { enabled: typed.length > 0 },
-    dialogCount: { count: 0 },
     alertVisible: { visible: false, count: 0 },
     stopCandidate0: { visible: false, count: 0 },
     stopCandidate1: { visible: false, count: 0 },
-    dialogText: { text: null },
     alertText: { text: null },
     // The assistant echo: the REGION text carries the exact prompt;
     // the USER-message rows never do.
@@ -1435,44 +1235,6 @@ test("an ASSISTANT echo of the exact prompt in a mixed message REGION is never U
   assert.ok(!("submitted" in result), "an assistant echo never produces a submitted record");
 });
 
-test("a popup whose dismissal ALSO resets the governed surface preparation: the FULL PREPARATION RESTART re-establishes the Agent mode before the resend (never a bare resend on an unverified surface)", async () => {
-  // PR #6 review 5123260890, requirement 3: the popup interaction can
-  // disturb the governed surface state. Here the Enter dismissal
-  // also switches the provider app OFF the Agent mode (the pill's
-  // data-active marker flips). The restart must RE-SELECT the Agent
-  // pill (clicked TWICE in the whole run) and re-verify the model
-  // ground truths BEFORE the resend — with the pre-continuation-9
-  // "resend without restart" semantics the submission would have
-  // been sent on a NON-GOVERNED (chat-mode) surface.
-  const { adapter, pages } = build({
-    popupOnSend: true,
-    popupText: "Confirm your submission",
-    beforeRespond: (message, state) => {
-      if (message.op === "pressEnter") {
-        state.popupOnSend = false; // dismissed for good on the first Enter
-        state.agent.active = false; // the popup interaction reset the governed mode
-      }
-    },
-  });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 2);
-  assert.equal(result.submitted.popupDismissals, 1);
-  const history = pages[0].history();
-  const pillClicks = history.filter(
-    (c) => c.op === "click" && c.selector === "#sidebar button[data-active]:not([id]):nth-of-type(2):last-of-type"
-  ).length;
-  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
-  const enters = history.filter((c) => c.op === "pressEnter").length;
-  assert.equal(pillClicks, 2); // the initial selection + the RESTART re-selection
-  assert.equal(sends, 2); // the initial send + the resend
-  assert.equal(enters, 1); // exactly one Enter per popup observation
-  // The governed surface was re-established before the accepted
-  // submission: the Agent mode is ACTIVE at acceptance.
-  assert.equal(pages[0].state.agent.active, true);
-  assert.ok(pages[0].state.conversation.includes(PROMPT));
-});
-
 test("an ambiguous composer surface (two visible #chat-input elements) fails closed before ANY action — nothing prepared, typed, or sent", async () => {
   // The pre-correction `?? \"\"` coercion treated an unreadable
   // composer as empty (cleared). The corrected adapter requires
@@ -1505,11 +1267,9 @@ test("an unreadable composer value is NEVER treated as cleared or present — St
     composerValue: { value: null, ambiguous: true },
     sendVisible: { visible: true, count: 1 },
     sendEnabled: { enabled: false },
-    dialogCount: { count: 0 },
     alertVisible: { visible: false, count: 0 },
     stopCandidate0: { visible: false, count: 0 },
     stopCandidate1: { visible: false, count: 0 },
-    dialogText: { text: null },
     alertText: { text: null },
     conversationCandidate0: { text: null },
     userMessageCandidate0: { texts: [] },
@@ -1559,15 +1319,13 @@ test("a Start whose exact prompt is ALREADY in the message evidence with a decis
   // was lost on service-worker restart after a landed submission),
   // the re-run Start re-establishes the idempotent preparation and
   // re-reports the submission WITHOUT typing or sending again. The
-  // SAME result shape (attempts=1, popupDismissals=0,
-  // generation=waiting) is now reachable ONLY through genuine
-  // message evidence — contrast the weak-surface variant above,
-  // which types and sends.
+  // SAME result shape (attempts=1, generation=waiting) is now
+  // reachable ONLY through genuine message evidence — contrast the
+  // weak-surface variant above, which types and sends.
   const { adapter, pages } = build({ conversation: [PROMPT] });
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.submitted.attempts, 1);
-  assert.equal(result.submitted.popupDismissals, 0);
   assert.equal(result.submitted.composeReestablishments, 0);
   assert.equal(result.submitted.generation, "waiting");
   const history = pages[0].history().filter((c) => c.op !== "probe");
@@ -1746,13 +1504,27 @@ test("authentication dropping during recovery fails closed AUTHENTICATION_INTERR
   assert.equal(result.error.code, "AUTHENTICATION_INTERRUPTED");
 });
 
-test("a dialog during recovery fails closed UNKNOWN_DIALOG (the popup Enter path is submission-only)", async () => {
-  const { adapter, pages } = await hungSession();
-  pages[0].state.dialog = { text: "Some modal" };
-  const result = await adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "UNKNOWN_DIALOG");
-  assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0);
+test("a provider dialog visible throughout hung recovery NEVER blocks the governed sequence and never receives Enter (the recovery depends only on the Stop control state)", async () => {
+  // CONTINUATION 13 (PR #6 review 5124488246, requirement 6): "For
+  // hung recovery, make the adapter depend only on the actual Stop
+  // control state and the frozen sequence... A dialog being present
+  // must not itself trigger UNKNOWN_DIALOG in this flow." A dialog
+  // sits on the surface for the WHOLE recovery: the precondition
+  // settles on the Stop control, the adapter owns the Stop click,
+  // verifies the stop, types the exact `continue`, sends, and accepts
+  // on the message-exclusive evidence — zero Enter presses, zero
+  // dialog consultations, and the dialog is still present at the
+  // end. The pre-correction adapter failed closed UNKNOWN_DIALOG
+  // here; re-adding that fails this regression.
+  const built = await hungSession();
+  built.pages[0].state.dialog = { text: "Some modal" };
+  const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.recovered.message, "continue");
+  assert.equal(result.recovered.acceptance, "conversation-evidence"); // the frozen acceptance
+  assert.ok(built.pages[0].state.conversation.includes("continue"));
+  assert.equal(built.pages[0].history().filter((c) => c.op === "pressEnter").length, 0); // never an Enter
+  assert.ok(built.pages[0].state.dialog); // the dialog was never consulted, never dismissed
 });
 
 test("recovery whose stop never verifies exhausts the bounded budget", async () => {
@@ -2006,92 +1778,63 @@ test("an ENABLED send control with the exact prompt present is PREPARATORY ONLY 
 test("the Stop control replacing the send control is generation-in-progress CONTEXT — reported through the generation field, never acceptance (and the completion swap back is context too)", async () => {
   // Requirement 7, bullet 3. The provider's slot swap send -> Stop is
   // the provider's own "a current message is in flight" computation.
-  // (a) While the Stop control is visible through the async-outcome
-  // hold, the acceptance is still the frozen message-exclusive
-  // evidence and the Stop reading is reported as generation:"working"
-  // CONTEXT. (b) The completion transition (Stop disappears, the send
-  // control returns, the Regenerate control renders) is likewise
-  // context: the acceptance stays the row + decisively-empty-composer
-  // evidence, recorded with generation:"waiting".
+  // (a) While the Stop control is visible on the verification read,
+  // the acceptance is still the frozen message-exclusive evidence and
+  // the Stop reading is reported as generation:"working" CONTEXT.
+  // (b) The completion transition (Stop disappears, the send control
+  // returns, the Regenerate control renders) is likewise context: the
+  // acceptance stays the row + decisively-empty-composer evidence,
+  // recorded with generation:"waiting".
   const { adapter, pages } = build(); // generates: true — the Stop control appears on the send
   const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.deepEqual(Object.keys(result.submitted).sort(), ["attempts", "composeReestablishments", "generation", "popupDismissals"]);
+  assert.deepEqual(Object.keys(result.submitted).sort(), ["attempts", "composeReestablishments", "generation"]);
   assert.equal(result.submitted.generation, "working"); // the Stop control observed — CONTEXT, reported
-  assert.equal(result.submitted.popupDismissals, 0);
   assert.ok(pages[0].state.conversation.includes(PROMPT)); // the acceptance evidence: the exact row
 
-  // (b) The completion transition mid-hold: the current message
-  // completes on the 2nd fact read with the Stop control visible —
-  // the slot swaps back to the send control and the Regenerate
-  // control renders (the REAL post-response surface). The acceptance
-  // is recorded from the frozen evidence; the completion is context.
-  const completing = build({ generationCompletes: 2 });
+  // (b) The completion transition on the recording read itself: the
+  // current message completes on the verification probe — the slot
+  // swaps back to the send control and the Regenerate control
+  // renders (the REAL post-response surface). The acceptance is
+  // recorded from the frozen evidence; the completion is context.
+  // (A completion arriving AFTER the recording read is equally
+  // context — unobserved, exactly like the beyond-window async
+  // outcome; the recorded generation simply reports the read.)
+  const completing = build({ generationCompletes: 1 });
   const completed = await completing.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(completed.ok, true, JSON.stringify(completed));
   assert.equal(completed.submitted.generation, "waiting"); // the Stop control gone at the recording read — context reported
-  assert.equal(completed.submitted.popupDismissals, 0);
   assert.equal(completing.pages[0].state.regenerate.visible, true); // the real post-response surface rendered
   assert.ok(!completing.pages[0].state.regenerate.clicked); // the Regenerate control is never automated
   assert.ok(completing.pages[0].state.conversation.includes(PROMPT));
 });
 
-test("the asynchronous known popup is still caught through the hold EVEN WHILE the generation appears active (the Stop context never closes the popup window)", async () => {
-  // Requirement 7, bullet 4 — the Stop-visible variant of the
-  // continuation-10 modality. The provider's capacity error can
-  // arrive while the current message is already in flight (the Stop
-  // control visible through the hold): the Stop reading is context
-  // and NEVER closes the async-outcome window — the popup is
-  // observed, Enter is pressed exactly once, the dismissal verified,
-  // the FULL preparation restarts, and the landed row is the
-  // acceptance (the already-confirmed submission is never resent).
-  const { adapter, pages } = build({
-    generates: true, // the Stop control is visible from the send onward
-    popupAfterSend: { probes: 3 }, // the popup materializes on the 3rd fact read after the send (inside the hold)
-  });
-  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.submitted.attempts, 2); // the preparation restart after the dismissal
-  assert.equal(result.submitted.popupDismissals, 1); // the Enter was actually issued
-  const history = pages[0].history();
-  assert.equal(history.filter((c) => c.op === "pressEnter").length, 1); // exactly one Enter
-  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
-  assert.equal(sends, 1); // the landed row IS the confirmation — never resent
-  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
-  assert.equal(pages[0].state.dialog, null); // the popup was actually dismissed
-});
-
 test("the provider's prompt-restore computed on the send control (ENABLED) while the composer read degrades is caught by the control-state channel — the acceptance is never recorded from an untrustworthy composer read", async () => {
-  // Requirement 6's race, closed by the channel's OWN async-outcome
-  // observable: the MODEL_CONCURRENCY_LIMIT handler restores the
-  // prompt into the composer AND recomputes the send control ENABLED
-  // in the same reactive update — but the raw #chat-input value read
-  // can lag or degrade across the restore transition (the handler
-  // focuses and resizes the textarea). Pre-correction, the hold
-  // watched only the dialog and the refilled composer: a degraded
-  // composer read with no dialog produced a QUIET budget exhaustion
-  // and the acceptance was recorded over a surface the provider
-  // itself said held a prompt — a false acceptance. The corrected
-  // hold watches the provider's own computation: the enabled send
-  // control fires the held dispatch, and the unreadable composer
-  // fails closed. The submission is never confirmed from a read the
-  // control state contradicts.
+  // Requirement 6's race, closed by the control-state consistency
+  // gate: the MODEL_CONCURRENCY_LIMIT handler restores the prompt
+  // into the composer AND recomputes the send control ENABLED in the
+  // same reactive update — but the raw #chat-input value read can
+  // lag or degrade across the restore transition (the handler
+  // focuses and resizes the textarea). A degraded composer read
+  // would otherwise let the acceptance record over a surface the
+  // provider itself said held a prompt — a false acceptance. The
+  // recording gate fails closed on the unreadable composer: the
+  // submission is never confirmed from a read the control state
+  // contradicts.
   const lagging = build({
     generates: false,
     beforeRespond: (message, state) => {
       if (message.op === "click" && message.selector === "#send-message-button") {
-        state.__reads = 0;
+        state.__sent = true;
       }
-      if (message.op === "probe" && state.__reads !== undefined) {
-        state.__reads += 1;
-        if (state.__reads === 2) {
-          // The restore transition lands BETWEEN the verdict read (1)
-          // and the hold's first read (2): the prompt is back in the
-          // composer (the provider computes the send control ENABLED)
-          // while the #chat-input read degrades to an ambiguous null.
-          state.composerValue = PROMPT;
-          state.duplicateComposer = true;
-        }
+      if (message.op === "probe" && state.__sent) {
+        state.__sent = false;
+        // The restore transition lands ON the verification reads: the
+        // prompt is back in the composer (the provider computes the
+        // send control ENABLED) while the #chat-input read degrades
+        // to an ambiguous null.
+        state.composerValue = PROMPT;
+        state.duplicateComposer = true;
       }
     },
   });
@@ -2124,16 +1867,17 @@ test("a CONTRADICTORY composer action slot (both the send control and the Stop c
   assert.equal(sends, 1); // the initial send only — the confirmed submission is never resent
 });
 
-test("the send control computed ENABLED while the composer reads decisively EMPTY is the contradictory surface — the held outcome fails closed before any recovery path", async () => {
+test("the send control computed ENABLED while the composer reads decisively EMPTY is the contradictory surface — the acceptance recording fails closed before any recovery path", async () => {
   // Requirement 7, bullet 6 (the enabled-vs-composer contradiction).
   // The provider's own prompt-present computation (send ENABLED)
   // contradicting the decisively-empty composer read means the
-  // composer read is untrustworthy. Pre-correction, the hold had no
-  // enabled observable at all: this surface looked quiet and the
-  // acceptance was recorded. The corrected channel fires the held
-  // dispatch on the enabled computation and the consistency gate
-  // refuses IMMEDIATELY — the compose re-establishment is never
-  // invoked on an untrustworthy read, and no acceptance is recorded.
+  // composer read is untrustworthy. The recording gate refuses the
+  // acceptance on EVERY bounded attempt (the confirmed-branch
+  // re-observes and re-refuses) — the compose re-establishment is
+  // never invoked on an untrustworthy read, and no acceptance is
+  // recorded. CONTINUATION 13: with the async-outcome hold removed,
+  // this contradiction is caught directly on the verification-read
+  // facts through recordSubmission's control-state gate.
   const lying = build({ generates: false, sendEnabledLie: true });
   const result = await lying.adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
   assert.equal(result.ok, false, JSON.stringify(result));
@@ -2157,13 +1901,14 @@ test("the send control computed ENABLED while the composer reads decisively EMPT
   assert.deepEqual(postSend.map((c) => c.op), []); // nothing after the send — the refusal is purely observational
 });
 
-test("an AMBIGUOUS send-control resolution (two send controls) observed through the async-outcome hold fails closed — the acceptance is never recorded from an unreadable control state", async () => {
+test("an AMBIGUOUS send-control resolution (two send controls) on the verification facts fails closed — the acceptance is never recorded from an unreadable control state", async () => {
   // Requirement 7, bullet 6 (the unreadable control state). The
   // enabled probe degrades to an ambiguous null when the send
   // selector resolves to zero-or-many visible elements; a surface
   // that renders TWO send controls after the send is unreadable.
-  // Pre-correction, the quiet budget exhaustion recorded the
-  // acceptance regardless. The corrected recording gate refuses.
+  // The recording gate refuses on every bounded attempt. CONTINUATION
+  // 13: with the async-outcome hold removed, the contradiction is
+  // caught directly on the verification-read facts.
   const doubled = build({
     generates: false,
     beforeRespond: (message, state) => {
@@ -2233,13 +1978,13 @@ test("the queued state that never becomes active within the bounded wait fails c
   assert.equal(ops.length, 0, JSON.stringify(ops));
 });
 
-test("a restored prompt sitting in the composer (no Stop control) refuses the recovery with the re-Start guidance — the popup path is submission-only and there is no active generation to recover", async () => {
-  // Requirement 8's prompt-present branch. The known popup path
-  // restored the session prompt into the composer (and the popup was
-  // already handled): the composer holds text, the send control is
-  // rendered, no Stop control is visible. There is nothing to
-  // recover — the refusal says so and points at the governed remedy
-  // (handle the provider popup state, re-Start the worker session).
+test("a restored prompt sitting in the composer (no Stop control) refuses the recovery with the re-Start guidance — there is no active generation to recover", async () => {
+  // Requirement 8's prompt-present branch. The provider returned the
+  // session prompt into the composer (the async error's restore —
+  // the submission was invalidated): the composer holds text, the
+  // send control is rendered, no Stop control is visible. There is
+  // nothing to recover — the refusal says so and points at the
+  // governed remedy (re-Start the worker session).
   const built = await hungSession({ generates: false });
   built.pages[0].state.composerValue = PROMPT; // the restored prompt — the submission was invalidated
   built.pages[0].state.stop.visible = false;
