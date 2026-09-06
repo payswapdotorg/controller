@@ -206,8 +206,50 @@ const ZAI_LOCATORS = Object.freeze({
   ]),
   agentText: "Agent",
   agentTextScan: "#sidebar button[data-active]:not([id])",
-  stopControl: Object.freeze(['button[aria-label="Stop"]', 'button[title="Stop"]']),
+  // The provider Stop control (CONTINUATION-11, PR #6 comment
+  // 5557087907, requirement 2 facts — LIVE-OBSERVED wrapper family +
+  // provider-bundle-proven slot): the composer action slot renders
+  // through a bits-ui Tooltip trigger — a DIV carrying
+  // data-tooltip-trigger whose aria-label is the computed tooltip
+  // content (LIVE-OBSERVED family: every one of the ten wrappers in
+  // the operator's saved authenticated capture at main 5d14d90 is a
+  // div[data-tooltip-trigger][aria-label=...], including the send
+  // slot's aria-label="Send Message" wrapping #send-message-button).
+  // The provider's own bundle code swaps that slot between the send
+  // control and the Stop control (the render conditional: no current
+  // message or the current message done -> send; otherwise -> Stop —
+  // exactly the operator's observation "Z.ai then replaced Stop with
+  // the normal send control") and computes the Stop tooltip content
+  // as "Stop" OR the long-task text "The current task is in progress.
+  // Please cancel it before starting other tasks." — the SAME control
+  // in two label states. The bundle attaches the abort click handler
+  // to the INNER button (a synthetic click on the wrapper div never
+  // reaches a descendant handler), so the live-observed candidates
+  // resolve the inner button THROUGH the wrapper's machine label; the
+  // pre-correction button[aria-label="Stop"] / button[title="Stop"]
+  // candidates are retained only as trailing fallbacks (they match
+  // ZERO elements on the live wrapper-div surface — the pre-correction
+  // adapter could never see or click the real Stop control).
+  stopControl: Object.freeze([
+    '[data-tooltip-trigger][aria-label="Stop"] button',
+    '[data-tooltip-trigger][aria-label^="The current task is in progress"] button',
+    'button[aria-label="Stop"]',
+    'button[title="Stop"]',
+  ]),
   stopText: "Stop",
+  // The post-response Regenerate control (CONTINUATION-11, LIVE-OBSERVED
+  // in the operator's saved authenticated capture at main 5d14d90 and
+  // bundle-proven): the bits-ui tooltip wrapper
+  // div[data-tooltip-trigger][aria-label="Regenerate"] wrapping the
+  // provider's own button.regenerate-response-button (a circular
+  // svg.size-5 icon; the class list toggles "visible" /
+  // "invisible group-hover:visible" — only the completed/stopped
+  // last response's control is visible). CONTEXT ONLY: the frozen
+  // recovery needs NO regeneration (post-stop the composer is enabled
+  // and the send control is back, so the fixed `continue` is typed and
+  // sent directly); this locator exists for the post-response
+  // DIAGNOSTIC fact only and is NEVER a click target.
+  postResponseRegenerate: '[data-tooltip-trigger][aria-label="Regenerate"] button.regenerate-response-button',
   // AUTHENTICATED-SURFACE-DECLARED message-evidence candidates. The
   // CONTINUATION-6 ELIMINATION (PR #6 review 5123047551): the
   // acceptance predicate previously consulted BROAD region
@@ -340,6 +382,16 @@ export function createZaiAdapter({
     mode: "visible",
   }));
 
+  // The post-response CONTEXT fact (continuation 11, PR #6 comment
+  // 5557087907): the Regenerate control's visibility distinguishes the
+  // post-response surface (the last response complete or stopped —
+  // nothing to recover) from an unreadable/mid-transition surface. A
+  // read-only fact: the control is NEVER a click target, and its
+  // visibility is never an acceptance predicate.
+  const POST_RESPONSE_PROBES = [
+    { name: "postResponseRegenerate", selector: ZAI_LOCATORS.postResponseRegenerate, mode: "visible" },
+  ];
+
   const EVIDENCE_PROBES = [
     { name: "dialogText", selector: ZAI_LOCATORS.dialog, mode: "text" },
     { name: "alertText", selector: ZAI_LOCATORS.alert, mode: "text" },
@@ -360,7 +412,7 @@ export function createZaiAdapter({
     const response = await pageBridge.send(tabId, {
       zaiPage: true,
       op: "probe",
-      probes: [...BASE_PROBES, ...STOP_PROBES, ...EVIDENCE_PROBES, ...extraProbes],
+      probes: [...BASE_PROBES, ...STOP_PROBES, ...POST_RESPONSE_PROBES, ...EVIDENCE_PROBES, ...extraProbes],
     });
     if (!response.ok) {
       return response; // typed page-surface refusal
@@ -483,6 +535,16 @@ export function createZaiAdapter({
   /** @private */
   function stopVisible(facts) {
     return STOP_PROBES.some((probe) => facts[probe.name]?.visible === true);
+  }
+
+  /**
+   * @private — the post-response CONTEXT observable (continuation 11,
+   * PR #6 comment 5557087907): the Regenerate control visible on the
+   * completed/stopped last response. Read-only diagnostic context —
+   * never a click target, never an acceptance predicate.
+   */
+  function postResponseRegenerateVisible(facts) {
+    return facts.postResponseRegenerate?.visible === true;
   }
 
   /**
@@ -1510,6 +1572,27 @@ export function createZaiAdapter({
         return failure("UNKNOWN_DIALOG", `a dialog or ambiguous surface is visible during recovery — the bounded popup recovery applies only to submission: ${precheck.detail}`);
       }
       if (!stopVisible(observed.facts)) {
+        // The CONTINUATION-11 post-response diagnostic (PR #6 comment
+        // 5557087907): the operator's failed live run manually pressed
+        // the provider Stop control BEFORE invoking the recovery — the
+        // post-stopped surface has no Stop control, and the generic
+        // refusal could not distinguish "already stopped/finished"
+        // from an unreadable surface, which is exactly the ambiguity
+        // that produced the failed run. When the post-response
+        // observables are present (the Regenerate control visible AND
+        // the composer enabled), the refusal names them and the wrong
+        // procedure explicitly. Fail-closed either way — the recovery
+        // is never attempted without the adapter-owned precondition,
+        // and the Regenerate control is never automated.
+        const postResponse =
+          postResponseRegenerateVisible(observed.facts) &&
+          observed.facts.composerEnabled?.enabled === true;
+        if (postResponse) {
+          return failure(
+            "AMBIGUOUS_STATE",
+            "the hung precondition (generation in progress) is not established — the provider Stop control is not visible and the post-response state is observed (the Regenerate control is visible and the composer is enabled: the last response is complete or stopped, so there is nothing to recover; if the generation was stopped manually before this call, that is the wrong procedure — invoke the recovery while generation is genuinely active so the adapter can own the governed Stop action)"
+          );
+        }
         return failure(
           "AMBIGUOUS_STATE",
           "the hung precondition (generation in progress) is not established — the provider Stop control is not visible"

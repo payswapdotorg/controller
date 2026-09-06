@@ -456,7 +456,36 @@ export function fakeZaiPage({
   modelTextStuck = false,
   agent = { present: false, active: false },
   sidebar = "expanded",
+  // The Stop control (CONTINUATION-11, PR #6 comment 5557087907,
+  // requirement 2 facts — LIVE-OBSERVED wrapper family +
+  // provider-bundle-proven slot): the composer action slot renders
+  // through a bits-ui Tooltip trigger wrapper — a DIV carrying
+  // data-tooltip-trigger whose aria-label is the COMPUTED tooltip
+  // content. The provider's own bundle computes that content as
+  // "Stop" OR the long-task text "The current task is in progress.
+  // Please cancel it before starting other tasks." (the SAME control
+  // in two label states), and attaches the abort click handler to the
+  // INNER button (never the wrapper div). `stop.visible` models the
+  // control's presence; `stopLongTask` models the long-task label
+  // state (the wrapper's aria-label switches, so the Stop-labeled
+  // candidates stop matching while the long-task-labeled candidate
+  // resolves the same inner button).
   stop = { visible: false },
+  stopLongTask = false,
+  // The post-response Regenerate control (CONTINUATION-11,
+  // LIVE-OBSERVED in the operator's saved authenticated capture at
+  // main 5d14d90): the bits-ui tooltip wrapper
+  // div[data-tooltip-trigger][aria-label="Regenerate"] wrapping
+  // button.regenerate-response-button — the circular control on the
+  // completed/stopped last response. The real provider renders it
+  // after a generation STOPS (exactly the operator's observed
+  // post-Stop UI), so the fixture's Stop click turns it visible;
+  // `regenerate.visible` also models the manually-stopped surface
+  // (the operator's literal failed-run state). The control is
+  // context/diagnostic only — the adapter never clicks it (a click
+  // increments `regenerate.clicked`, which regressions assert never
+  // happens).
+  regenerate = { visible: false },
   generates = true,
   popupOnSend = false,
   popupText = "Confirm submission",
@@ -525,6 +554,8 @@ export function fakeZaiPage({
     agent,
     sidebar,
     stop,
+    stopLongTask,
+    regenerate,
     generates,
     popupOnSend,
     popupText,
@@ -813,8 +844,29 @@ export function fakeZaiPage({
     if (selector === "#sidebar button[data-active]:not([id])") {
       return modePills();
     }
-    if (selector.includes('aria-label="Stop"') || selector.includes('title="Stop"')) {
-      return state.stop.visible ? [{ text: "Stop", isStop: true, disabled: false }] : [];
+    // The Stop control (CONTINUATION-11 LIVE-OBSERVED structure): the
+    // wrapper-label-derived inner-button candidates (both computed
+    // label states — "Stop" and the long-task text), then the legacy
+    // button-shaped candidates as trailing fallbacks. The clickable is
+    // the INNER button of the wrapper carrying the computed label.
+    if (selector === '[data-tooltip-trigger][aria-label="Stop"] button') {
+      return state.stop.visible && !state.stopLongTask ? [{ isStop: true, disabled: false }] : [];
+    }
+    if (selector === '[data-tooltip-trigger][aria-label^="The current task is in progress"] button') {
+      return state.stop.visible && state.stopLongTask ? [{ isStop: true, disabled: false }] : [];
+    }
+    if (selector === 'button[aria-label="Stop"]' || selector === 'button[title="Stop"]') {
+      return state.stop.visible && !state.stopLongTask ? [{ isStop: true, disabled: false }] : [];
+    }
+    // The post-response Regenerate control (CONTINUATION-11
+    // LIVE-OBSERVED markup): the Regenerate-labeled tooltip wrapper
+    // wrapping the provider's regenerate-response-button — present
+    // only while the completed/stopped last response renders it.
+    if (
+      selector === '[data-tooltip-trigger][aria-label="Regenerate"] button.regenerate-response-button' ||
+      selector === 'button.regenerate-response-button'
+    ) {
+      return state.regenerate.visible ? [{ isRegenerate: true, disabled: false }] : [];
     }
     if (selector === '[role="log"]') {
       return state.conversation.length > 0 ? [{ text: state.conversation.join("\n") }] : [];
@@ -873,6 +925,18 @@ export function fakeZaiPage({
     }
     if (element.isStop) {
       state.stop.visible = false;
+      // The REAL post-Stop surface (the operator's observed UI, PR #6
+      // comment 5557087907): stopping the generation swaps the composer
+      // action slot back to the send control AND renders the
+      // Regenerate control on the stopped response — context only.
+      state.regenerate.visible = true;
+      return { ok: true, clicked: true };
+    }
+    if (element.isRegenerate) {
+      // The adapter must NEVER reach this (regressions assert
+      // regenerate.clicked stays unset): the Regenerate control is
+      // post-response context, not a recovery action.
+      state.regenerate.clicked = (state.regenerate.clicked ?? 0) + 1;
       return { ok: true, clicked: true };
     }
     if (element.isAgentPill) {

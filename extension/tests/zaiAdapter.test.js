@@ -1755,6 +1755,116 @@ test("recovery whose stop never verifies exhausts the bounded budget", async () 
 });
 
 // --------------------------------------------------------------------
+// The CONTINUATION-11 regressions (PR #6 comment 5557087907: reconcile
+// the live hung-worker recovery against the real Z.ai stop/regenerate
+// UI — the operator's manually-stopped run, the Stop control's two
+// computed label states, and the Regenerate control's context-only
+// semantics).
+// --------------------------------------------------------------------
+
+test("the operator's literal manual-Stop state fails closed with the post-response diagnostic (the Regenerate control is never automated)", async () => {
+  // The operator's live run (PR #6 comment 5557087907) manually clicked
+  // the provider Stop control BEFORE invoking the recovery: the
+  // post-stopped surface (the send control back, the composer enabled,
+  // the Regenerate control visible on the stopped response) carries NO
+  // Stop control, so the adapter-owned precondition fails closed —
+  // exactly the observed AMBIGUOUS_STATE. The manual Stop is the WRONG
+  // operator procedure (the frozen contract is adapter-owned
+  // Stop -> verified stopped -> exact continue -> verified conversation
+  // evidence; the recovery must be invoked while generation is
+  // genuinely active). The refusal now NAMES the post-response
+  // observables (the Regenerate control visible + the composer
+  // enabled) and the wrong procedure, so the ambiguity that produced
+  // the failed run cannot recur silently — and the Regenerate control
+  // is never clicked as a remedy.
+  const built = await hungSession();
+  // The manually-stopped surface: generation already stopped externally.
+  built.pages[0].state.stop.visible = false;
+  built.pages[0].state.regenerate.visible = true;
+  const historyBeforeRecovery = built.pages[0].history().length;
+  const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/hung precondition/.test(result.error.message));
+  assert.ok(/post-response state is observed/.test(result.error.message));
+  assert.ok(/Regenerate control is visible/.test(result.error.message));
+  assert.ok(/wrong procedure/.test(result.error.message));
+  // Zero automation: no click ever issued (no Stop press, no Regenerate
+  // click, no send), nothing typed, no Enter — the refusal is purely
+  // observational.
+  const ops = built.pages[0]
+    .history()
+    .slice(historyBeforeRecovery)
+    .filter((c) => c.op !== "probe");
+  assert.equal(ops.length, 0, JSON.stringify(ops));
+  assert.ok(!built.pages[0].state.regenerate.clicked, "the Regenerate control must never be clicked");
+  assert.ok(!built.pages[0].state.conversation.includes("continue"));
+});
+
+test("the Stop control carrying the long-task tooltip label still resolves and clicks (the provider's computed label variant)", async () => {
+  // The provider's own bundle computes the Stop tooltip content as
+  // "Stop" OR "The current task is in progress. Please cancel it
+  // before starting other tasks." — the SAME control in two label
+  // states (the wrapper's aria-label switches). The wrapper-derived
+  // locator resolves the inner button through BOTH labels, so the
+  // frozen recovery still performs Stop -> verified stopped -> exact
+  // continue -> verified acceptance while a long task runs — the
+  // pre-correction button[aria-label="Stop"] candidates matched ZERO
+  // elements on the wrapper-div surface in either state.
+  const built = await hungSession();
+  built.pages[0].state.stopLongTask = true;
+  const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.recovered.message, "continue");
+  assert.equal(result.recovered.acceptance, "conversation-evidence");
+  assert.ok(built.pages[0].state.conversation.includes("continue"));
+  // The adapter's own Stop happened through the long-task-labeled
+  // candidate (the real post-stop surface rendered: the Regenerate
+  // control became visible — context only, never clicked).
+  assert.equal(built.pages[0].state.regenerate.visible, true);
+  assert.ok(!built.pages[0].state.regenerate.clicked, "the Regenerate control must never be clicked");
+});
+
+test("a Regenerate control appearing after the adapter's own Stop is context only — never acceptance", async () => {
+  // Requirement 4 (PR #6 comment 5557087907): "Generation resuming, a
+  // cleared composer, or a Regenerate button appearing are context
+  // only and never acceptance by themselves." After the adapter's own
+  // verified Stop, the fixture renders the REAL post-stop surface (the
+  // stopped response's Regenerate control visible, the send control
+  // back) — and this recovery's `continue` NEVER lands in the
+  // conversation evidence, so the recovery must fail closed despite
+  // the healthy-looking post-response context, with the Regenerate
+  // control never clicked as a remedy.
+  const built = await hungSession({
+    beforeRespond: (message, state) => {
+      if (message.op === "click" && message.selector === "#send-message-button" && state.composerValue === "continue") {
+        state.__sentRecovery = true;
+      }
+      if (message.op === "probe" && state.__sentRecovery) {
+        state.__sentRecovery = false;
+        // The provider dropped the recovery message from the
+        // conversation surface: it never landed as a user message even
+        // though the post-response context looks healthy.
+        if (state.conversation[state.conversation.length - 1] === "continue") {
+          state.conversation.pop();
+        }
+      }
+    },
+  });
+  const result = await built.adapter.recoverHungWorker({ worker: "w1", workItem: "CTRL-014", tabId: 7 });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/not confirmed/.test(result.error.message));
+  // The adapter's own Stop happened (the real post-stop surface
+  // rendered: the Regenerate control became visible) ...
+  assert.equal(built.pages[0].state.regenerate.visible, true);
+  // ... but the Regenerate control was never clicked as a remedy, and
+  // the exact fixed message never landed.
+  assert.ok(!built.pages[0].state.regenerate.clicked, "the Regenerate control must never be clicked");
+  assert.ok(!built.pages[0].state.conversation.includes("continue"));
+});
+
+// --------------------------------------------------------------------
 // Session-aware observations after submission.
 // --------------------------------------------------------------------
 
