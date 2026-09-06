@@ -460,6 +460,23 @@ export function fakeZaiPage({
   generates = true,
   popupOnSend = false,
   popupText = "Confirm submission",
+  // The REAL peak-hours modality (continuation 10, PR #6 review
+  // 5123872434): LIVE-OBSERVED in the operator's captured run
+  // (repository of record, main 5d14d90 — the "Currently in peak
+  // hours" bits-ui capacity dialog, role="dialog" +
+  // aria-modal="true" + data-state="open") and proven from the
+  // provider's own bundle code (the MODEL_CONCURRENCY_LIMIT error
+  // handler): the send LANDS first (the user-message row appears,
+  // the composer clears, no generation starts), and the capacity
+  // dialog materializes only when the ASYNCHRONOUS error arrives —
+  // the same handler optionally RESTORES the submitted prompt into
+  // the composer. `true` models the observed default (the popup
+  // materializes on the 2nd fact read after the send, no restore);
+  // `{ probes: N, text: "...", restore: true }` customizes it. This
+  // is the modality the operator's continuation-10 run reproduced:
+  // Start returned ok:true / popupDismissals:0 while the popup was
+  // visibly present — the async-outcome hold exists for it.
+  popupAfterSend = null,
   // The composer Agent/compose control (LIVE-OBSERVED 2026-09-06,
   // real origin: the composer FORM containing #chat-input renders
   // EXACTLY THREE buttons — upload (More), the Agent/compose toggle
@@ -482,6 +499,12 @@ export function fakeZaiPage({
   duplicateComposer = false,
   beforeRespond = null,
 } = {}) {
+  // The REAL peak-hours dialog's trimmed text as captured (title +
+  // body + button labels): deliberately non-auth-shaped and
+  // non-error-shaped — the known submission-blocking popup.
+  const PEAK_HOURS_POPUP_TEXT =
+    "Currently in peak hours GLM-5.3 is intensifying the coordination of resources, please switch to GLM-5.3-Flash for experience or try again later. Cancel Switch to GLM-5.3-Flash";
+  const asyncPopup = popupAfterSend === true ? { probes: 2 } : popupAfterSend;
   const effectiveSelectedValue = selectedValue ?? (authenticated ? "glm-5.2" : "x-preview-l");
   const initialSelectedValue = effectiveSelectedValue;
   const history = [];
@@ -505,6 +528,16 @@ export function fakeZaiPage({
     generates,
     popupOnSend,
     popupText,
+    asyncPopup: asyncPopup
+      ? {
+          probes: asyncPopup.probes,
+          text: asyncPopup.text ?? PEAK_HOURS_POPUP_TEXT,
+          restore: asyncPopup.restore === true,
+          fired: false,
+        }
+      : null,
+    pendingPopup: null,
+    lastSubmitted: null,
     composeControl,
     composeStuck,
     duplicateComposer,
@@ -552,8 +585,16 @@ export function fakeZaiPage({
       return; // the popup blocked the submission: the prompt stays put
     }
     if (state.composerValue.length > 0) {
+      state.lastSubmitted = state.composerValue;
       state.conversation.push(state.composerValue);
       state.composerValue = "";
+      // The REAL modality: the landing happens FIRST; the capacity
+      // dialog materializes only on the ASYNC error path — modeled
+      // as a fact-read countdown after the send (once per Start).
+      if (state.asyncPopup && !state.asyncPopup.fired) {
+        state.asyncPopup.fired = true;
+        state.pendingPopup = state.asyncPopup.probes;
+      }
       if (state.generates) {
         state.stop.visible = true;
       }
@@ -602,6 +643,18 @@ export function fakeZaiPage({
       return { ok: false, error: { code: "PAGE_MALFORMED", message: "not a Z.ai page command" } };
     }
     if (message.op === "probe") {
+      // The async popup materializes on the Nth fact read after the
+      // send (the asynchronous MODEL_CONCURRENCY_LIMIT arrival).
+      if (state.pendingPopup !== null) {
+        state.pendingPopup -= 1;
+        if (state.pendingPopup <= 0) {
+          state.pendingPopup = null;
+          state.dialog = { text: state.asyncPopup.text };
+          if (state.asyncPopup.restore) {
+            state.composerValue = state.lastSubmitted; // the provider's prompt restore
+          }
+        }
+      }
       const facts = {};
       for (const probe of message.probes) {
         const fact = probeFact(probe);

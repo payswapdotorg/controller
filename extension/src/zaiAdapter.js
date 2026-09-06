@@ -279,6 +279,7 @@ const PROVIDER_ALERT_PATTERN = /error|went\s*wrong|rate\s*limit|too\s*many|unava
 const DEFAULTS = Object.freeze({
   settlePolls: 8, // post-action observation polls per step
   settleIntervalMs: 400, // delay between polls
+  confirmationHoldPolls: 10, // the post-confirmation async-outcome watch (continuation 10)
   maxSubmissionAttempts: 3, // bounded preparation/send/verify attempts
   maxRecoveryAttempts: 2, // bounded Stop/continue recovery attempts
 });
@@ -288,8 +289,8 @@ const DEFAULTS = Object.freeze({
  *
  * @param {{ tabsApi: object, pageBridge: object, providerUrl?: string,
  *           sleep?: Function, now?: Function, settlePolls?: number,
- *           settleIntervalMs?: number, maxSubmissionAttempts?: number,
- *           maxRecoveryAttempts?: number }} wiring
+ *           settleIntervalMs?: number, confirmationHoldPolls?: number,
+ *           maxSubmissionAttempts?: number, maxRecoveryAttempts?: number }} wiring
  *        `pageBridge` is the typed channel to the content script
  *        (createZaiPageBridge); tests inject a scriptable fake.
  */
@@ -301,6 +302,7 @@ export function createZaiAdapter({
   now = () => Date.now(),
   settlePolls = DEFAULTS.settlePolls,
   settleIntervalMs = DEFAULTS.settleIntervalMs,
+  confirmationHoldPolls = DEFAULTS.confirmationHoldPolls,
   maxSubmissionAttempts = DEFAULTS.maxSubmissionAttempts,
   maxRecoveryAttempts = DEFAULTS.maxRecoveryAttempts,
 } = {}) {
@@ -386,6 +388,77 @@ export function createZaiAdapter({
       }
     }
     return last;
+  }
+
+  /**
+   * The ASYNC SUBMISSION-OUTCOME HOLD (continuation 10, PR #6 review
+   * 5123872434, requirements 1-3). The REAL known blocking popup is
+   * the provider's "Currently in peak hours" capacity dialog —
+   * LIVE-OBSERVED in the operator's captured run (repository of
+   * record, main 5d14d90): a bits-ui modal carrying role="dialog",
+   * aria-modal="true" and data-state="open" that IS matched by the
+   * adapter's `[role="dialog"], dialog` observation channel (the
+   * modality is an accessible in-page DOM dialog — NOT a native or
+   * browser-level modal). The provider's own bundle code (the
+   * MODEL_CONCURRENCY_LIMIT error handler) proves the TIMING: the
+   * prompt is optimistically landed and the composer cleared FIRST,
+   * and the popup materializes only when the asynchronous
+   * chat-completion error arrives — the same handler also RESTORES
+   * the submitted prompt into the composer. The submission-
+   * verification settle therefore observes the confirm-shaped state
+   * (decisively-empty composer + the exact user-message row) BEFORE
+   * the popup exists and closes its window: exactly the operator's
+   * continuation-10 run — Start returned ok:true with attempts=1,
+   * popupDismissals=0 while the popup was visibly present and never
+   * dismissed (the Enter path was never REACHED, not never invoked).
+   *
+   * This hold re-opens the window: after the confirm-shaped state is
+   * observed, the surface is watched for the bounded
+   * confirmationHoldPolls budget for exactly the two observables of
+   * that asynchronous outcome — a dialog (classified in the
+   * verifying-submission phase: the known popup, or an auth/error/
+   * unknown dialog that fails closed) and a composer that has been
+   * refilled (the provider's own prompt restore — the unconfirmed
+   * resend path). Outcomes:
+   *   { held: true, facts }  — an async outcome observable appeared;
+   *                           the caller dispatches on these fresher
+   *                           facts (the known-popup Enter path, the
+   *                           fail-closed dialog refusals, or the
+   *                           unconfirmed bounded retry);
+   *   { held: false, facts } — the confirmation HELD for the whole
+   *                           budget (facts = the freshest quiet
+   *                           read; null when no read succeeded);
+   *                           the acceptance is recorded from it;
+   *   { held: false, facts: null } — the outcome window was
+   *                           UNWATCHABLE (every read failed): the
+   *                           acceptance is NOT asserted without the
+   *                           bounded popup watch — fail closed.
+   * The hold never treats popup ABSENCE as success by itself: the
+   * acceptance it returns is still the message-exclusive exact-row +
+   * decisively-empty-composer evidence already observed, merely held
+   * through the async-outcome window; a popup that materializes
+   * beyond the bounded window is a live-evidence matter, never a
+   * code-side guess.
+   */
+  async function holdForAsyncSubmissionOutcome(tabId) {
+    let quiet = null;
+    for (let i = 0; i < confirmationHoldPolls; i++) {
+      await sleep(settleIntervalMs);
+      const read = await readFacts(tabId);
+      if (!read.ok) {
+        continue; // a transport failure is not a submission outcome
+      }
+      quiet = read.facts;
+      const dialog = classifyDialog(read.facts, "verifying-submission");
+      if (dialog.kind !== "none") {
+        return { held: true, facts: read.facts };
+      }
+      const value = composerValueOf(read.facts);
+      if (value !== null && value.length > 0) {
+        return { held: true, facts: read.facts };
+      }
+    }
+    return { held: false, facts: quiet };
   }
 
   // ------------------------------------------------------------------
@@ -1248,7 +1321,41 @@ export function createZaiAdapter({
         lastRefusal = verdict;
         continue;
       }
-      const facts = verdict.facts;
+      let facts = verdict.facts;
+      // CONTINUATION 10 (PR #6 review 5123872434, requirements 1-3):
+      // the confirm-shaped verdict is NOT yet final on this provider.
+      // The real known blocking popup ("Currently in peak hours",
+      // MODEL_CONCURRENCY_LIMIT) materializes ASYNCHRONOUSLY — after
+      // the optimistic landing the settle just observed — so the
+      // acceptance is recorded only after the bounded async-outcome
+      // hold. A popup (or the provider's prompt restore) observed
+      // during the hold replaces the facts and dispatches below: the
+      // frozen known-popup contract (Enter exactly once -> verified
+      // dismissal -> FULL preparation restart -> re-enter/re-verify
+      // -> resend only under the governed preconditions), the
+      // fail-closed dialog refusals, or the unconfirmed bounded
+      // retry. An unwatchable hold fails closed: the acceptance is
+      // never asserted without the bounded popup watch.
+      if (composerValueOf(facts) === "" && messageEvidenceContains(facts, prompt)) {
+        const hold = await holdForAsyncSubmissionOutcome(tabId);
+        if (hold.held) {
+          facts = hold.facts;
+        } else if (hold.facts) {
+          // The confirmation HELD through the async-outcome window:
+          // record the acceptance from the freshest quiet read (the
+          // message-exclusive exact-row + decisively-empty-composer
+          // evidence, held — popup absence itself is never success,
+          // and a popup beyond the bounded window is a live-evidence
+          // matter).
+          return recordSubmission(hold.facts);
+        } else {
+          lastRefusal = failure(
+            "PAGE_UNAVAILABLE",
+            "the post-confirmation outcome watch could not read the provider surface — the submission acceptance is not asserted without the bounded popup watch"
+          );
+          continue;
+        }
+      }
       const dialog = classifyDialog(facts, "verifying-submission");
       if (dialog.kind === "auth") {
         return failure("AUTHENTICATION_INTERRUPTED", `authentication was required during submission: ${dialog.reason}`);
@@ -1277,12 +1384,16 @@ export function createZaiAdapter({
         // success"); only the decisive submission acceptance of step
         // 7 can confirm, and an already-confirmed submission (the
         // popup let it land) is still never resent.
-        popupDismissals += 1;
+        // CONTINUATION 10 (PR #6 review 5123872434, requirement 3):
+        // popupDismissals increments ONLY AFTER the known popup was
+        // actually observed AND the Enter action was actually issued —
+        // a refused or failed press never counts a dismissal.
         const pressed = await pressEnter(tabId);
         if (!pressed.ok) {
           lastRefusal = pressed;
           continue;
         }
+        popupDismissals += 1;
         const dismissed = await settle(tabId, [], (f) => dialogCount(f) === 0);
         if (!dismissed.ok) {
           lastRefusal = dismissed;
@@ -1296,11 +1407,6 @@ export function createZaiAdapter({
         continue;
       }
       const composerValue = composerValueOf(facts);
-      if (composerValue === "" && messageEvidenceContains(facts, prompt)) {
-        // Submission CONFIRMED by message-exclusive post-action
-        // evidence with a decisively cleared composer.
-        return recordSubmission(facts);
-      }
       if (composerValue !== null && composerValue.length > 0) {
         // Unconfirmed: the send did not take (the composer still holds
         // the prompt). The bounded retry resends the exact prompt.

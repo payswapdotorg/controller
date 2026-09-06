@@ -40,6 +40,7 @@ function build({
   stop = { visible: false },
   popupOnSend = false,
   popupText = "Confirm submission",
+  popupAfterSend = null,
   generates = true,
   tabsCount = 1,
   beforeRespond = null,
@@ -67,6 +68,7 @@ function build({
       stop,
       popupOnSend,
       popupText,
+      popupAfterSend,
       generates,
       beforeRespond,
       dialog,
@@ -94,6 +96,7 @@ function build({
     now: () => 1725500000000,
     settlePolls: 4,
     settleIntervalMs: 0,
+    confirmationHoldPolls: 4,
   });
   return { adapter, tabsApi, pages, tabs };
 }
@@ -689,6 +692,102 @@ test("a popup that clears the composer re-types the exact prompt before the rese
   // The re-typed prompt is byte-identical (the type op carries the exact text).
   const typeTexts = history.filter((c) => c.op === "type").map((c) => c.text);
   assert.deepEqual(typeTexts, [PROMPT, PROMPT]);
+});
+
+test("the REAL peak-hours modality: the popup arrives ASYNCHRONOUSLY after the confirm-shaped state — the hold catches it and the Enter path runs", async () => {
+  // CONTINUATION 10 (PR #6 review 5123872434, requirement 5 — the
+  // real failure mode): the provider's "Currently in peak hours"
+  // capacity dialog (LIVE-OBSERVED in the operator's captured run,
+  // main 5d14d90; the provider bundle's MODEL_CONCURRENCY_LIMIT
+  // handler) materializes only when the ASYNC error arrives — AFTER
+  // the prompt has optimistically landed (the exact user-message row
+  // + the cleared composer) and AFTER the verification settle would
+  // have closed its window. This is the operator's literal
+  // continuation-10 run reproduced: pre-correction, Start returned
+  // ok:true / attempts=1 / popupDismissals:0 while the popup was
+  // visibly present (the Enter path was never REACHED — the
+  // classification window closed before the popup existed). The
+  // async-outcome hold re-opens the window: the popup is observed,
+  // Enter is pressed exactly once, the dismissal is verified, the
+  // FULL preparation restarts, and the landed row is the acceptance
+  // (the already-confirmed submission is never resent).
+  const { adapter, pages } = build({
+    generates: false, // the capacity error means no generation started
+    popupAfterSend: true, // materializes on the 2nd fact read after the send
+  });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 2); // the preparation restart after the dismissal
+  assert.equal(result.submitted.popupDismissals, 1); // the Enter was actually issued
+  assert.equal(result.submitted.generation, "waiting"); // the operator's literal surface shape
+  const history = pages[0].history();
+  const enters = history.filter((c) => c.op === "pressEnter").length;
+  assert.equal(enters, 1); // exactly one Enter per observed popup
+  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
+  assert.equal(sends, 1); // the landed row IS the confirmation — never resent
+  assert.equal(history.filter((c) => c.op === "type").length, 1); // typed exactly once
+  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 1); // never duplicated
+  assert.equal(pages[0].state.dialog, null); // the popup was actually dismissed
+});
+
+test("the peak-hours popup WITH the provider's prompt restore: the restored prompt is resent as-is after the dismissal and the restart, and the resend's own outcome is held", async () => {
+  // The provider's error handler also RESTORES the submitted prompt
+  // into the composer (bundle-proven): after the Enter dismissal and
+  // the FULL preparation restart, the restored prompt is sent AS-IS
+  // (never re-typed, never rewritten), and the resend's own
+  // submission outcome passes through the same async-outcome hold
+  // before acceptance.
+  const { adapter, pages } = build({
+    generates: false,
+    popupAfterSend: { probes: 2, restore: true },
+  });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 2);
+  assert.equal(result.submitted.popupDismissals, 1);
+  const history = pages[0].history();
+  assert.equal(history.filter((c) => c.op === "type").length, 1); // the restored prompt is sent AS-IS — never re-typed
+  const sends = history.filter((c) => c.op === "click" && c.selector === "#send-message-button").length;
+  assert.equal(sends, 2); // the initial send + the resend after the restart
+  assert.equal(history.filter((c) => c.op === "pressEnter").length, 1); // exactly one Enter
+  assert.equal(pages[0].state.conversation.filter((t) => t === PROMPT).length, 2); // the optimistic row + the resent row
+  assert.equal(pages[0].state.dialog, null); // the popup was actually dismissed
+});
+
+test("a popup that materializes BEYOND the bounded hold budget does not retroactively fail the recorded acceptance (the hold is bounded; live evidence decides popup recovery)", async () => {
+  // The honest bound (the review's requirement 7): the hold watches a
+  // bounded window; a popup whose asynchronous arrival exceeds it is
+  // the operator's live-evidence matter — a run without an observed
+  // popup can establish happy-path submission evidence but NOT
+  // popup-recovery evidence, and the code never hangs waiting for a
+  // popup that may never come. The popup then materializes on the
+  // next observation — exactly the operator's post-run view.
+  const { adapter, pages } = build({
+    generates: false,
+    popupAfterSend: { probes: 6 }, // the settle read (1) + the hold (4) pass first
+  });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.submitted.attempts, 1);
+  assert.equal(result.submitted.popupDismissals, 0); // no popup was observed within the bounded window
+  const observed = await adapter.observeSession("w1");
+  assert.equal(observed.observation.state, "unexpected-dialog"); // the popup IS visibly present now
+  assert.ok(pages[0].state.dialog); // the dialog materialized after the window
+});
+
+test("an auth-shaped dialog materializing during the hold fails closed AUTHENTICATION_INTERRUPTED (no Enter, no acceptance)", async () => {
+  // The hold observes dialogs in the verifying-submission phase and
+  // dispatches them through the SAME fail-closed classification: an
+  // auth-shaped dialog NEVER receives the Enter action and the
+  // acceptance is never recorded.
+  const { adapter, pages } = build({
+    generates: false,
+    popupAfterSend: { probes: 2, text: "Please sign in to continue" },
+  });
+  const result = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AUTHENTICATION_INTERRUPTED");
+  assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 0); // auth dialogs NEVER receive Enter
 });
 
 test("a send that clears the composer without message-evidence confirmation is NEVER success (no popup does not mean accepted)", async () => {
