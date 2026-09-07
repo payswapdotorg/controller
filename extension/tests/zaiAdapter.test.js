@@ -3316,3 +3316,256 @@ test("OPERATOR ACTION: the action requires the worker identity (typed refusal ot
   assert.equal(result.error.code, "MALFORMED_MESSAGE");
   assert.ok(/worker/.test(result.error.message));
 });
+
+// --------------------------------------------------------------------
+// CTRL-014 CONTINUATION 24 — SendZaiTurn (the resident supervision
+// turn channel: the EXACT governed turn text into an EXISTING
+// provider conversation tab, on the same submission/verification
+// lifecycle and dialog law as Start, without the fresh-session
+// preparation, never mutating the session registry).
+// --------------------------------------------------------------------
+
+test("SEND TURN: the closed form (worker, tabId, prompt) refuses malformed input", async () => {
+  const { adapter } = build({ chatUrl: "https://chat.z.ai/c/existing" });
+  const noWorker = await adapter.sendTurn({ tabId: 7, prompt: PROMPT });
+  assert.equal(noWorker.ok, false);
+  assert.equal(noWorker.error.code, "MALFORMED_MESSAGE");
+  const noTab = await adapter.sendTurn({ worker: "w1", prompt: PROMPT });
+  assert.equal(noTab.ok, false);
+  assert.equal(noTab.error.code, "MALFORMED_MESSAGE");
+  const noPrompt = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: "   " });
+  assert.equal(noPrompt.ok, false);
+  assert.equal(noPrompt.error.code, "MALFORMED_MESSAGE");
+});
+
+test("SEND TURN: a foreign tab refuses STALE_REFERENCE", async () => {
+  const { adapter } = build({});
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 424242, prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "STALE_REFERENCE");
+});
+
+test("SEND TURN: the exact turn lands in the existing conversation with the four-field record", async () => {
+  const { adapter, pages } = build({ chatUrl: "https://chat.z.ai/c/existing", conversation: ["prior turn one"] });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(result.ok, true);
+  assert.equal(result.turn.worker, "w1");
+  assert.equal(result.turn.tabId, 7);
+  assert.equal(result.turn.attempts, 1);
+  assert.equal(result.turn.popupDismissals, 0);
+  assert.equal(result.turn.composeReestablishments, 0);
+  assert.equal(result.turn.generation, "working");
+  // The conversation advanced: the prior row + the exact landed row.
+  const rows = pages[0].state.conversation;
+  assert.deepEqual(rows, ["prior turn one", PROMPT]);
+});
+
+test("SEND TURN: the session registry is NEVER mutated (a later Start runs the FULL governed sequence, never alreadyActive)", async () => {
+  const { adapter, pages } = build({ chatUrl: "https://chat.z.ai/c/existing" });
+  const sent = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(sent.ok, true);
+  // The sent turn's generation completes (the surface returns to rest).
+  pages[0].state.stop.visible = false;
+  // A later Start for the same worker runs the FULL governed sequence
+  // (the registry is empty — sendTurn never recorded a correlation;
+  // an alreadyActive re-report would prove the registry was mutated).
+  const started = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: "Fresh governed prompt" });
+  assert.equal(started.ok, true);
+  assert.equal(started.alreadyActive, undefined);
+  assert.equal(started.submitted.attempts, 1);
+});
+
+test("SEND TURN: a generation in flight refuses (the concurrency gate — never a queued second turn)", async () => {
+  const { adapter } = build({ chatUrl: "https://chat.z.ai/c/existing", stop: { visible: true } });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/generation is in progress/.test(result.error.message));
+});
+
+test("SEND TURN: a stale popup is dismissed through the key law BEFORE the turn submits", async () => {
+  const { adapter, pages } = build({ chatUrl: "https://chat.z.ai/c/existing", dialog: { text: "Currently in peak hours" } });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(result.ok, true);
+  assert.equal(result.turn.popupDismissals, 1);
+  assert.equal(result.turn.attempts, 2); // the dismissal consumed the first attempt
+  const rows = pages[0].state.conversation;
+  assert.deepEqual(rows, [PROMPT]);
+});
+
+test("SEND TURN: an auth-shaped dialog refuses (never Enter)", async () => {
+  const { adapter } = build({ chatUrl: "https://chat.z.ai/c/existing", dialog: { text: "Please sign in to continue" } });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(result.ok, false);
+  // The precheck classifies the auth-shaped dialog as the
+  // authentication-required surface (the typed authorization
+  // refusal — never an Enter, exactly like Start's precheck).
+  assert.equal(result.error.code, "AUTHORIZATION_REQUIRED");
+});
+
+test("SEND TURN: an error-shaped dialog refuses (never Enter)", async () => {
+  const { adapter } = build({ chatUrl: "https://chat.z.ai/c/existing", dialog: { text: "Something went wrong" } });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "PROVIDER_ERROR");
+});
+
+test("SEND TURN: an unauthenticated surface refuses AUTHORIZATION_REQUIRED", async () => {
+  const { adapter } = build({ chatUrl: "https://chat.z.ai/c/existing", authenticated: false });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AUTHORIZATION_REQUIRED");
+});
+
+test("SEND TURN: a prior turn with the SAME exact text resubmits as a NEW turn (the overnight completion-error recovery — history is never a never-resent lock)", async () => {
+  const { adapter, pages } = build({
+    chatUrl: "https://chat.z.ai/c/existing",
+    conversation: [PROMPT], // the FAILED turn's row — the completion error is history
+  });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(result.ok, true);
+  const rows = pages[0].state.conversation;
+  assert.deepEqual(rows, [PROMPT, PROMPT]); // the new turn landed as a NEW row
+});
+
+test("SEND TURN: the async popup after the send is dismissed ONCE (the key law); the held turn surfaces the concurrency gate honestly", async () => {
+  const { adapter, pages } = build({ chatUrl: "https://chat.z.ai/c/existing", popupAfterSend: { probes: 1 } });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  // The turn landed optimistically and the async capacity popup
+  // materialized inside the hold: exactly ONE Enter was issued (the
+  // bounded key law — the observed, classified known popup alone).
+  assert.equal(pages[0].history().filter((c) => c.op === "pressEnter").length, 1);
+  // The post-dismissal surface (the Stop control rendered over the
+  // held row) honestly refuses a second submission on the retry:
+  // the provider's own concurrency gate is the duplicate guard.
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+  assert.ok(/generation is in progress/.test(result.error.message));
+});
+
+test("SEND TURN: the composer already holding the exact text sends AS-IS (never retyped)", async () => {
+  const { adapter, pages } = build({ chatUrl: "https://chat.z.ai/c/existing" });
+  pages[0].state.composerValue = PROMPT;
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: PROMPT });
+  assert.equal(result.ok, true);
+  assert.equal(pages[0].history().filter((c) => c.op === "type").length, 0); // the exact draft was sent as-is
+  assert.deepEqual(pages[0].state.conversation, [PROMPT]);
+});
+
+// --------------------------------------------------------------------
+// CTRL-014 CONTINUATION 24 — RelaunchZaiSession (the find-or-open
+// watcher-died recovery).
+// --------------------------------------------------------------------
+
+test("RELAUNCH: the closed form refuses a non-provider-origin sessionUrl", async () => {
+  const { adapter } = build({});
+  const foreign = await adapter.relaunchSession({ worker: "w1", sessionUrl: "https://example.com/c/x" });
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.error.code, "MALFORMED_MESSAGE");
+  const malformed = await adapter.relaunchSession({ worker: "w1", sessionUrl: "not-a-url" });
+  assert.equal(malformed.ok, false);
+  assert.equal(malformed.error.code, "MALFORMED_MESSAGE");
+  const noWorker = await adapter.relaunchSession({ sessionUrl: null });
+  assert.equal(noWorker.ok, false);
+  assert.equal(noWorker.error.code, "MALFORMED_MESSAGE");
+});
+
+test("RELAUNCH: the live tab at the session URL is reused (focus + verify + observe)", async () => {
+  const { adapter, tabs } = build({ chatUrl: "https://chat.z.ai/c/existing", conversation: ["prior turn one"] });
+  tabs[0].url = "https://chat.z.ai/c/existing";
+  const result = await adapter.relaunchSession({ worker: "w1", sessionUrl: "https://chat.z.ai/c/existing" });
+  assert.equal(result.ok, true);
+  assert.equal(result.reused, true);
+  assert.equal(result.session.tabId, 7);
+  assert.equal(result.observation.state, "ready-for-input");
+  assert.equal(result.observation.worker, "w1");
+  assert.equal(result.popupDismissals, 0);
+  assert.equal(tabs.length, 1); // nothing was opened
+});
+
+test("RELAUNCH: a stale popup on the restored surface is dismissed and reported", async () => {
+  const { adapter, tabs } = build({ chatUrl: "https://chat.z.ai/c/existing", dialog: { text: "Currently in peak hours" } });
+  tabs[0].url = "https://chat.z.ai/c/existing";
+  const result = await adapter.relaunchSession({ worker: "w1", sessionUrl: "https://chat.z.ai/c/existing" });
+  assert.equal(result.ok, true);
+  assert.equal(result.popupDismissals, 1);
+  assert.equal(result.observation.state, "ready-for-input");
+});
+
+test("RELAUNCH: no matching tab OPENS a fresh one at the URL and waits for page-ready (the content-script injection latency tolerated)", async () => {
+  const { adapter, tabsApi } = build({ chatUrl: "https://chat.z.ai/c/existing", tabsCount: 0 });
+  const created = [];
+  const realCreate = tabsApi.create.bind(tabsApi);
+  tabsApi.create = async (options) => {
+    const tab = await realCreate(options);
+    // The fresh tab's content script injects at document_idle: the
+    // first probe finds no page, the next one does (the injection
+    // latency the bounded relaunch window exists to tolerate).
+    const page = fakeZaiPage({ authenticated: true, conversation: ["restored history"] });
+    let pending = 1;
+    Object.defineProperty(tab, "page", {
+      get: () => {
+        if (pending > 0) {
+          pending -= 1;
+          return null;
+        }
+        return page;
+      },
+      configurable: true,
+    });
+    created.push({ url: options.url, id: tab.id });
+    return tab;
+  };
+  const result = await adapter.relaunchSession({ worker: "w1", sessionUrl: "https://chat.z.ai/c/existing" });
+  assert.equal(result.ok, true);
+  assert.equal(result.reused, false);
+  assert.equal(result.session.tabId, created[0].id);
+  assert.equal(result.observation.state, "ready-for-input");
+  assert.equal(created[0].url, "https://chat.z.ai/c/existing");
+});
+
+test("RELAUNCH: multiple matching tabs refuse ambiguous (never a guess between tabs)", async () => {
+  const { adapter, tabs } = build({ tabsCount: 2, chatUrl: "https://chat.z.ai/c/dup" });
+  tabs[0].url = "https://chat.z.ai/c/dup";
+  tabs[1].url = "https://chat.z.ai/c/dup";
+  const result = await adapter.relaunchSession({ worker: "w1", sessionUrl: "https://chat.z.ai/c/dup" });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "AMBIGUOUS_STATE");
+});
+
+test("RELAUNCH: a null sessionUrl addresses the provider home with the exactly-one discipline", async () => {
+  const { adapter, tabs } = build({ tabsCount: 1 });
+  tabs[0].url = "https://chat.z.ai/";
+  const reuse = await adapter.relaunchSession({ worker: "w1", sessionUrl: null });
+  assert.equal(reuse.ok, true);
+  assert.equal(reuse.reused, true);
+  assert.equal(reuse.session.tabId, 7);
+
+  const { adapter: adapter2 } = build({ tabsCount: 2 });
+  const ambiguous = await adapter2.relaunchSession({ worker: "w1", sessionUrl: null });
+  assert.equal(ambiguous.ok, false);
+  assert.equal(ambiguous.error.code, "AMBIGUOUS_STATE");
+});
+
+test("RELAUNCH: an unauthenticated restored surface reports authentication-required honestly (the operator's out-of-band action)", async () => {
+  const { adapter, tabs } = build({ authenticated: false });
+  tabs[0].url = "https://chat.z.ai/";
+  const result = await adapter.relaunchSession({ worker: "w1", sessionUrl: null });
+  assert.equal(result.ok, true);
+  assert.equal(result.observation.state, "authentication-required");
+});
+
+// --------------------------------------------------------------------
+// CTRL-014 CONTINUATION 24 — observeTab (the keepalive probe).
+// --------------------------------------------------------------------
+
+test("OBSERVE TAB: the registry-free single-tab observation", async () => {
+  const { adapter } = build({ chatUrl: "https://chat.z.ai/c/existing", stop: { visible: true } });
+  const observed = await adapter.observeTab(7);
+  assert.equal(observed.ok, true);
+  assert.equal(observed.observation.state, "working");
+  assert.equal(observed.observation.tabId, 7);
+  const foreign = await adapter.observeTab(424242);
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.error.code, "STALE_REFERENCE");
+});

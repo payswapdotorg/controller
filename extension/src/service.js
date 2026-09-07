@@ -96,6 +96,7 @@ import { createGitHubIdentity } from "./githubIdentity.js";
 import { createGitHubClient } from "./githubClient.js";
 import { createZaiAdapter } from "./zaiAdapter.js";
 import { createZaiPageBridge } from "./zaiPageBridge.js";
+import { createZaiKeepalive } from "./keepalive.js";
 import { PROVIDERS } from "./providers.js";
 import { validateRepositoryIdentity } from "./repository.js";
 import { failure } from "./errors.js";
@@ -107,6 +108,7 @@ import { failure } from "./errors.js";
  *           apiRoot?: string, rawRoot?: string,
  *           identity?: object, githubClient?: object,
  *           zaiAdapter?: object,
+ *           keepaliveWatchdog?: object, alarmsApi?: object,
  *           getClientId?: Function, getScopes?: Function,
  *           sleep?: Function, now?: Function }} wiring
  *        `identity`/`githubClient`/`zaiAdapter` override the built-ins
@@ -115,6 +117,8 @@ import { failure } from "./errors.js";
  *        and the real Z.ai adapter over the page bridge; the optional
  *        getClientId/getScopes/sleep/now hooks let tests exercise the
  *        REAL identity offline with deterministic clocks.
+ *        `keepaliveWatchdog` overrides the built-in keepalive in tests
+ *        (with `alarmsApi` for the real alarm scheduling surface).
  */
 export function createControllerService({
   storage,
@@ -125,6 +129,8 @@ export function createControllerService({
   identity,
   githubClient,
   zaiAdapter,
+  keepaliveWatchdog,
+  alarmsApi = typeof chrome !== "undefined" && chrome.alarms ? chrome.alarms : undefined,
   getClientId,
   getScopes,
   sleep,
@@ -158,6 +164,50 @@ export function createControllerService({
       pageBridge: createZaiPageBridge({ tabsApi }),
       providerUrl: PROVIDERS.zai.canonicalOrigin,
       ...(sleep !== undefined ? { sleep } : {}),
+      ...(now !== undefined ? { now } : {}),
+    });
+  // CTRL-014 continuation 24 (the resident supervision surface): the
+  // keepalive watchdog over the adapter's relaunch/probe capabilities.
+  // Injected fakes keep it offline-testable exactly like the adapter;
+  // the real wiring (chrome.alarms/storage/tabs) is assembled here.
+  const keepalive =
+    keepaliveWatchdog ??
+    createZaiKeepalive({
+      // When no alarm scheduler exists in this runtime (the node test
+      // environments), the keepalive constructs over a typed-stub
+      // surface: arm/disarm refuse INTERNAL_ERROR honestly instead of
+      // crashing the service construction (the same doctrine as the
+      // shot action's missing captureVisibleTab).
+      alarmsApi:
+        alarmsApi ?? {
+          create: async () => {
+            throw new Error("the alarms surface is unavailable in this runtime");
+          },
+          clear: async () => {
+            throw new Error("the alarms surface is unavailable in this runtime");
+          },
+        },
+      storageApi: storage,
+      tabsApi,
+      relaunch: (args) => zai.relaunchSession(args),
+      probe: (tabId) => zai.observeTab(tabId),
+      reloadTab: (tabId) =>
+        new Promise((resolve, reject) => {
+          if (typeof tabsApi?.reload !== "function") {
+            reject(new Error("tabsApi has no reload"));
+            return;
+          }
+          try {
+            const pending = tabsApi.reload(tabId);
+            if (pending && typeof pending.then === "function") {
+              pending.then(resolve, reject);
+            } else {
+              resolve(undefined);
+            }
+          } catch (err) {
+            reject(err);
+          }
+        }),
       ...(now !== undefined ? { now } : {}),
     });
   // The authority content client reads with the session token attached
@@ -545,7 +595,12 @@ export function createControllerService({
         case "ObserveZaiSession":
         case "StartZaiWorkerSession":
         case "RecoverZaiHungWorker":
-        case "ZaiOperatorAction": {
+        case "ZaiOperatorAction":
+        case "SendZaiTurn":
+        case "RelaunchZaiSession":
+        case "ArmZaiKeepalive":
+        case "DisarmZaiKeepalive":
+        case "ObserveZaiKeepalive": {
           const gated = _requireZaiWorker(configurationForRequest, validated.request.worker);
           if (!gated.ok) {
             return gated;
@@ -580,6 +635,44 @@ export function createControllerService({
                   ...(started.observation !== undefined ? { observation: started.observation } : {}),
                 }
               : started;
+          }
+          // CTRL-014 continuation 24: the resident supervision surface.
+          // These return INSIDE the case block, before the Recover
+          // fall-through (the last kind standing in the group).
+          if (validated.request.kind === "SendZaiTurn") {
+            // The operator turn channel: the EXACT governed turn text
+            // into the EXISTING provider conversation tab (the same
+            // submission/verification lifecycle and dialog law as
+            // Start; the session registry is never mutated).
+            return await zai.sendTurn({
+              worker: validated.request.worker,
+              tabId: validated.request.tabId,
+              prompt: validated.request.prompt,
+            });
+          }
+          if (validated.request.kind === "RelaunchZaiSession") {
+            // The find-or-open recovery the operator invokes when the
+            // supervision stack dies (and the keepalive watchdog
+            // invokes automatically).
+            return await zai.relaunchSession({
+              worker: validated.request.worker,
+              sessionUrl: validated.request.sessionUrl,
+            });
+          }
+          if (validated.request.kind === "ArmZaiKeepalive") {
+            const armed = await keepalive.arm({
+              worker: validated.request.worker,
+              tabId: validated.request.tabId,
+              sessionUrl: validated.request.sessionUrl,
+              periodMinutes: validated.request.periodMinutes,
+            });
+            return armed.ok ? { ok: true, keepalive: armed.keepalive } : armed;
+          }
+          if (validated.request.kind === "DisarmZaiKeepalive") {
+            return await keepalive.disarm({ worker: validated.request.worker });
+          }
+          if (validated.request.kind === "ObserveZaiKeepalive") {
+            return await keepalive.observe({ worker: validated.request.worker });
           }
           const recovered = await zai.recoverHungWorker({
             worker: validated.request.worker,
@@ -677,7 +770,7 @@ export function createControllerService({
     }
   }
 
-  return { start, handleMessage, store };
+  return { start, handleMessage, handleKeepaliveAlarm: (name) => keepalive.handleAlarm(name), store };
 }
 
 /** @private — the manifest OAuth client id (public identifier, not a secret). */
@@ -725,4 +818,13 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
       });
     return true; // the response is async
   });
+  // CTRL-014 continuation 24: the keepalive watchdog's alarm handler —
+  // the periodic wake that keeps the supervised provider session tab
+  // alive (the service worker sleeps freely between wakes; the armed
+  // records and event rings persist in chrome.storage.local).
+  if (chrome.alarms && chrome.alarms.onAlarm) {
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      void ready.then(() => service.handleKeepaliveAlarm(alarm?.name)).catch(() => {});
+    });
+  }
 }

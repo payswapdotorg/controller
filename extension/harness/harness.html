@@ -85,6 +85,41 @@
     <p id="action-error" class="error hidden"></p>
   </section>
 
+  <section id="send-turn-panel">
+    <h2>SendZaiTurn — launch a prompt into the existing session (CTRL-014 c24)</h2>
+    <p class="hint">The resident-supervision turn channel: submit the EXACT governed turn text into the EXISTING provider conversation tab (the operator's "use only the extension to launch a prompt to the agent" directive). The adapter runs the same submission/verification lifecycle and dialog law as Start — without the fresh-session preparation; it never mutates the session registry. The prompt is carried verbatim, never rewritten.</p>
+    <label for="turn-tab-id">tabId (the exact provider conversation tab)</label>
+    <input type="number" id="turn-tab-id" min="1" step="1" placeholder="e.g. 221177405">
+    <label for="turn-prompt">Exact governed turn text (paste verbatim)</label>
+    <textarea id="turn-prompt" rows="6" spellcheck="false" placeholder="Paste the exact governed turn text here — it is carried byte-for-byte into the existing conversation."></textarea>
+    <p id="turn-readback" class="hint">0 characters — carried verbatim, never rewritten.</p>
+    <button type="button" id="invoke-send-turn" class="invoke" disabled>Invoke SendZaiTurn</button>
+  </section>
+
+  <section id="relaunch-panel">
+    <h2>RelaunchZaiSession — the watcher-died recovery (CTRL-014 c24)</h2>
+    <p class="hint">The find-or-open recovery: exactly one provider tab at the session URL is reused (focus + verify + observe); when the tab is gone a fresh tab is opened at the URL and waited to page-ready; popups on the restored surface are dismissed through the bounded key law. An empty session URL addresses the provider home surface. This is the control the operator uses to relaunch the session when the supervision stack dies.</p>
+    <label for="relaunch-session-url">Session URL (the exact conversation URL, or empty for the provider home)</label>
+    <input type="text" id="relaunch-session-url" autocomplete="off" spellcheck="false" placeholder="https://chat.z.ai/c/&lt;conversation-id&gt;">
+    <button type="button" id="invoke-relaunch" class="invoke" disabled>Invoke RelaunchZaiSession</button>
+  </section>
+
+  <section id="keepalive-panel">
+    <h2>ZaiKeepalive — the extension-side supervision watchdog (CTRL-014 c24)</h2>
+    <p class="hint">Arm the watchdog for the supervised provider tab: a periodic alarm checks the tab (gone → automatic relaunch at the armed session URL; page unreachable → counted, then the tab reload; dialog surface → the bounded popup recovery; authentication/verification gates → recorded for the operator, never acted on). Every check lands in the persisted event ring — read it back with Observe.</p>
+    <label for="keepalive-tab-id">tabId (the supervised provider tab)</label>
+    <input type="number" id="keepalive-tab-id" min="1" step="1" placeholder="e.g. 221177405">
+    <label for="keepalive-session-url">Session URL (the relaunch target when the tab dies, or empty for the provider home)</label>
+    <input type="text" id="keepalive-session-url" autocomplete="off" spellcheck="false" placeholder="https://chat.z.ai/c/&lt;conversation-id&gt;">
+    <label for="keepalive-period">Alarm period in minutes (1–30, or empty for the 1-minute default)</label>
+    <input type="number" id="keepalive-period" min="1" max="30" step="1" placeholder="1">
+    <div class="row">
+      <button type="button" id="invoke-keepalive-arm" class="invoke" disabled>Arm keepalive</button>
+      <button type="button" id="invoke-keepalive-disarm" class="invoke" disabled>Disarm keepalive</button>
+      <button type="button" id="invoke-keepalive-observe" class="invoke" disabled>Observe keepalive</button>
+    </div>
+  </section>
+
   <section id="evidence-panel">
     <h2>Evidence log</h2>
     <p class="hint">One deterministic JSON line per invocation: sequence, ISO-8601 timestamp, exact request kind, the request verbatim (including the exact governed prompt), the typed response verbatim, and the tab/session correlation. The log lives in this page's memory only (never persisted, never sent anywhere). No credential or provider token can appear on this surface by construction. Copy it for the Architect review.</p>

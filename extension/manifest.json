@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pectoraux Controller",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Pectoraux Controller browser operator surface (non-authoritative): registers Workers/Architects, connects GitHub (OAuth device flow), selects the controlled repository, presents repository-derived Controller authority state and evidence, and executes the governed Z.ai browser Worker adapter (CTRL-014) against an already-authenticated human session.",
   "action": {
     "default_title": "Pectoraux Controller",
@@ -13,7 +13,8 @@
   },
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "alarms"
   ],
   "host_permissions": [
     "https://api.github.com/*",

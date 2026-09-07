@@ -21,6 +21,10 @@ import {
   buildEvidenceRecord,
   formatEvidenceLog,
   startResultCorrelation,
+  buildSendTurnRequest,
+  buildRelaunchRequest,
+  buildKeepaliveArmRequest,
+  buildKeepaliveSimpleRequest,
 } from "../src/harnessCore.js";
 import { validateRequest } from "../src/messages.js";
 
@@ -35,12 +39,17 @@ const GOVERNED_PROMPT = [
 // The frozen harness vocabulary.
 // --------------------------------------------------------------------
 
-test("the harness invokes exactly the CTRL-014 kinds (plus the operator action surface)", () => {
+test("the harness invokes exactly the CTRL-014 kinds (plus the operator action surface and the resident supervision surface)", () => {
   assert.deepEqual(HARNESS_REQUEST_KINDS, [
     "ObserveZaiSession",
     "StartZaiWorkerSession",
     "RecoverZaiHungWorker",
     "ZaiOperatorAction",
+    "SendZaiTurn",
+    "RelaunchZaiSession",
+    "ArmZaiKeepalive",
+    "DisarmZaiKeepalive",
+    "ObserveZaiKeepalive",
   ]);
 });
 
@@ -320,4 +329,54 @@ test("formatEvidenceLog is empty for no records and ignores non-record entries",
   assert.equal(formatEvidenceLog([]), "");
   assert.equal(formatEvidenceLog(null), "");
   assert.equal(formatEvidenceLog([null, 7, "x"]), "");
+});
+
+// --------------------------------------------------------------------
+// CTRL-014 continuation 24 — the resident supervision builders.
+// --------------------------------------------------------------------
+
+test("buildSendTurnRequest emits the exact frozen form (the turn text carried verbatim)", () => {
+  const prompt = "Multi-line\nturn text — 'verbatim' & <safe>";
+  const built = buildSendTurnRequest({ kind: "SendZaiTurn", worker: "Z.ai", tabId: 221177405, prompt });
+  assert.equal(built.ok, true);
+  assert.deepEqual(built.request, { kind: "SendZaiTurn", worker: "Z.ai", tabId: 221177405, prompt });
+
+  const noTab = buildSendTurnRequest({ kind: "SendZaiTurn", worker: "Z.ai", tabId: null, prompt });
+  assert.equal(noTab.ok, false);
+  const blank = buildSendTurnRequest({ kind: "SendZaiTurn", worker: "Z.ai", tabId: 7, prompt: "   " });
+  assert.equal(blank.ok, false);
+  assert.ok(/verbatim/.test(blank.error.message));
+});
+
+test("buildRelaunchRequest maps an empty URL to the explicit null (the provider home)", () => {
+  const withUrl = buildRelaunchRequest({ kind: "RelaunchZaiSession", worker: "Z.ai", sessionUrl: "https://chat.z.ai/c/abc " });
+  assert.equal(withUrl.ok, true);
+  assert.deepEqual(withUrl.request, { kind: "RelaunchZaiSession", worker: "Z.ai", sessionUrl: "https://chat.z.ai/c/abc" });
+  const empty = buildRelaunchRequest({ kind: "RelaunchZaiSession", worker: "Z.ai", sessionUrl: "   " });
+  assert.equal(empty.ok, true);
+  assert.equal(empty.request.sessionUrl, null);
+});
+
+test("buildKeepaliveArmRequest bounds the period window and maps the empty period to null", () => {
+  const ok = buildKeepaliveArmRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 9, sessionUrl: "", periodMinutes: "2" });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.request, { kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 9, sessionUrl: null, periodMinutes: 2 });
+
+  const none = buildKeepaliveArmRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 9, sessionUrl: "", periodMinutes: "" });
+  assert.equal(none.ok, true);
+  assert.equal(none.request.periodMinutes, null);
+
+  const bad = buildKeepaliveArmRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 9, sessionUrl: "", periodMinutes: "31" });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.error.code, "MALFORMED_MESSAGE");
+});
+
+test("buildKeepaliveSimpleRequest serves disarm and observe (and refuses anything else)", () => {
+  const disarm = buildKeepaliveSimpleRequest({ kind: "DisarmZaiKeepalive", worker: "Z.ai" });
+  assert.equal(disarm.ok, true);
+  assert.deepEqual(disarm.request, { kind: "DisarmZaiKeepalive", worker: "Z.ai" });
+  const observe = buildKeepaliveSimpleRequest({ kind: "ObserveZaiKeepalive", worker: "Z.ai" });
+  assert.equal(observe.ok, true);
+  const other = buildKeepaliveSimpleRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai" });
+  assert.equal(other.ok, false);
 });

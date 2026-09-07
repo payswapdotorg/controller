@@ -50,6 +50,14 @@ export const HARNESS_REQUEST_KINDS = Object.freeze([
   "StartZaiWorkerSession",
   "RecoverZaiHungWorker",
   "ZaiOperatorAction",
+  // CTRL-014 continuation 24 — the resident supervision surface (the
+  // operator's overnight directive: launch prompts through the
+  // extension, deal with popups, relaunch z.ai when the watcher dies).
+  "SendZaiTurn",
+  "RelaunchZaiSession",
+  "ArmZaiKeepalive",
+  "DisarmZaiKeepalive",
+  "ObserveZaiKeepalive",
 ]);
 
 /**
@@ -305,6 +313,156 @@ function requirePlainInput(value) {
     return failure("MALFORMED_MESSAGE", "harness: the input must be a plain object");
   }
   return { ok: true, input: value };
+}
+
+/**
+ * Build the frozen SendZaiTurn request form (CTRL-014 continuation
+ * 24 — the resident supervision surface): the EXACT governed turn
+ * text into the EXISTING provider conversation tab. The prompt is
+ * carried VERBATIM — never rewritten, trimmed, or substituted (the
+ * same verbatim law as the Start prompt).
+ *
+ * @param {{ worker: unknown, tabId: unknown, prompt: unknown }} input
+ * @returns {{ ok: true, request: { kind: "SendZaiTurn", worker: string, tabId: number, prompt: string } } |
+ *           { ok: false, error: { code: string, message: string } }}
+ */
+export function buildSendTurnRequest(input) {
+  const checked = requirePlainInput(input);
+  if (!checked.ok) {
+    return checked;
+  }
+  const { worker, tabId, prompt } = checked.input;
+  if (typeof worker !== "string" || worker.length === 0) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness SendZaiTurn: the registered Worker name is required"
+    );
+  }
+  if (!isPositiveInteger(tabId)) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness SendZaiTurn: field 'tabId' must be the positive-integer provider conversation tab the turn addresses"
+    );
+  }
+  if (typeof prompt !== "string" || prompt.trim().length === 0) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness SendZaiTurn: the exact governed turn text is required — paste it verbatim (the harness never authors or rewrites prompt text)"
+    );
+  }
+  return {
+    ok: true,
+    request: Object.freeze({ kind: "SendZaiTurn", worker, tabId, prompt }),
+  };
+}
+
+/**
+ * Build the frozen RelaunchZaiSession request form (CTRL-014
+ * continuation 24): the find-or-open recovery. The sessionUrl is the
+ * provider-origin conversation URL to restore — typed by the operator
+ * from the exact session the supervision owns (never guessed or
+ * defaulted here) — or the explicit null for the provider home.
+ *
+ * @param {{ worker: unknown, sessionUrl: unknown }} input
+ * @returns {{ ok: true, request: { kind: "RelaunchZaiSession", worker: string, sessionUrl: string | null } } |
+ *           { ok: false, error: { code: string, message: string } }}
+ */
+export function buildRelaunchRequest(input) {
+  const checked = requirePlainInput(input);
+  if (!checked.ok) {
+    return checked;
+  }
+  const { worker, sessionUrl } = checked.input;
+  if (typeof worker !== "string" || worker.length === 0) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness RelaunchZaiSession: the registered Worker name is required"
+    );
+  }
+  const trimmed = typeof sessionUrl === "string" ? sessionUrl.trim() : "";
+  const url = trimmed.length === 0 ? null : trimmed;
+  return {
+    ok: true,
+    request: Object.freeze({ kind: "RelaunchZaiSession", worker, sessionUrl: url }),
+  };
+}
+
+/**
+ * Build the frozen ArmZaiKeepalive request form (CTRL-014 continuation
+ * 24): arm the extension-side watchdog for a Worker's supervised
+ * session tab. The periodMinutes is the operator's explicit choice
+ * (null = the 1-minute default) — never defaulted to anything else.
+ *
+ * @param {{ worker: unknown, tabId: unknown, sessionUrl: unknown, periodMinutes: unknown }} input
+ */
+export function buildKeepaliveArmRequest(input) {
+  const checked = requirePlainInput(input);
+  if (!checked.ok) {
+    return checked;
+  }
+  const { worker, tabId, sessionUrl, periodMinutes } = checked.input;
+  if (typeof worker !== "string" || worker.length === 0) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness ArmZaiKeepalive: the registered Worker name is required"
+    );
+  }
+  if (!isPositiveInteger(tabId)) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness ArmZaiKeepalive: field 'tabId' must be the positive-integer supervised provider tab"
+    );
+  }
+  const trimmedUrl = typeof sessionUrl === "string" ? sessionUrl.trim() : "";
+  const url = trimmedUrl.length === 0 ? null : trimmedUrl;
+  const period =
+    periodMinutes === null || periodMinutes === undefined || periodMinutes === ""
+      ? null
+      : Number(periodMinutes);
+  if (period !== null && (!Number.isInteger(period) || period < 1 || period > 30)) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness ArmZaiKeepalive: field 'periodMinutes' must be an integer between 1 and 30, or empty for the 1-minute default"
+    );
+  }
+  return {
+    ok: true,
+    request: Object.freeze({
+      kind: "ArmZaiKeepalive",
+      worker,
+      tabId,
+      sessionUrl: url,
+      periodMinutes: period,
+    }),
+  };
+}
+
+/**
+ * Build the frozen DisarmZaiKeepalive / ObserveZaiKeepalive request
+ * forms (CTRL-014 continuation 24).
+ *
+ * @param {{ kind: "DisarmZaiKeepalive" | "ObserveZaiKeepalive", worker: unknown }} input
+ */
+export function buildKeepaliveSimpleRequest(input) {
+  const checked = requirePlainInput(input);
+  if (!checked.ok) {
+    return checked;
+  }
+  const kind = input.kind;
+  if (kind !== "DisarmZaiKeepalive" && kind !== "ObserveZaiKeepalive") {
+    return failure("MALFORMED_MESSAGE", "harness keepalive: the kind must be DisarmZaiKeepalive or ObserveZaiKeepalive");
+  }
+  const { worker } = checked.input;
+  if (typeof worker !== "string" || worker.length === 0) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      `harness ${kind}: the registered Worker name is required`
+    );
+  }
+  return {
+    ok: true,
+    request: Object.freeze({ kind, worker }),
+  };
 }
 
 /**

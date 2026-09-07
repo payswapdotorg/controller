@@ -47,6 +47,10 @@ import {
   buildStartRequest,
   buildRecoverRequest,
   buildOperatorActionRequest,
+  buildSendTurnRequest,
+  buildRelaunchRequest,
+  buildKeepaliveArmRequest,
+  buildKeepaliveSimpleRequest,
   buildEvidenceRecord,
   formatEvidenceLog,
   startResultCorrelation,
@@ -158,10 +162,42 @@ function applyStartResult(response) {
   $("recover-tab-id").value = String(correlation.tabId);
 }
 
+/**
+ * Apply a successful RELAUNCH result's tab correlation to the
+ * supervision prefill (CTRL-014 c24): the keepalive arm and the turn
+ * channel address the tab the relaunch just reported. A refusal or
+ * malformed result never prefills anything (the same law as the
+ * start-result prefill).
+ */
+function applyRelaunchResult(response) {
+  if (typeof response !== "object" || response === null || response.ok !== true) {
+    return;
+  }
+  const session = response.session;
+  if (typeof session !== "object" || session === null || !Number.isInteger(session.tabId)) {
+    return;
+  }
+  $("keepalive-tab-id").value = String(session.tabId);
+  $("turn-tab-id").value = String(session.tabId);
+  if (typeof session.worker === "string" && session.worker.length > 0) {
+    // Nothing else to prefill: the worker select already carries it.
+  }
+}
+
 /** Enable/disable every invoke control per the operator acknowledgment. */
 function updateGate() {
   const armed = $("operator-ack").checked;
-  for (const id of ["invoke-observe", "invoke-start", "invoke-recover", "invoke-action"]) {
+  for (const id of [
+    "invoke-observe",
+    "invoke-start",
+    "invoke-recover",
+    "invoke-action",
+    "invoke-send-turn",
+    "invoke-relaunch",
+    "invoke-keepalive-arm",
+    "invoke-keepalive-disarm",
+    "invoke-keepalive-observe",
+  ]) {
     $(id).disabled = !armed;
   }
   $("gate-hint").textContent = armed
@@ -175,10 +211,17 @@ function updatePromptReadback() {
   $("prompt-readback").textContent = `${prompt.length} characters — carried verbatim, never rewritten.`;
 }
 
+/** Verbatim TURN text readback: character count only — never a rewrite. */
+function updateTurnReadback() {
+  const prompt = $("turn-prompt").value;
+  $("turn-readback").textContent = `${prompt.length} characters — carried verbatim, never rewritten.`;
+}
+
 function wire() {
   $("operator-ack").addEventListener("change", updateGate);
   $("refresh-workers").addEventListener("click", () => void refreshWorkers());
   $("start-prompt").addEventListener("input", updatePromptReadback);
+  $("turn-prompt").addEventListener("input", updateTurnReadback);
 
   $("invoke-observe").addEventListener("click", async () => {
     await invoke(buildObserveRequest, { kind: "ObserveZaiSession", worker: selectedWorker() });
@@ -228,6 +271,50 @@ function wire() {
     });
   });
 
+  $("invoke-send-turn").addEventListener("click", async () => {
+    const tabText = $("turn-tab-id").value.trim();
+    await invoke(buildSendTurnRequest, {
+      kind: "SendZaiTurn",
+      worker: selectedWorker(),
+      tabId: tabText.length === 0 ? null : Number(tabText),
+      prompt: $("turn-prompt").value,
+    });
+  });
+
+  $("invoke-relaunch").addEventListener("click", async () => {
+    const response = await invoke(buildRelaunchRequest, {
+      kind: "RelaunchZaiSession",
+      worker: selectedWorker(),
+      sessionUrl: $("relaunch-session-url").value,
+    });
+    applyRelaunchResult(response);
+  });
+
+  $("invoke-keepalive-arm").addEventListener("click", async () => {
+    const tabText = $("keepalive-tab-id").value.trim();
+    await invoke(buildKeepaliveArmRequest, {
+      kind: "ArmZaiKeepalive",
+      worker: selectedWorker(),
+      tabId: tabText.length === 0 ? null : Number(tabText),
+      sessionUrl: $("keepalive-session-url").value,
+      periodMinutes: $("keepalive-period").value === "" ? null : $("keepalive-period").value,
+    });
+  });
+
+  $("invoke-keepalive-disarm").addEventListener("click", async () => {
+    await invoke(buildKeepaliveSimpleRequest, {
+      kind: "DisarmZaiKeepalive",
+      worker: selectedWorker(),
+    });
+  });
+
+  $("invoke-keepalive-observe").addEventListener("click", async () => {
+    await invoke(buildKeepaliveSimpleRequest, {
+      kind: "ObserveZaiKeepalive",
+      worker: selectedWorker(),
+    });
+  });
+
   $("copy-evidence").addEventListener("click", async () => {
     const log = formatEvidenceLog(state.records);
     const result = $("copy-result");
@@ -252,6 +339,7 @@ async function main() {
   wire();
   updateGate();
   updatePromptReadback();
+  updateTurnReadback();
   await refreshWorkers();
 }
 

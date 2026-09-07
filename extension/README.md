@@ -836,3 +836,88 @@ be an inferred fallback). To recover manually:
   transitions initiated by the extension; no authoritative extension
   state; the extension never
   becomes a second source of truth.
+
+## CTRL-014 continuation 24 — the resident supervision surface (SendZaiTurn / RelaunchZaiSession / ZaiKeepalive)
+
+The operator's overnight directive (2026-09-07 ~02:00): *"use only the
+extension to launch a prompt to the agent, make updates to the adapter
+until it is able to handle sending a prompt, dealing with all sorts of
+popups, etc.; also it should be able to relaunch z.ai when the watcher
+dies — I'll be using it to relaunch the watcher of this session when it
+dies like it has already happened twice. I'll be going to sleep soon and
+I'd like to be sure development keep happening."*
+
+Three new adapter capabilities and a watchdog, all on the frozen
+fail-closed doctrine (no governance mutation, no provider knowledge
+outside the adapter, no credential anywhere, closed vocabularies):
+
+### SendZaiTurn `{ worker, tabId, prompt }` → the operator turn channel
+
+Submits the EXACT governed turn text into an EXISTING provider
+conversation tab — the "launch a prompt to the agent" channel. The flow
+reuses Start's shared machinery with the existing-conversation
+adaptation:
+
+| step | law |
+| --- | --- |
+| provider-tab gate | the tab must exist and hold a provider page (STALE_REFERENCE otherwise) |
+| precheck | the dialog law (auth-shaped → `AUTHORIZATION_REQUIRED`, error-shaped → `PROVIDER_ERROR`, human-verification → `HUMAN_VERIFICATION_REQUIRED`); a single non-auth/non-error dialog is dismissed through the bounded key law (ONE Enter, VERIFIED dismissal) before the precheck re-runs; a generation in flight REFUSES `AMBIGUOUS_STATE` (the concurrency gate — a second turn is never submitted while one is in flight) |
+| turn entry | the composer is read once: an already-exact value sends AS-IS (the operator's restored draft); anything else is typed over (the channel owns the surface). A PRIOR turn that carried the same text (the overnight completion-error recovery) is resubmitted as a NEW turn — the never-resent law on this channel is the precheck's concurrency gate plus the provider's own submission gate (the Stop-rendered refusal), per the frozen doctrine |
+| pre-send gate | a FRESH decisive read: no dialog, the exact text byte-for-byte, the send control in the action slot (a Stop-rendered or unresolvable slot is never sent through) |
+| send | the send-control click (never an Enter at the send step) |
+| verification | the SAME bounded start-signal watch + async-outcome hold (the conversation-state advancement past the dispatch baseline, the exact prompt row, the Send→Stop transition, the decisively empty composer) |
+| record | the frozen four-field shape: `{ worker, tabId, attempts, popupDismissals, composeReestablishments, generation }`; the session registry is NEVER mutated (Start/Recover own it) |
+
+### RelaunchZaiSession `{ worker, sessionUrl }` → the watcher-died recovery
+
+The find-or-open recovery the operator invokes from the harness when
+the supervision stack dies (and the keepalive invokes automatically):
+
+- a `sessionUrl` (a provider-origin conversation URL) resolves by EXACT
+  normalized match: **exactly one** matching tab → reuse (focus +
+  verify + observe); **zero** → open a fresh tab at the URL and wait
+  for page-ready (the bounded 20-round window tolerating the
+  content-script injection latency); **more than one** → the typed
+  ambiguous refusal (never a guess between tabs);
+- a `null` sessionUrl addresses the provider home surface with the
+  same exactly-one discipline over all provider tabs;
+- popups on the restored surface (the stale overnight capacity modal)
+  are dismissed through the bounded key law — at most
+  `maxRecoveryAttempts` verified dismissals; auth-shaped and
+  error-shaped dialogs fail closed through the key law;
+- the post-relaunch observation is the honest classified state
+  (`ready-for-input`, `working`, `stopped`,
+  `authentication-required` — the operator's out-of-band action, ...).
+
+### ZaiKeepalive — the extension-side supervision watchdog
+
+`ArmZaiKeepalive { worker, tabId, sessionUrl, periodMinutes }` (the
+period bounded 1–30 minutes, null = the 1-minute default) /
+`DisarmZaiKeepalive { worker }` / `ObserveZaiKeepalive { worker }`:
+a `chrome.alarms` period wakes the service worker and runs ONE honest
+check of the armed tab:
+
+| check outcome | action |
+| --- | --- |
+| the tab is gone | the RELAUNCH recovery at the armed session URL; the new tab correlation replaces the stale one |
+| the page channel unreachable | the consecutive-failure count; at the threshold (3) the tab RELOAD (the hung-page modality) — below it, the check is recorded only |
+| a dialog-bearing surface | the relaunch recovery (which owns the bounded popup-dismissal key law) |
+| authentication / human-verification required | RECORDED for the operator (the out-of-band action), never acted on |
+| any other state | recorded (`checked`) |
+
+Every outcome lands in a bounded event ring (50 events, persisted in
+`chrome.storage.local` with the arm record — the service worker
+restarts freely, the supervision state survives) — `ObserveZaiKeepalive`
+returns exactly what happened overnight, typed and timestamped, newest
+last. The manifest gains exactly one permission for this: `alarms`.
+
+### Where the popups are handled (the "all sorts of popups" ask)
+
+| surface | handling |
+| --- | --- |
+| the known submission-blocking popup ("Currently in peak hours") | ONE Enter per bounded attempt, VERIFIED dismissal, then the full attempt restart (the frozen Work Order law — Start, Recover) |
+| the same popup sitting on a restored/stale page (the overnight modality) | the same bounded key law at the precheck / relaunch / keepalive surfaces (`dismissPopup`) |
+| auth-shaped dialog | `AUTHORIZATION_REQUIRED` / `AUTHENTICATION_INTERRUPTED` — never keypressed |
+| error-shaped dialog / alerting surface | `PROVIDER_ERROR` — never keypressed |
+| multiple simultaneous dialogs | `UNKNOWN_DIALOG` — never keypressed |
+| the body-level Aliyun human-verification popup | `HUMAN_VERIFICATION_REQUIRED` — the operator's out-of-band action, never solved, never Enter |

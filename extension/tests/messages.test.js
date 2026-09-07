@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 
 import { validateRequest, REQUEST_KINDS } from "../src/messages.js";
 
-test("the request vocabulary is the frozen CTRL-012 + CTRL-013 + CTRL-014 set (plus the operator action surface)", () => {
+test("the request vocabulary is the frozen CTRL-012 + CTRL-013 + CTRL-014 set (plus the operator action surface and the resident supervision surface)", () => {
   assert.deepEqual([...REQUEST_KINDS], [
     "GetConfiguration",
     "RegisterWorker",
@@ -35,6 +35,11 @@ test("the request vocabulary is the frozen CTRL-012 + CTRL-013 + CTRL-014 set (p
     "StartZaiWorkerSession",
     "RecoverZaiHungWorker",
     "ZaiOperatorAction",
+    "SendZaiTurn",
+    "RelaunchZaiSession",
+    "ArmZaiKeepalive",
+    "DisarmZaiKeepalive",
+    "ObserveZaiKeepalive",
   ]);
   // The mutation vocabulary is exactly the three Controller-authorized
   // mutations — nothing else. No approval, completion, comment, or
@@ -286,4 +291,74 @@ test("no Zai governance mutation kind exists (no merge/approve/complete through 
   for (const absent of ["MergeZaiSession", "ApproveZaiSession", "CompleteZaiWorkItem", "ActivateZaiWorkItem"]) {
     assert.equal(REQUEST_KINDS.includes(absent), false, absent);
   }
+});
+
+// --------------------------------------------------------------------
+// CTRL-014 continuation 24 — the resident supervision surface forms.
+// --------------------------------------------------------------------
+
+test("the SendZaiTurn form is closed (worker, tabId, prompt — exactly these fields)", () => {
+  const ok = validateRequest({ kind: "SendZaiTurn", worker: "Z.ai", tabId: 7, prompt: "Exact governed turn text" });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.request.tabId, 7);
+
+  const missing = validateRequest({ kind: "SendZaiTurn", worker: "Z.ai", prompt: "x" });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "MALFORMED_MESSAGE");
+
+  const extra = validateRequest({ kind: "SendZaiTurn", worker: "Z.ai", tabId: 7, prompt: "x", workItem: "CTRL-014" });
+  assert.equal(extra.ok, false);
+  assert.equal(extra.error.code, "MALFORMED_MESSAGE");
+
+  const blank = validateRequest({ kind: "SendZaiTurn", worker: "Z.ai", tabId: 7, prompt: "   " });
+  assert.equal(blank.ok, false);
+  assert.equal(blank.error.code, "MALFORMED_MESSAGE");
+
+  const badTab = validateRequest({ kind: "SendZaiTurn", worker: "Z.ai", tabId: 0, prompt: "x" });
+  assert.equal(badTab.ok, false);
+  assert.equal(badTab.error.code, "MALFORMED_MESSAGE");
+});
+
+test("the RelaunchZaiSession form is closed (worker + the declared-nullable sessionUrl)", () => {
+  const withUrl = validateRequest({ kind: "RelaunchZaiSession", worker: "Z.ai", sessionUrl: "https://chat.z.ai/c/abc" });
+  assert.equal(withUrl.ok, true);
+
+  const nullUrl = validateRequest({ kind: "RelaunchZaiSession", worker: "Z.ai", sessionUrl: null });
+  assert.equal(nullUrl.ok, true);
+
+  const missing = validateRequest({ kind: "RelaunchZaiSession", worker: "Z.ai" });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "MALFORMED_MESSAGE");
+
+  const empty = validateRequest({ kind: "RelaunchZaiSession", worker: "Z.ai", sessionUrl: "" });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.error.code, "MALFORMED_MESSAGE");
+});
+
+test("the keepalive forms are closed (arm: worker, tabId, sessionUrl, periodMinutes; disarm/observe: worker)", () => {
+  const armOk = validateRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 7, sessionUrl: null, periodMinutes: null });
+  assert.equal(armOk.ok, true);
+  const armPeriod = validateRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 7, sessionUrl: "https://chat.z.ai/c/abc", periodMinutes: 5 });
+  assert.equal(armPeriod.ok, true);
+
+  const armMissingPeriod = validateRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 7, sessionUrl: null });
+  assert.equal(armMissingPeriod.ok, false);
+  assert.equal(armMissingPeriod.error.code, "MALFORMED_MESSAGE");
+
+  const armBadPeriod = validateRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 7, sessionUrl: null, periodMinutes: 0 });
+  assert.equal(armBadPeriod.ok, false);
+  assert.equal(armBadPeriod.error.code, "MALFORMED_MESSAGE");
+
+  const armHighPeriod = validateRequest({ kind: "ArmZaiKeepalive", worker: "Z.ai", tabId: 7, sessionUrl: null, periodMinutes: 31 });
+  assert.equal(armHighPeriod.ok, false);
+  assert.equal(armHighPeriod.error.code, "MALFORMED_MESSAGE");
+
+  const disarm = validateRequest({ kind: "DisarmZaiKeepalive", worker: "Z.ai" });
+  assert.equal(disarm.ok, true);
+  const disarmExtra = validateRequest({ kind: "DisarmZaiKeepalive", worker: "Z.ai", tabId: 7 });
+  assert.equal(disarmExtra.ok, false);
+  assert.equal(disarmExtra.error.code, "MALFORMED_MESSAGE");
+
+  const observe = validateRequest({ kind: "ObserveZaiKeepalive", worker: "Z.ai" });
+  assert.equal(observe.ok, true);
 });

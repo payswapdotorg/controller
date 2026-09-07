@@ -78,6 +78,34 @@
  *   StartZaiWorkerSession { worker, workItem, prompt }  -> governed new-session result
  *   RecoverZaiHungWorker  { worker, workItem, tabId }   -> governed hang-recovery result
  *
+ * Message vocabulary (added by CTRL-014 continuation 24 — the
+ * resident supervision surface; the operator's overnight directive
+ * 2026-09-07 ~02:00: "use only the extension to launch a prompt to
+ * the agent ... dealing with all sorts of popups ... relaunch z.ai
+ * when the watcher dies"):
+ *
+ *   SendZaiTurn          { worker, tabId, prompt }   -> typed existing-session turn result
+ *   RelaunchZaiSession   { worker, sessionUrl }      -> typed find-or-open relaunch result
+ *   ArmZaiKeepalive      { worker, tabId, sessionUrl, periodMinutes } -> armed watchdog
+ *   DisarmZaiKeepalive   { worker }                  -> disarmed watchdog
+ *   ObserveZaiKeepalive  { worker }                  -> keepalive state + event ring
+ *
+ *   SendZaiTurn submits the EXACT governed turn text into an
+ *   EXISTING provider conversation tab (the operator's
+ *   launch-a-prompt-to-the-agent channel — the adapter runs the
+ *   same submission/verification lifecycle and dialog law as
+ *   Start, without the fresh-session preparation; it never mutates
+ *   the session registry). RelaunchZaiSession is the find-or-open
+ *   recovery the operator invokes from the harness when the
+ *   supervision stack dies (and the keepalive watchdog invokes
+ *   automatically): `sessionUrl` is the provider-origin conversation
+ *   URL to restore, or null for the provider home. The keepalive
+ *   kinds arm/disarm/observe the extension-side watchdog that
+ *   keeps the supervised tab alive (periodMinutes is bounded 1-30,
+ *   null = the 1-minute default). All remain provider-page
+ *   execution actions against an already-authenticated human
+ *   session — NOT governance mutations.
+ *
  *   These are provider-page execution actions against an
  *   already-authenticated human session — NOT governance mutations:
  *   no kind approves, merges, comments, completes, advances, or
@@ -124,6 +152,12 @@ export const REQUEST_KINDS = Object.freeze([
   "StartZaiWorkerSession",
   "RecoverZaiHungWorker",
   "ZaiOperatorAction",
+  // CTRL-014 continuation 24 — the resident supervision surface.
+  "SendZaiTurn",
+  "RelaunchZaiSession",
+  "ArmZaiKeepalive",
+  "DisarmZaiKeepalive",
+  "ObserveZaiKeepalive",
 ]);
 
 /** Field sets per kind (closed forms — exactly these fields). */
@@ -156,6 +190,12 @@ const KIND_FIELDS = Object.freeze({
   StartZaiWorkerSession: ["worker", "workItem", "prompt"],
   RecoverZaiHungWorker: ["worker", "workItem", "tabId"],
   ZaiOperatorAction: ["worker", "tabId", "action", "args"],
+  // CTRL-014 continuation 24 — the resident supervision surface.
+  SendZaiTurn: ["worker", "tabId", "prompt"],
+  RelaunchZaiSession: ["worker", "sessionUrl"],
+  ArmZaiKeepalive: ["worker", "tabId", "sessionUrl", "periodMinutes"],
+  DisarmZaiKeepalive: ["worker"],
+  ObserveZaiKeepalive: ["worker"],
 });
 
 /** The closed PR list state vocabulary (GitHub's three list states). */
@@ -288,7 +328,10 @@ export function validateRequest(value) {
     }
   }
   if (kind === "ObserveZaiSession" || kind === "StartZaiWorkerSession" ||
-      kind === "RecoverZaiHungWorker" || kind === "ZaiOperatorAction") {
+      kind === "RecoverZaiHungWorker" || kind === "ZaiOperatorAction" ||
+      kind === "SendZaiTurn" || kind === "RelaunchZaiSession" ||
+      kind === "ArmZaiKeepalive" || kind === "DisarmZaiKeepalive" ||
+      kind === "ObserveZaiKeepalive") {
     // The Worker identity the Z.ai adapter session is bound to.
     if (typeof value.worker !== "string" || value.worker.length === 0) {
       return failure("MALFORMED_MESSAGE", `request ${kind}: field 'worker' must be a non-empty string`);
@@ -328,6 +371,41 @@ export function validateRequest(value) {
     if (value.args !== undefined && value.args !== null &&
         (typeof value.args !== "object" || Array.isArray(value.args))) {
       return failure("MALFORMED_MESSAGE", "request ZaiOperatorAction: field 'args' must be an object when present");
+    }
+  }
+  if (kind === "SendZaiTurn") {
+    // The existing provider conversation tab the turn addresses,
+    // and the exact governed turn text, carried verbatim (the same
+    // verbatim law as StartZaiWorkerSession's prompt — never
+    // rewritten, never truncated).
+    if (!isPositiveInteger(value.tabId)) {
+      return failure("MALFORMED_MESSAGE", "request SendZaiTurn: field 'tabId' must be a positive integer (the existing provider conversation tab)");
+    }
+    if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) {
+      return failure("MALFORMED_MESSAGE", "request SendZaiTurn: field 'prompt' must be a non-empty string (the exact governed turn text)");
+    }
+  }
+  if (kind === "RelaunchZaiSession") {
+    // The provider-origin conversation URL to restore, or null for
+    // the provider home surface (a declared nullable, exactly like
+    // ObservePullRequests' headBranch).
+    if (value.sessionUrl !== null && (typeof value.sessionUrl !== "string" || value.sessionUrl.length === 0)) {
+      return failure("MALFORMED_MESSAGE", "request RelaunchZaiSession: field 'sessionUrl' must be a non-empty string or null");
+    }
+  }
+  if (kind === "ArmZaiKeepalive") {
+    // The supervised tab correlation, the relaunch target URL (null =
+    // the provider home), and the bounded alarm period (null = the
+    // 1-minute default).
+    if (!isPositiveInteger(value.tabId)) {
+      return failure("MALFORMED_MESSAGE", "request ArmZaiKeepalive: field 'tabId' must be a positive integer (the supervised provider tab)");
+    }
+    if (value.sessionUrl !== null && (typeof value.sessionUrl !== "string" || value.sessionUrl.length === 0)) {
+      return failure("MALFORMED_MESSAGE", "request ArmZaiKeepalive: field 'sessionUrl' must be a non-empty string or null");
+    }
+    if (value.periodMinutes !== null && value.periodMinutes !== undefined &&
+        (!Number.isInteger(value.periodMinutes) || value.periodMinutes < 1 || value.periodMinutes > 30)) {
+      return failure("MALFORMED_MESSAGE", "request ArmZaiKeepalive: field 'periodMinutes' must be an integer between 1 and 30, or null/undefined for the default");
     }
   }
   return { ok: true, request: value };

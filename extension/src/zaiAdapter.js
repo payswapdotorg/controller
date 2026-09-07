@@ -597,6 +597,14 @@ const DEFAULTS = Object.freeze({
   confirmationHoldPolls: 10, // the bounded async-outcome window
   maxSubmissionAttempts: 3, // bounded preparation/send/verify attempts
   maxRecoveryAttempts: 2, // bounded Stop/continue recovery attempts
+  // CTRL-014 CONTINUATION 24 (the resident supervision surface): the
+  // bounded RELAUNCH page-ready window — a freshly opened provider
+  // tab must mount, inject its content script (document_idle), and
+  // answer a decisive facts read within this budget (20 rounds x 1s
+  // against the observed full page-load latency; the post-action
+  // settle window is far too short for a fresh navigation).
+  relaunchPolls: 20,
+  relaunchIntervalMs: 1000,
 });
 
 /**
@@ -606,7 +614,8 @@ const DEFAULTS = Object.freeze({
  *           sleep?: Function, now?: Function, settlePolls?: number,
  *           settleIntervalMs?: number, watchRounds?: number,
  *           watchRoundIntervalMs?: number, confirmationHoldPolls?: number,
- *           maxSubmissionAttempts?: number, maxRecoveryAttempts?: number }} wiring
+ *           maxSubmissionAttempts?: number, maxRecoveryAttempts?: number,
+ *           relaunchPolls?: number, relaunchIntervalMs?: number }} wiring
  *        `pageBridge` is the typed channel to the content script
  *        (createZaiPageBridge); tests inject a scriptable fake. The
  *        watch budgets size the bounded pure-observation verification
@@ -626,6 +635,8 @@ export function createZaiAdapter({
   confirmationHoldPolls = DEFAULTS.confirmationHoldPolls,
   maxSubmissionAttempts = DEFAULTS.maxSubmissionAttempts,
   maxRecoveryAttempts = DEFAULTS.maxRecoveryAttempts,
+  relaunchPolls = DEFAULTS.relaunchPolls,
+  relaunchIntervalMs = DEFAULTS.relaunchIntervalMs,
 } = {}) {
   if (typeof tabsApi?.query !== "function" || typeof tabsApi?.update !== "function") {
     throw new Error("createZaiAdapter requires a tabsApi with query/create/update/get");
@@ -3385,11 +3396,544 @@ export function createZaiAdapter({
     }
   }
 
+  // ------------------------------------------------------------------
+  // CTRL-014 CONTINUATION 24 — THE RESIDENT SUPERVISION SURFACE (the
+  // operator's overnight directive, 2026-09-07 ~02:00: "use only the
+  // extension to launch a prompt to the agent, make updates to the
+  // adapter until it is able to handle sending a prompt, dealing
+  // with all sorts of popups, etc.; also it should be able to
+  // relaunch z.ai when the watcher dies — I'll be using it to
+  // relaunch the watcher of this session when it dies"). Three new
+  // capabilities, each on the frozen fail-closed doctrine:
+  //
+  //   sendTurn       — submit the EXACT governed turn text into an
+  //                    EXISTING provider conversation tab (the same
+  //                    ensurePrompt/pre-send-gate/send/watch lifecycle
+  //                    Start runs, WITHOUT the fresh-session
+  //                    preparation: no Agent-pill re-selection, no
+  //                    model re-selection, no provisioning wait — the
+  //                    conversation already holds its ground truths),
+  //                    with the SAME dialog law and the SAME bounded
+  //                    known-popup recovery, plus the concurrency
+  //                    gate (a second turn is never submitted while
+  //                    a generation is in flight);
+  //   relaunchSession— the find-or-open relaunch: exactly-one-tab
+  //                    discovery at the target session URL (or the
+  //                    provider home when null), reuse when the tab
+  //                    is alive, OPEN a fresh tab when it is gone
+  //                    (the watcher-died recovery), a bounded
+  //                    page-ready wait, bounded popup dismissals, and
+  //                    the honest post-relaunch observation;
+  //   observeTab     — the registry-free single-tab observation the
+  //                    keepalive watchdog probes with.
+  // ------------------------------------------------------------------
+
+  /**
+   * The bounded single-popup dismissal (the operator's "dealing with
+   * all sorts of popups" directive, on the frozen key law): the
+   * EXACTLY-ONE visible dialog that is neither auth-shaped nor
+   * error-shaped may receive ONE Enter press; the dismissal is
+   * VERIFIED by post-action observation (a keypress is never
+   * evidence by itself). Auth-shaped dialogs fail closed
+   * AUTHENTICATION_INTERRUPTED, error-shaped dialogs fail closed
+   * PROVIDER_ERROR, zero dialogs are a no-op (dismissed: false), and
+   * multiple simultaneous dialogs fail closed UNKNOWN_DIALOG — the
+   * same classes classifyDialog produces, applied at the
+   * supervision surface where a stale popup sitting on a restored
+   * page (LIVE-OBSERVED: the "Currently in peak hours" capacity
+   * modal persisting across the overnight watcher death) is the
+   * ordinary case.
+   */
+  async function dismissPopup(tabId) {
+    const facts = await readFacts(tabId);
+    if (!facts.ok) {
+      return facts;
+    }
+    const count = dialogCount(facts.facts);
+    if (count === 0) {
+      return { ok: true, dismissed: false, reason: "no dialog is visible" };
+    }
+    if (count > 1) {
+      return failure(
+        "UNKNOWN_DIALOG",
+        `${count} dialogs are visible simultaneously — an ambiguous dialog surface is never keypressed`
+      );
+    }
+    const text = String(facts.facts.dialogText?.text ?? "");
+    if (AUTH_DIALOG_PATTERN.test(text)) {
+      return failure(
+        "AUTHENTICATION_INTERRUPTED",
+        "the visible dialog is an authentication surface — the operator authenticates out of band; it is never Enter-dismissed"
+      );
+    }
+    if (ERROR_DIALOG_PATTERN.test(text)) {
+      return failure(
+        "PROVIDER_ERROR",
+        `the visible dialog is an error surface — never Enter-dismissed: ${text.slice(0, 120)}`
+      );
+    }
+    const pressed = await pressEnter(tabId);
+    if (!pressed.ok) {
+      return pressed;
+    }
+    const dismissed = await settle(tabId, [], (f) => dialogCount(f) === 0);
+    if (!dismissed.ok) {
+      return dismissed;
+    }
+    if (dialogCount(dismissed.facts) !== 0) {
+      return failure(
+        "UNKNOWN_DIALOG",
+        "the dialog did not verifiably dismiss after the bounded Enter press — the surface is never assumed cleared"
+      );
+    }
+    return { ok: true, dismissed: true };
+  }
+
+  /**
+   * Send the EXACT governed turn text into an EXISTING provider
+   * conversation tab (the operator's "use only the extension to
+   * launch a prompt to the agent" directive). The full shared
+   * submission lifecycle runs against the named tab: the dialog-law
+   * precheck (with the bounded popup dismissal — the "dealing with
+   * all sorts of popups" ask), the byte-exact ensurePrompt, the
+   * fresh pre-send gate, the send-control click (never an Enter at
+   * the send step), the SAME bounded start-signal watch, and the
+   * async-outcome hold. The session registry is NEVER mutated —
+   * Start/Recover own it; sendTurn is the operator turn channel.
+   * The frozen FOUR-FIELD submitted record shape is preserved
+   * (attempts, popupDismissals, composeReestablishments,
+   * generation).
+   */
+  async function sendTurn({ worker, tabId, prompt }) {
+    if (typeof worker !== "string" || worker.length === 0) {
+      return failure("MALFORMED_MESSAGE", "send turn: worker must be a non-empty string");
+    }
+    if (!Number.isInteger(tabId) || tabId <= 0) {
+      return failure(
+        "MALFORMED_MESSAGE",
+        "send turn: tabId must be a positive integer (the existing provider conversation tab the turn addresses)"
+      );
+    }
+    if (typeof prompt !== "string" || prompt.trim().length === 0) {
+      return failure(
+        "MALFORMED_MESSAGE",
+        "send turn: prompt must be a non-empty string (the exact governed turn text, carried verbatim)"
+      );
+    }
+    // 1. the provider-tab gate: the turn addresses a live provider page.
+    const target = await requireProviderTab(tabId);
+    if (!target.ok) {
+      return target;
+    }
+    const focused = await focusTab(tabId);
+    if (!focused.ok) {
+      return focused;
+    }
+
+    let attempts = 0;
+    let popupDismissals = 0;
+    let composeReestablishments = 0;
+    let lastRefusal = null;
+
+    /** The dialog/failure refusals that are TERMINAL for a turn. */
+    const terminalForTurn = (refusal) =>
+      refusal !== null &&
+      refusal !== undefined &&
+      !refusal.ok &&
+      ["AUTHENTICATION_INTERRUPTED", "AUTHORIZATION_REQUIRED", "HUMAN_VERIFICATION_REQUIRED", "PROVIDER_ERROR", "UNKNOWN_DIALOG"].includes(
+        refusal.error?.code
+      );
+
+    while (attempts < maxSubmissionAttempts) {
+      attempts += 1;
+      // 2. THE PRECHECK (the dialog law + the concurrency gate): the
+      // settled classification must be a surface a turn can be
+      // submitted to. A visible popup is dismissed through the
+      // bounded key law BEFORE the precheck is re-run (the restored
+      // overnight page with its stale capacity modal is the ordinary
+      // case); a generation in flight REFUSES — the provider's own
+      // concurrency gate is the duplicate guard, never an artificial
+      // queue.
+      const settled = await settle(tabId, [], (f) =>
+        classifySession(f, null, "preparing").state !== "ambiguous"
+      );
+      if (!settled.ok) {
+        return settled;
+      }
+      const precheck = classifySession(settled.facts, null, "preparing");
+      if (precheck.state === "human-verification-required") {
+        return failure("HUMAN_VERIFICATION_REQUIRED", `the target session is demanding interactive human verification: ${precheck.detail}`);
+      }
+      if (precheck.state === "authentication-required") {
+        return failure(
+          "AUTHORIZATION_REQUIRED",
+          `the target session is not authenticated: ${precheck.detail}. Human authentication is out of band — authenticate in the provider tab, then send the turn again`
+        );
+      }
+      if (precheck.state === "provider-error") {
+        return failure("PROVIDER_ERROR", `the target session is presenting an error surface: ${precheck.detail}`);
+      }
+      if (
+        precheck.state === "expected-blocking-dialog" ||
+        precheck.state === "unexpected-dialog" ||
+        precheck.state === "ambiguous"
+      ) {
+        const dismissed = await dismissPopup(tabId);
+        if (!dismissed.ok) {
+          return dismissed;
+        }
+        if (dismissed.dismissed) {
+          popupDismissals += 1;
+          continue; // the precheck re-runs on the cleared surface
+        }
+        return failure("UNKNOWN_DIALOG", `a dialog is visible on the target session and did not classify as dismissible: ${precheck.detail}`);
+      }
+      if (precheck.state === "working" || precheck.state === "prompt-submitted") {
+        return failure(
+          "AMBIGUOUS_STATE",
+          `a generation is in progress on the target session (${precheck.state}: ${precheck.detail}) — a second turn is never submitted while one is in flight; wait for completion, observe, or invoke RecoverZaiHungWorker`
+        );
+      }
+      // 3. THE EXACT TURN ENTRY (the byte-exact law, adapted to the
+      // existing-conversation channel): the composer is read once;
+      // an already-exact value is sent AS-IS (never retyped — the
+      // operator's restored draft after a popup dismissal); any
+      // other value is typed over (the operator turn channel owns
+      // the surface). The never-resent law on this channel is the
+      // PRECHECK's concurrency gate above plus the provider's own
+      // submission gate (the Stop-rendered refusal) — per the frozen
+      // doctrine ("the provider's own concurrency gate is the
+      // duplicate guard, never an artificial one"): a PRIOR turn
+      // that carried the same exact text (LIVE-OBSERVED: the
+      // overnight completion-error recovery — the failed turn's row
+      // is history, never a never-resent lock on the at-rest
+      // surface) is resubmitted as a NEW turn; an IN-FLIGHT
+      // generation carrying the exact row is refused by the precheck
+      // before this point.
+      const gate = await readFacts(tabId);
+      if (!gate.ok) {
+        lastRefusal = gate;
+        continue;
+      }
+      const gateDialog = classifyDialog(gate.facts, "preparing");
+      if (gateDialog.kind !== "none") {
+        // A dialog at the entry: the bounded dismissal (the key
+        // law), then the attempt restarts (the re-read re-verifies).
+        const dismissed = await dismissPopup(tabId);
+        if (!dismissed.ok) {
+          if (terminalForTurn(dismissed)) {
+            return dismissed;
+          }
+          lastRefusal = dismissed;
+          continue;
+        }
+        if (dismissed.dismissed) {
+          popupDismissals += 1;
+        }
+        continue;
+      }
+      if (composerValueOf(gate.facts) !== prompt) {
+        const typed = await enterPrompt(tabId, prompt);
+        if (!typed.ok) {
+          lastRefusal = typed;
+          continue;
+        }
+      }
+      // 4. THE PRE-SEND GATE: a FRESH decisive read immediately
+      // before the send — an unreadable, empty, or rewritten
+      // composer is NEVER sent; the action slot must render the
+      // send control (a Stop-rendered slot is a generation in
+      // progress — the turn is not sent through it).
+      const fresh = await readFacts(tabId);
+      if (!fresh.ok) {
+        lastRefusal = fresh;
+        continue;
+      }
+      const freshDialog = classifyDialog(fresh.facts, "preparing");
+      if (freshDialog.kind !== "none") {
+        lastRefusal = failure("UNKNOWN_DIALOG", `a dialog is visible at the send gate: ${freshDialog.reason}`);
+        continue;
+      }
+      if (composerValueOf(fresh.facts) !== prompt) {
+        const reestablished = await reestablishComposer(tabId);
+        if (reestablished.ok) {
+          composeReestablishments += 1;
+          lastRefusal = failure(
+            "PAGE_MALFORMED",
+            "the exact turn text was not present in the composer at the send gate — the composer input state was re-established for a re-typed, re-verified resend"
+          );
+        } else {
+          lastRefusal = reestablished;
+        }
+        continue;
+      }
+      const control = controlStateOf(fresh.facts);
+      if (control === "stop") {
+        return failure(
+          "AMBIGUOUS_STATE",
+          "the composer action slot is rendering the Stop control — a generation is in progress; the turn was not sent"
+        );
+      }
+      if (control !== "send") {
+        lastRefusal = failure(
+          "AMBIGUOUS_STATE",
+          `the composer action slot did not resolve to the send control (observed: ${control}) — the turn is not sent through an unresolved slot`
+        );
+        continue;
+      }
+      // 5. SEND (the send-control click; never an Enter at the send
+      // step — the frozen key law).
+      const clicked = await send(tabId);
+      if (!clicked.ok) {
+        lastRefusal = clicked;
+        continue;
+      }
+      // 6. THE SAME bounded start-signal watch + async-outcome hold
+      // (the conversation-state advancement past the dispatch
+      // baseline, the exact prompt row, the Send->Stop transition
+      // corroborating, the decisively empty composer).
+      const outcome = await watchAgentStart(
+        tabId,
+        prompt,
+        chatObjectCreatedOf(fresh.facts) === true,
+        userTurnCountOf(fresh.facts) ?? 0,
+        { popupRecovery: true, authMarkersBaseline: false }
+      );
+      if (outcome.started) {
+        const generation = stopVisible(outcome.started) ? "working" : "waiting";
+        return {
+          ok: true,
+          turn: {
+            worker,
+            tabId,
+            attempts,
+            popupDismissals,
+            composeReestablishments,
+            generation,
+          },
+        };
+      }
+      if (outcome.reestablished) {
+        composeReestablishments += 1;
+      }
+      if (outcome.popup) {
+        // the OBSERVED KNOWN popup after the send: the bounded Enter
+        // dismissal, verified, then the attempt restart (the next
+        // ensurePrompt decides resend-vs-never-resent honestly).
+        const dismissed = await dismissPopup(tabId);
+        if (!dismissed.ok) {
+          if (terminalForTurn(dismissed)) {
+            return dismissed;
+          }
+          lastRefusal = dismissed;
+          continue;
+        }
+        if (dismissed.dismissed) {
+          popupDismissals += 1;
+        }
+        continue;
+      }
+      if (terminalForTurn(outcome.refusal)) {
+        return outcome.refusal;
+      }
+      lastRefusal = outcome.refusal;
+    }
+    return (
+      lastRefusal ??
+      failure("RETRY_EXHAUSTED", `the bounded turn attempt budget (${maxSubmissionAttempts}) was exhausted`)
+    );
+  }
+
+  /**
+   * The bounded page-ready wait for a RELAUNCHED tab (a fresh
+   * navigation or a reloaded hung page): the content script must
+   * inject (document_idle) and answer a decisive facts read within
+   * the dedicated relaunch budget (a full provider page load is far
+   * slower than the post-action settle window — 20 rounds x 1s
+   * against the observed load latency).
+   */
+  async function awaitRelaunchReady(tabId) {
+    let last = null;
+    for (let i = 0; i < relaunchPolls; i += 1) {
+      if (i > 0) {
+        await sleep(relaunchIntervalMs);
+      }
+      last = await readFacts(tabId);
+      if (last.ok && classifySession(last.facts, null, "idle").state !== "ambiguous") {
+        return last;
+      }
+    }
+    if (last === null) {
+      return failure("PAGE_UNAVAILABLE", `the relaunched provider tab ${tabId} never answered a facts read`);
+    }
+    return last.ok
+      ? failure(
+          "PAGE_UNAVAILABLE",
+          `the relaunched provider tab ${tabId} never reached a decisive session state within the bounded window (${relaunchPolls} rounds)`
+        )
+      : last;
+  }
+
+  /**
+   * Relaunch the provider session (the operator's "it should be able
+   * to relaunch z.ai when the watcher dies" directive — the recovery
+   * the operator invokes from the harness when the supervision stack
+   * dies, and the recovery the keepalive watchdog invokes
+   * automatically). The find-or-open law:
+   *
+   *   - a sessionUrl (a provider-origin conversation URL) resolves
+   *     by EXACT normalized match: exactly one matching tab ->
+   *     REUSE (focus + verify + observe); zero -> OPEN a fresh tab
+   *     at the URL (the tab-died recovery) and wait for page-ready;
+   *     more than one -> the typed ambiguous refusal (never a guess
+   *     between tabs);
+   *   - a null sessionUrl addresses the provider HOME surface with
+   *     the same exactly-one discipline over all provider tabs.
+   *
+   * Popups on the restored surface are dismissed through the bounded
+   * key law (the stale overnight capacity modal); the post-relaunch
+   * observation is the honest classified state — ready-for-input,
+   * working, stopped, authentication-required (the session cookie
+   * was lost — the operator's out-of-band action), and so on.
+   */
+  async function relaunchSession({ worker, sessionUrl }) {
+    if (typeof worker !== "string" || worker.length === 0) {
+      return failure("MALFORMED_MESSAGE", "relaunch session: worker must be a non-empty string");
+    }
+    if (sessionUrl !== null && sessionUrl !== undefined && (typeof sessionUrl !== "string" || sessionUrl.length === 0)) {
+      return failure(
+        "MALFORMED_MESSAGE",
+        "relaunch session: sessionUrl must be a non-empty provider-origin URL string or null (null relaunches the provider home surface)"
+      );
+    }
+    let target = providerUrl;
+    if (sessionUrl !== null && sessionUrl !== undefined) {
+      let parsed;
+      try {
+        parsed = new URL(sessionUrl);
+      } catch (err) {
+        return failure("MALFORMED_MESSAGE", `relaunch session: sessionUrl is not a valid URL (${err})`);
+      }
+      if (parsed.origin !== origin) {
+        return failure(
+          "MALFORMED_MESSAGE",
+          `relaunch session: sessionUrl must be on the frozen provider origin ${origin} (received ${parsed.origin})`
+        );
+      }
+      target = `${parsed.origin}${parsed.pathname}`.replace(/\/$/, "");
+    }
+    const discovered = await discoverTabs();
+    if (!discovered.ok) {
+      return discovered;
+    }
+    const normalize = (value) => {
+      try {
+        const parsed = new URL(String(value));
+        parsed.hash = "";
+        parsed.search = "";
+        let pathname = parsed.pathname;
+        if (pathname.length > 1 && pathname.endsWith("/")) {
+          pathname = pathname.slice(0, -1);
+        }
+        return `${parsed.origin}${pathname}`;
+      } catch {
+        return null;
+      }
+    };
+    const wanted = normalize(target);
+    let matches;
+    if (sessionUrl !== null && sessionUrl !== undefined) {
+      matches = discovered.tabs.filter((tab) => normalize(tab.url) === wanted);
+    } else {
+      matches = discovered.tabs;
+    }
+    let tabId;
+    let reused;
+    if (matches.length === 1) {
+      tabId = matches[0].id;
+      reused = true;
+      const focused = await focusTab(tabId);
+      if (!focused.ok) {
+        return focused;
+      }
+    } else if (matches.length > 1) {
+      return failure(
+        "AMBIGUOUS_STATE",
+        `${matches.length} provider tabs match the relaunch target — exactly one is required (close the extras, then relaunch again)`
+      );
+    } else {
+      try {
+        const tab = await tabsApi.create({ url: target, active: true });
+        if (typeof tab?.id !== "number") {
+          return failure("TABS_UNAVAILABLE", "opening the provider session tab returned an unusable result");
+        }
+        tabId = tab.id;
+        reused = false;
+      } catch (err) {
+        return failure("TABS_UNAVAILABLE", `opening the provider session tab failed: ${err}`);
+      }
+    }
+    const ready = await awaitRelaunchReady(tabId);
+    if (!ready.ok) {
+      return ready;
+    }
+    // The bounded popup dismissals on the restored surface (the
+    // operator's "dealing with all sorts of popups" — the stale
+    // capacity modal across a watcher death is the ordinary case;
+    // auth/error-shaped dialogs fail closed through the key law).
+    let popupDismissals = 0;
+    let facts = ready.facts;
+    for (let round = 0; round < maxRecoveryAttempts; round += 1) {
+      if (dialogCount(facts) === 0) {
+        break;
+      }
+      const dismissed = await dismissPopup(tabId);
+      if (!dismissed.ok) {
+        return dismissed;
+      }
+      if (!dismissed.dismissed) {
+        break;
+      }
+      popupDismissals += 1;
+      const reread = await readFacts(tabId);
+      if (!reread.ok) {
+        return reread;
+      }
+      facts = reread.facts;
+    }
+    const observation = classifySession(facts, null, "idle");
+    return {
+      ok: true,
+      session: { worker, tabId },
+      reused,
+      popupDismissals,
+      observation: { ...observation, worker },
+    };
+  }
+
+  /**
+   * The registry-free single-tab observation (the keepalive
+   * watchdog's probe): the named provider tab's honest classified
+   * state, with no session correlation and no discovery — exactly
+   * the tab the caller supervises.
+   */
+  async function observeTab(tabId) {
+    const target = await requireProviderTab(tabId);
+    if (!target.ok) {
+      return target;
+    }
+    const observation = await observePage(tabId, null);
+    return { ok: true, observation: { ...observation, tabId } };
+  }
+
   return Object.freeze({
     observeSession,
     startWorkerSession,
     recoverHungWorker,
     operatorAction,
+    sendTurn,
+    relaunchSession,
+    observeTab,
   });
 }
 

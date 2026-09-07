@@ -40,7 +40,9 @@ import { EXTENSION_ROOT, loadManifest, readExtensionFile } from "./fixtures.js";
 test("the manifest parses as Manifest V3 with the minimal permissions", () => {
   const manifest = loadManifest();
   assert.equal(manifest.manifest_version, 3);
-  assert.deepEqual([...manifest.permissions].sort(), ["storage", "tabs"]);
+  // CTRL-014 continuation 24: "alarms" joins the minimal set — the
+  // keepalive watchdog's periodic wake surface (nothing more).
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "storage", "tabs"]);
   // The four hosts are: the GitHub REST API, raw repository content,
   // github.com for exactly the OAuth device-flow endpoints (API
   // posts, never page interaction — no github.com content script),
@@ -53,7 +55,7 @@ test("the manifest parses as Manifest V3 with the minimal permissions", () => {
     "https://chat.z.ai/*",
   ]);
   // No other API permissions (no identity, no scripting, no webRequest...).
-  assert.deepEqual(manifest.permissions, ["storage", "tabs"]);
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "storage", "tabs"]);
 });
 
 test("the manifest documents the OAuth deployment configuration with the minimal scope", () => {
