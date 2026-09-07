@@ -1074,17 +1074,62 @@ export function createZaiAdapter({
    * turn still fails (different text), and a stale exact row is
    * still refused by the turn-count-delta conjunct (the count did
    * not advance).
+   *
+   * CTRL-014 CONTINUATION 25 (LIVE-OBSERVED 2026-09-07 ~02:45, the
+   * 801-char PAT-delivery turn): the provider renders LONG message
+   * rows in the COLLAPSED FULL-MESSAGE form — the content
+   * byte-identical, then the provider's trailing-whitespace
+   * normalization (the prompt's trailing newline renders as
+   * whitespace), then the "Show full message" expander label. The
+   * live row read "...the real tool behavior. \n \nShow full
+   * message" for the exactly submitted "...the real tool
+   * behavior.\n" (the leading 800 characters byte-identical — the
+   * divergence is ONLY the trailing-whitespace class + the label).
+   * The predicate accepts the third form ONLY through the exact
+   * expander label suffix: the interior must be byte-identical and
+   * ONLY the trailing whitespace may differ (a near-miss in any
+   * non-whitespace character still fails; a foreign turn still
+   * fails; the turn-count-delta conjunct still refuses a stale row).
    */
   function userRowTextIsExact(rowText, text) {
     if (rowText === text) {
       return true;
     }
-    return (
+    if (
       typeof rowText === "string" &&
       typeof text === "string" &&
       rowText.startsWith(text) &&
       TURN_INDEX_BADGE_PATTERN.test(rowText.slice(text.length))
-    );
+    ) {
+      return true;
+    }
+    return rowIsCollapsedFullMessage(rowText, text);
+  }
+
+  /** @private — the LIVE-OBSERVED "Show full message" expander label. */
+  const SHOW_FULL_MESSAGE_LABEL = "Show full message";
+
+  /**
+   * @private — CONTINUATION 25: the collapsed-long-message row form.
+   * The row must END with the exact expander label; the body before
+   * it must equal the submitted text with ONLY the trailing
+   * whitespace normalized on both sides (the interior is
+   * byte-identical — every non-whitespace difference is a refusal).
+   */
+  function rowIsCollapsedFullMessage(rowText, text) {
+    if (typeof rowText !== "string" || typeof text !== "string") {
+      return false;
+    }
+    if (!rowText.endsWith(SHOW_FULL_MESSAGE_LABEL)) {
+      return false;
+    }
+    const body = rowText.slice(0, rowText.length - SHOW_FULL_MESSAGE_LABEL.length);
+    return _trailingWhitespaceTrimmed(body) === _trailingWhitespaceTrimmed(text);
+  }
+
+  /** @private — the string with its trailing whitespace removed. */
+  function _trailingWhitespaceTrimmed(value) {
+    return value.replace(/\s+$/, "");
   }
 
   /**

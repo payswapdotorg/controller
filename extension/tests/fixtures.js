@@ -550,6 +550,13 @@ export function fakeZaiPage({
   //   LIVE-OBSERVED) is set on the completion transition when
   //   `completionErrorText` is given.
   turnIndexBadge = false,
+  // CTRL-014 CONTINUATION 25 (LIVE-OBSERVED 2026-09-07 ~02:45): the
+  // provider renders LONG message rows in the collapsed full-message
+  // form — the content byte-identical, the trailing whitespace
+  // normalized, then the "Show full message" expander label. The
+  // threshold is a deterministic stand-in for the provider's own
+  // (the live row: 801 chars -> collapsed; short rows render bare).
+  longMessageCollapse = false,
   humanVerification = false,
   humanVerificationOnSend = null,
   assistantText = null,
@@ -707,6 +714,7 @@ export function fakeZaiPage({
     generationCompletes: generationCompletes ? { probes: generationCompletes, fired: false } : null,
     pendingCompletion: null,
     turnIndexBadge,
+    longMessageCollapse,
     humanVerification: { visible: humanVerification },
     pendingHumanVerification: null,
     humanVerificationOnSend,
@@ -778,8 +786,16 @@ export function fakeZaiPage({
       // rendering of the current message; the exact-row predicate
       // accepts both the bare and the badge-suffixed form).
       const turnNumber = state.conversation.length + 1;
+      // CONTINUATION 25: the collapsed-long-message rendering (the
+      // LIVE-OBSERVED "Show full message" form — the trailing
+      // newline renders as whitespace, the label follows).
+      const collapsed =
+        state.longMessageCollapse && state.lastSubmitted.length > 400
+          ? state.lastSubmitted.replace(/\s+$/, " ") + " \n \nShow full message"
+          : null;
       state.conversation.push(
-        state.composerValue + (state.turnIndexBadge ? `         ${turnNumber}/${turnNumber}` : "")
+        collapsed ??
+          (state.composerValue + (state.turnIndexBadge ? `         ${turnNumber}/${turnNumber}` : ""))
       );
       state.composerValue = "";
       // CONTINUATION 16 (PR #6 review 5125198728): the chat-object

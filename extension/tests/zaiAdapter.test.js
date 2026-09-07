@@ -104,6 +104,7 @@ function build({
   // human-verification captcha popup (initial / on-send-armed), and
   // the assistant-row completion-error rendering.
   turnIndexBadge = false,
+  longMessageCollapse = false,
   humanVerification = false,
   humanVerificationOnSend = null,
   assistantText = null,
@@ -141,6 +142,7 @@ function build({
       sendInaccessible,
       chatUrl,
       turnIndexBadge,
+      longMessageCollapse,
       humanVerification,
       humanVerificationOnSend,
       assistantText,
@@ -3568,4 +3570,69 @@ test("OBSERVE TAB: the registry-free single-tab observation", async () => {
   const foreign = await adapter.observeTab(424242);
   assert.equal(foreign.ok, false);
   assert.equal(foreign.error.code, "STALE_REFERENCE");
+});
+
+// --------------------------------------------------------------------
+// CTRL-014 CONTINUATION 25 — the collapsed full-message row form
+// (LIVE-OBSERVED 2026-09-07 ~02:45: the 801-char PAT-delivery turn —
+// the provider renders long rows as the byte-identical content + the
+// trailing-whitespace normalization + the "Show full message"
+// expander label; the exact-row predicate must accept the form and
+// the near-miss law must survive it).
+// --------------------------------------------------------------------
+
+const LONG_PROMPT = [
+  "Architect here. The blocker is resolved — the actual token value is below (the real string, not a placeholder):",
+  "",
+  "Use it exactly once, now, via the script's env var (never printed, never written to a file).",
+  "",
+  "Then: verify the push landed, report the PR number and URL, and STOP for architect review.",
+].join("\n").padEnd(620, "x"); // > 400 chars: the collapse threshold
+
+test("COLLAPSED ROW: a long turn lands and the start signal fires through the collapsed full-message form", async () => {
+  const { adapter, pages } = build({ chatUrl: "https://chat.z.ai/c/existing", longMessageCollapse: true });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: LONG_PROMPT });
+  assert.equal(result.ok, true);
+  assert.equal(result.turn.attempts, 1);
+  assert.equal(result.turn.generation, "working");
+  // The landed row renders in the LIVE-OBSERVED collapsed form.
+  const row = pages[0].state.conversation[0];
+  assert.ok(row.endsWith("Show full message"));
+  assert.ok(row.startsWith(LONG_PROMPT.slice(0, 400)));
+});
+
+test("COLLAPSED ROW: the Start flow's confirmed-detection accepts the collapsed landed row (the never-resent law holds)", async () => {
+  const { adapter } = build({ longMessageCollapse: true });
+  const first = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: LONG_PROMPT });
+  assert.equal(first.ok, true);
+  assert.equal(first.submitted.attempts, 1);
+  // A RE-Start of the SAME governed prompt on the landed surface:
+  // ensurePrompt's confirmed path fires (the collapsed row IS the
+  // exact prompt) — never a resend.
+  const again = await adapter.startWorkerSession({ worker: "w1", workItem: "CTRL-014", prompt: LONG_PROMPT });
+  assert.equal(again.ok, true);
+  assert.equal(again.alreadyActive, true); // the registry correlation re-reports idempotently
+});
+
+test("COLLAPSED ROW: a near-miss collapsed row never matches (the exact law survives the third form)", async () => {
+  // The prior row: the exact text with ONE interior non-whitespace
+  // difference, rendered collapsed — a foreign turn, never ours.
+  const nearMiss = (LONG_PROMPT.replace("Architect here.", "Architect her3.") + " \n \nShow full message");
+  const { adapter } = build({ chatUrl: "https://chat.z.ai/c/existing", conversation: [nearMiss], longMessageCollapse: true });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: LONG_PROMPT });
+  // The near-miss prior row never satisfies the exact-row predicate:
+  // the turn is typed and sent as a NEW turn (the count advances).
+  assert.equal(result.ok, true);
+  assert.equal(result.turn.attempts, 1);
+});
+
+test("COLLAPSED ROW: trailing-whitespace-only differences match; the label must be exact", async () => {
+  const { adapter, pages } = build({ chatUrl: "https://chat.z.ai/c/existing", longMessageCollapse: true });
+  const result = await adapter.sendTurn({ worker: "w1", tabId: 7, prompt: LONG_PROMPT });
+  assert.equal(result.ok, true);
+  const row = pages[0].state.conversation[0];
+  // The row: content (trailing newline normalized to a space) + the
+  // label. A DIFFERENT label must not match — pin the exact form.
+  assert.ok(row.includes("Show full message"));
+  assert.ok(!row.includes("Show full messages"));
 });
