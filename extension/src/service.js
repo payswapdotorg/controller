@@ -119,6 +119,10 @@ import { failure } from "./errors.js";
  *        REAL identity offline with deterministic clocks.
  *        `keepaliveWatchdog` overrides the built-in keepalive in tests
  *        (with `alarmsApi` for the real alarm scheduling surface).
+ *        The service surface additionally exposes
+ *        `restoreKeepaliveAlarms()` (the startup alarm-schedule
+ *        restore over the keepalive — typed, never throwing), which
+ *        the browser wiring runs once after start() resolves.
  */
 export function createControllerService({
   storage,
@@ -770,7 +774,43 @@ export function createControllerService({
     }
   }
 
-  return { start, handleMessage, handleKeepaliveAlarm: (name) => keepalive.handleAlarm(name), store };
+  /**
+   * @private — restore the keepalive alarm schedule from the
+   * persisted store (CTRL-014 continuation 26, the keepalive
+   * persistence): the armed records survive a service-worker restart
+   * in chrome.storage.local while the scheduled chrome.alarms alarm
+   * can be LOST — the restore re-creates every lost alarm at the
+   * persisted period and never resets an intact one.
+   *
+   * Exposed on the service return object for the BROWSER WIRING
+   * (which runs it once after start() resolves) rather than folded
+   * into start() itself: start()'s typed contract is the
+   * configuration-store load (its result is the store's typed
+   * result, pinned by the existing suites), while the restore is
+   * runtime wiring over the alarms surface — and staying on the
+   * return surface keeps it testable with the injected watchdog.
+   * Never throws: an injected watchdog without the capability
+   * degrades to the typed INTERNAL_ERROR refusal (the same doctrine
+   * as the service's other missing-surface degradations), and the
+   * keepalive's own refusals arrive typed.
+   */
+  async function _restoreKeepaliveAlarms() {
+    if (typeof keepalive.restoreAlarms !== "function") {
+      return failure(
+        "INTERNAL_ERROR",
+        "the keepalive watchdog wiring has no restoreAlarms capability — the alarm restore is unavailable in this runtime"
+      );
+    }
+    return keepalive.restoreAlarms();
+  }
+
+  return {
+    start,
+    handleMessage,
+    handleKeepaliveAlarm: (name) => keepalive.handleAlarm(name),
+    restoreKeepaliveAlarms: _restoreKeepaliveAlarms,
+    store,
+  };
 }
 
 /** @private — the manifest OAuth client id (public identifier, not a secret). */
@@ -827,4 +867,24 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
       void ready.then(() => service.handleKeepaliveAlarm(alarm?.name)).catch(() => {});
     });
   }
+  // CTRL-014 continuation 26 (the keepalive persistence): after the
+  // configuration load, RESTORE the alarm schedule — the armed
+  // records persist in chrome.storage.local across a service-worker
+  // restart or an extension reload, but the scheduled chrome.alarms
+  // alarm can be LOST (the observed silent supervision death: the
+  // storage says "armed" and the watchdog never fires again). Every
+  // armed record whose named alarm is missing is re-created at the
+  // persisted period; an intact alarm is never reset (that would
+  // restart its cadence). A typed refusal is logged, never thrown —
+  // a restore failure never crashes startup.
+  void ready
+    .then(() => service.restoreKeepaliveAlarms())
+    .then((restored) => {
+      if (restored && restored.ok === false) {
+        console.warn(
+          `[pectoraux] keepalive alarm restore refused: ${restored.error?.code ?? "INTERNAL_ERROR"} — ${restored.error?.message ?? ""}`
+        );
+      }
+    })
+    .catch(() => {});
 }

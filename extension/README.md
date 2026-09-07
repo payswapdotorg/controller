@@ -911,6 +911,20 @@ restarts freely, the supervision state survives) — `ObserveZaiKeepalive`
 returns exactly what happened overnight, typed and timestamped, newest
 last. The manifest gains exactly one permission for this: `alarms`.
 
+**The alarm schedule is RESTORED at startup (continuation 26).** A
+service-worker restart (or an extension reload) can lose the
+scheduled `chrome.alarms` alarm while the armed records persist in
+`chrome.storage.local` — the storage would then say "armed" while the
+watchdog never fires again (a silent supervision death, the exact
+opposite of what the keepalive exists for). On every startup, after
+the configuration load, the wiring runs the restore once: each armed
+record whose named alarm (`zai-keepalive:<worker>`) no longer exists
+is re-created at the persisted period; an alarm that still exists is
+left UNTOUCHED (re-creating an intact alarm would restart its period
+cadence — a silent reschedule). A restore refusal is typed, logged,
+and never crashes startup; an alarms surface with neither `get` nor
+`getAll` refuses honestly rather than blindly re-creating.
+
 ### Where the popups are handled (the "all sorts of popups" ask)
 
 | surface | handling |

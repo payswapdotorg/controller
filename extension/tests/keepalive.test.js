@@ -23,7 +23,16 @@
  *   - THE DIALOG PATH: a dialog-bearing surface hands the recovery
  *     to the relaunch capability (which owns the popup key law);
  *   - the event ring is bounded (the oldest events are dropped);
- *   - the storage write happens after every handled check.
+ *   - the storage write happens after every handled check;
+ *   - THE RESTORE PATH (continuation 26, the keepalive persistence):
+ *     a lost alarm for an armed record is re-created with the
+ *     persisted period; an intact alarm is NEVER re-created (its
+ *     cadence is preserved); an empty store is a no-op; restore is
+ *     idempotent; a refused creation surfaces the typed refusal
+ *     (never a throw) while the OTHER records are still restored; a
+ *     malformed persisted record refuses typed (never a blind
+ *     create); the alarms surface without get/getAll degrades to the
+ *     typed refusal, and getAll alone is honored.
  */
 
 import { test } from "node:test";
@@ -35,19 +44,32 @@ import {
   KEEPALIVE_STORE_KEY,
 } from "../src/keepalive.js";
 
-/** A fake alarm scheduler recording create/clear calls. */
+/**
+ * A fake alarm scheduler recording create/clear calls and holding
+ * the live schedule (create registers, clear removes, get looks up —
+ * chrome.alarms semantics). `_lose(name)` drops a scheduled alarm —
+ * the schedule loss a service-worker restart or an extension reload
+ * can cause while the armed RECORD persists (the failure mode the
+ * restore path exists for).
+ */
 function fakeAlarms() {
   const created = [];
   const cleared = [];
+  const scheduled = new Map();
   return {
     created,
     cleared,
     create: async (name, info) => {
       created.push({ name, info });
+      scheduled.set(name, info);
     },
     clear: async (name) => {
       cleared.push(name);
+      scheduled.delete(name);
     },
+    get: async (name) => (scheduled.has(name) ? { name, info: scheduled.get(name) } : undefined),
+    /** Test-only: drop a scheduled alarm (the restart loss). */
+    _lose: (name) => scheduled.delete(name),
   };
 }
 
@@ -358,4 +380,121 @@ test("the event ring is bounded — the oldest events are dropped", async () => 
   const observed = await world.keepalive.observe({ worker: "w12" });
   assert.equal(observed.keepalive.events.length, 5); // maxEvents: 5
   assert.equal(observed.keepalive.checks, 8);
+});
+
+// --------------------------------------------------------------------
+// THE RESTORE PATH (continuation 26 — the keepalive persistence: the
+// armed record survives the restart, the scheduled alarm may not).
+// --------------------------------------------------------------------
+
+test("a lost alarm for an armed record is re-created with the persisted period", async () => {
+  const world = fakeWorld();
+  await world.keepalive.arm({ worker: "w13", tabId: 70, sessionUrl: "https://chat.z.ai/c/abc", periodMinutes: 4 });
+  world.alarms._lose(`${KEEPALIVE_ALARM_PREFIX}w13`); // the restart lost the schedule, not the record
+  const restored = await world.keepalive.restoreAlarms();
+  assert.deepEqual(restored, { ok: true, restored: ["w13"], intact: [] });
+  assert.equal(world.alarms.created.length, 2); // arm's create + exactly one re-create
+  assert.deepEqual(world.alarms.created[1], { name: `${KEEPALIVE_ALARM_PREFIX}w13`, info: { periodInMinutes: 4 } });
+  // the persisted record is never mutated by the restore
+  const stored = (await world.storage.get(KEEPALIVE_STORE_KEY))[KEEPALIVE_STORE_KEY];
+  assert.equal(stored.w13.tabId, 70);
+  assert.equal(stored.w13.periodMinutes, 4);
+  assert.equal(stored.w13.checks, 0);
+});
+
+test("an intact alarm is NOT re-created — its cadence is preserved", async () => {
+  const world = fakeWorld();
+  await world.keepalive.arm({ worker: "w14", tabId: 71, sessionUrl: null, periodMinutes: 3 });
+  const restored = await world.keepalive.restoreAlarms();
+  assert.deepEqual(restored, { ok: true, restored: [], intact: ["w14"] });
+  assert.equal(world.alarms.created.length, 1); // only arm's create — the restore never reset the schedule
+});
+
+test("an empty store is a no-op", async () => {
+  const world = fakeWorld();
+  const restored = await world.keepalive.restoreAlarms();
+  assert.deepEqual(restored, { ok: true, restored: [], intact: [] });
+  assert.deepEqual(world.alarms.created, []);
+});
+
+test("restore is idempotent across repeated calls", async () => {
+  const world = fakeWorld();
+  await world.keepalive.arm({ worker: "w15", tabId: 72, sessionUrl: null, periodMinutes: 2 });
+  world.alarms._lose(`${KEEPALIVE_ALARM_PREFIX}w15`);
+  const first = await world.keepalive.restoreAlarms();
+  assert.deepEqual(first, { ok: true, restored: ["w15"], intact: [] });
+  const second = await world.keepalive.restoreAlarms();
+  assert.deepEqual(second, { ok: true, restored: [], intact: ["w15"] }); // the re-created alarm is now intact
+  assert.equal(world.alarms.created.length, 2); // arm + exactly ONE re-create across BOTH restores
+});
+
+test("a refused alarm creation surfaces the typed refusal — never a throw, the other records still restored", async () => {
+  const world = fakeWorld();
+  await world.keepalive.arm({ worker: "w16", tabId: 73, sessionUrl: null, periodMinutes: 1 });
+  await world.keepalive.arm({ worker: "w17", tabId: 74, sessionUrl: null, periodMinutes: 2 });
+  world.alarms._lose(`${KEEPALIVE_ALARM_PREFIX}w16`);
+  world.alarms._lose(`${KEEPALIVE_ALARM_PREFIX}w17`);
+  const originalCreate = world.alarms.create;
+  world.alarms.create = async (name, info) => {
+    if (name === `${KEEPALIVE_ALARM_PREFIX}w16`) {
+      throw new Error("the alarms surface refused");
+    }
+    return originalCreate(name, info);
+  };
+  const restored = await world.keepalive.restoreAlarms();
+  assert.equal(restored.ok, false);
+  assert.equal(restored.error.code, "INTERNAL_ERROR");
+  // the refusal never silently disarms the REST: w17's alarm was still restored
+  assert.equal(world.alarms.created.filter((entry) => entry.name === `${KEEPALIVE_ALARM_PREFIX}w17`).length, 2);
+});
+
+test("a malformed persisted record refuses the restore typed — never a blind create", async () => {
+  const world = fakeWorld();
+  await world.storage.set({ [KEEPALIVE_STORE_KEY]: { w18: { worker: "w18", tabId: 80, sessionUrl: null, periodMinutes: "soon" } } });
+  const refused = await world.keepalive.restoreAlarms();
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error.code, "INTERNAL_ERROR");
+  assert.deepEqual(world.alarms.created, []); // nothing was ever scheduled from a guessed period
+});
+
+test("an alarms surface with neither get nor getAll refuses the restore typed", async () => {
+  const keepalive = createZaiKeepalive({
+    alarmsApi: { create: async () => {}, clear: async () => {} },
+    storageApi: fakeStorage(),
+    tabsApi: { get: async () => null },
+    probe: async () => ({ ok: true, observation: { state: "ready-for-input" } }),
+    relaunch: async () => ({ ok: true, session: { tabId: 1 } }),
+  });
+  const refused = await keepalive.restoreAlarms();
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error.code, "INTERNAL_ERROR");
+});
+
+test("restore honors getAll when get is unavailable", async () => {
+  const created = [];
+  let scheduled = [];
+  const alarmsApi = {
+    create: async (name, info) => {
+      created.push({ name, info });
+    },
+    clear: async () => {},
+    getAll: async () => scheduled,
+  };
+  const keepalive = createZaiKeepalive({
+    alarmsApi,
+    storageApi: fakeStorage(),
+    tabsApi: { get: async () => null },
+    probe: async () => ({ ok: true, observation: { state: "ready-for-input" } }),
+    relaunch: async () => ({ ok: true, session: { tabId: 1 } }),
+  });
+  await keepalive.arm({ worker: "k1", tabId: 9, sessionUrl: null, periodMinutes: 5 });
+  // this fake's schedule list never registered the arm — the loss
+  const first = await keepalive.restoreAlarms();
+  assert.deepEqual(first, { ok: true, restored: ["k1"], intact: [] });
+  assert.deepEqual(created.at(-1), { name: `${KEEPALIVE_ALARM_PREFIX}k1`, info: { periodInMinutes: 5 } });
+  // once getAll reports it, the alarm is intact — never re-created
+  scheduled = [{ name: `${KEEPALIVE_ALARM_PREFIX}k1` }];
+  const second = await keepalive.restoreAlarms();
+  assert.deepEqual(second, { ok: true, restored: [], intact: ["k1"] });
+  assert.equal(created.length, 2); // arm + exactly one restore re-create
 });

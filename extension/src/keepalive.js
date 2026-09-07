@@ -33,6 +33,14 @@
  * and the Architect read exactly what happened overnight, typed and
  * timestamped, newest last.
  *
+ * CTRL-014 continuation 26 (the keepalive persistence): because a
+ * service-worker restart (or an extension reload) can lose the
+ * SCHEDULED chrome.alarms alarm while the armed records persist,
+ * `restoreAlarms` re-creates every lost alarm from the persisted
+ * store (intact alarms are never reset) — the wiring runs it once
+ * at startup, so the supervision never dies silently with the
+ * storage still saying "armed".
+ *
  * Doctrine (the frozen boundary law): this module carries NO
  * provider knowledge — no locators, no dialog classification, no
  * page interpretation. It is the honest state machine over the
@@ -69,6 +77,10 @@ export const KEEPALIVE_PERIOD_MAX = 30;
  *        `relaunch` is the adapter's relaunchSession (typed); `probe`
  *        is the adapter's observeTab (typed); `reloadTab` reloads a
  *        tab id (chrome.tabs.reload). Tests inject fakes for all.
+ *        The alarmsApi must carry create/clear (the arm/disarm
+ *        schedule); `get` (or `getAll`) is OPTIONAL and enables
+ *        `restoreAlarms`' existence verification — without either,
+ *        restore degrades to the typed refusal (documented there).
  */
 export function createZaiKeepalive({
   alarmsApi,
@@ -332,5 +344,117 @@ export function createZaiKeepalive({
     return { ok: true, handled: true, worker };
   }
 
-  return Object.freeze({ arm, disarm, observe, handleAlarm });
+  /**
+   * RESTORE the alarm schedule from the persisted store — the
+   * service-worker-restart / extension-reload recovery (CTRL-014
+   * continuation 26, the keepalive persistence).
+   *
+   * THE OBSERVED FAILURE MODE: the armed records persist in
+   * chrome.storage.local across a service-worker restart (or an
+   * extension reload), but the scheduled chrome.alarms alarm can be
+   * LOST — the storage then says "armed" while the watchdog never
+   * fires again (a silent supervision death, the exact opposite of
+   * what the keepalive exists for). This method reads the persisted
+   * store and, for every armed record whose named alarm
+   * (`KEEPALIVE_ALARM_PREFIX + worker`) no longer exists, re-creates
+   * it with the PERSISTED period. An alarm that still exists is left
+   * UNTOUCHED — re-creating an intact alarm would restart its period
+   * cadence (a silent reschedule), which is exactly what the restore
+   * must never do.
+   *
+   * Honest degradation: alarm existence is verified through
+   * `alarmsApi.get` when the surface has it, else `alarmsApi.getAll`;
+   * with NEITHER the restore refuses typed `INTERNAL_ERROR` (a blind
+   * re-create would reschedule intact alarms — never a guess). A
+   * refused alarm creation, a failed lookup, or a malformed persisted
+   * record surfaces the FIRST typed refusal; the remaining records
+   * are still processed (one corrupt record never silently disarms
+   * the others — the alarms it already re-created are real and the
+   * next restore observes them intact). The persisted records
+   * themselves are never mutated. Never throws.
+   *
+   * @returns {Promise<{ ok: true, restored: string[], intact: string[] } |
+   *           { ok: false, error: { code: string, message: string } }>}
+   */
+  async function restoreAlarms() {
+    if (typeof alarmsApi.get !== "function" && typeof alarmsApi.getAll !== "function") {
+      return failure(
+        "INTERNAL_ERROR",
+        "keepalive restore: the alarms surface has neither get nor getAll — alarm existence cannot be verified, and a blind re-create would reset intact alarms (never a guess)"
+      );
+    }
+    let store;
+    try {
+      store = await readStore();
+    } catch (err) {
+      return failure("INTERNAL_ERROR", `keepalive restore: the persisted store could not be read: ${err}`);
+    }
+    const restored = [];
+    const intact = [];
+    let refusal = null;
+    for (const worker of Object.keys(store)) {
+      const record = store[worker];
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        if (refusal === null) {
+          refusal = failure(
+            "INTERNAL_ERROR",
+            `keepalive restore: the persisted record for '${worker}' is malformed (not an object) — the store is never guessed`
+          );
+        }
+        continue;
+      }
+      const period = record.periodMinutes;
+      if (!Number.isInteger(period) || period < KEEPALIVE_PERIOD_MIN || period > KEEPALIVE_PERIOD_MAX) {
+        if (refusal === null) {
+          refusal = failure(
+            "INTERNAL_ERROR",
+            `keepalive restore: the persisted record for '${worker}' has a malformed periodMinutes (${JSON.stringify(period)}) — outside the bounded window, never re-guessed`
+          );
+        }
+        continue;
+      }
+      const name = `${KEEPALIVE_ALARM_PREFIX}${worker}`;
+      let exists = false;
+      try {
+        if (typeof alarmsApi.get === "function") {
+          const alarm = await alarmsApi.get(name);
+          exists = alarm !== undefined && alarm !== null;
+        } else {
+          const all = await alarmsApi.getAll();
+          exists = (Array.isArray(all) ? all : []).some((alarm) => alarm?.name === name);
+        }
+      } catch (err) {
+        if (refusal === null) {
+          refusal = failure("INTERNAL_ERROR", `keepalive restore: the alarm lookup failed for '${worker}': ${err}`);
+        }
+        continue;
+      }
+      if (exists) {
+        // Intact: NEVER re-created (a re-create would restart the
+        // alarm's period cadence — a silent reschedule).
+        intact.push(worker);
+        continue;
+      }
+      try {
+        await alarmsApi.create(name, { periodInMinutes: period });
+        restored.push(worker);
+      } catch (err) {
+        if (refusal === null) {
+          refusal = failure(
+            "INTERNAL_ERROR",
+            `keepalive restore: the lost alarm could not be re-created for '${worker}' (the record stays armed; a later restore retries): ${err}`
+          );
+        }
+      }
+    }
+    if (refusal !== null) {
+      // The frozen refusal shape (exactly like arm/disarm refusals):
+      // the already-restored alarms are observable through the next
+      // restore/observe, never self-reported on a refusal.
+      return refusal;
+    }
+    return { ok: true, restored, intact };
+  }
+
+  return Object.freeze({ arm, disarm, observe, handleAlarm, restoreAlarms });
 }
