@@ -459,7 +459,7 @@ test("an unknown op is refused with the closed vocabulary named", async () => {
   const result = await page.send({ zaiPage: true, op: "scrollIntoView", selector: "#x" });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "PAGE_MALFORMED");
-  assert.ok(/probe, click, type, pressEnter/.test(result.error.message));
+  assert.ok(/probe, click, clickIndex, type, pressEnter, clickAt, rclickAt, key, evalInPage, navigateTo, readState/.test(result.error.message));
 });
 
 test("a message without the zaiPage marker is ignored, never consumed", async () => {

@@ -236,6 +236,152 @@
     return { ok: true, pressed: "Enter", target: target.tagName };
   }
 
+  /* ---- operator manipulation helpers ------------------------------ */
+
+  var MAX_EVAL = 20000;
+
+  /** The full taught key set (the operator's keyboard primitives). */
+  var KEY_BY_NAME = {
+    Enter: { key: "Enter", code: "Enter", keyCode: 13, which: 13 },
+    ShiftEnter: { key: "Enter", code: "Enter", keyCode: 13, which: 13, shiftKey: true },
+    Tab: { key: "Tab", code: "Tab", keyCode: 9, which: 9 },
+    Escape: { key: "Escape", code: "Escape", keyCode: 27, which: 27 },
+    Backspace: { key: "Backspace", code: "Backspace", keyCode: 8, which: 8 },
+    Delete: { key: "Delete", code: "Delete", keyCode: 46, which: 46 },
+    ArrowUp: { key: "ArrowUp", code: "ArrowUp", keyCode: 38, which: 38 },
+    ArrowDown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40, which: 40 },
+    ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37, which: 37 },
+    ArrowRight: { key: "ArrowRight", code: "ArrowRight", keyCode: 39, which: 39 },
+    Home: { key: "Home", code: "Home", keyCode: 36, which: 36 },
+    End: { key: "End", code: "End", keyCode: 35, which: 35 },
+  };
+
+  function requireViewportPoint(message, action) {
+    if (typeof message.x !== "number" || !Number.isFinite(message.x) ||
+        typeof message.y !== "number" || !Number.isFinite(message.y)) {
+      return fail("PAGE_MALFORMED", action + ".x and .y must be finite numbers (viewport coordinates)");
+    }
+    var x = Math.round(message.x);
+    var y = Math.round(message.y);
+    if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
+      return fail("PAGE_REFUSED", action + " coordinate (" + x + "," + y + ") is outside the viewport " + window.innerWidth + "x" + window.innerHeight);
+    }
+    return { ok: true, x: x, y: y };
+  }
+
+  /**
+   * A viewport-coordinate click (button 1) or right-click (button 2):
+   * resolves the element at the point and dispatches the full DOM
+   * event sequence (the provider's React surfaces observe the same
+   * sequence a real pointer produces).
+   */
+  function clickPoint(x, y, button) {
+    var element = document.elementFromPoint(x, y);
+    if (!element) {
+      return fail("PAGE_REFUSED", "no element at viewport point (" + x + "," + y + ")");
+    }
+    var target = element;
+    // Click-through: the topmost element at a point can be an overlay
+    // wrapper; the operator's click addresses what it hit — dispatch on
+    // the resolved element and let the event bubble.
+    var base = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: button, buttons: button };
+    target.dispatchEvent(new MouseEvent("pointerdown", base));
+    target.dispatchEvent(new MouseEvent("mousedown", base));
+    target.dispatchEvent(new MouseEvent("pointerup", base));
+    target.dispatchEvent(new MouseEvent("mouseup", base));
+    if (button === 2) {
+      target.dispatchEvent(new MouseEvent("contextmenu", base));
+      return { ok: true, rclicked: true, x: x, y: y, tag: target.tagName };
+    }
+    target.dispatchEvent(new MouseEvent("click", base));
+    return { ok: true, clicked: true, x: x, y: y, tag: target.tagName };
+  }
+
+  function pressKey(spec) {
+    var target = document.activeElement && document.activeElement !== document.body
+      ? document.activeElement
+      : document.body;
+    var options = {
+      key: spec.key, code: spec.code, keyCode: spec.keyCode, which: spec.which,
+      bubbles: true, cancelable: true,
+    };
+    if (spec.shiftKey) {
+      options.shiftKey = true;
+    }
+    target.dispatchEvent(new KeyboardEvent("keydown", options));
+    target.dispatchEvent(new KeyboardEvent("keypress", options));
+    target.dispatchEvent(new KeyboardEvent("keyup", options));
+    return { ok: true, pressed: spec.shiftKey ? "Shift+" + spec.key : spec.key, target: target.tagName };
+  }
+
+  /**
+   * The CSP-compliant structured query parser (the operator's page
+   * expression vocabulary). A shape outside the closed grammar is the
+   * typed refusal — never a code evaluation.
+   */
+  function evalStructuredQuery(expression) {
+    var text = String(expression).trim();
+    var m = text.match(/^(rect|textLength|href|attr|count)\s*\(\s*([\s\S]*)\s*\)$/);
+    if (!m) {
+      return fail(
+        "PAGE_MALFORMED",
+        "evalInPage: the expression must be one of the closed query forms rect(\"selector\") / textLength() / href() / attr(\"selector\", \"name\") / count(\"selector\") — arbitrary code evaluation is refused (the provider page CSP forbids it; the closed grammar is the honest surface)"
+      );
+    }
+    var fn = m[1];
+    var rest = m[2].trim();
+    if (fn === "textLength") {
+      if (rest !== "") {
+        return fail("PAGE_MALFORMED", "evalInPage: textLength() takes no arguments");
+      }
+      var bodyText = document.body && typeof document.body.innerText === "string" ? document.body.innerText : "";
+      return { ok: true, result: bodyText.length };
+    }
+    if (fn === "href") {
+      if (rest !== "") {
+        return fail("PAGE_MALFORMED", "evalInPage: href() takes no arguments");
+      }
+      return { ok: true, result: String(document.location.href) };
+    }
+    var quoted = rest.match(/^"((?:[^"\\]|\\.)*)"(?:\s*,\s*"((?:[^"\\]|\\.)*)")?$/);
+    if (!quoted) {
+      return fail("PAGE_MALFORMED", "evalInPage: the selector argument must be a double-quoted string (and attr takes a second quoted attribute name)");
+    }
+    var selector = quoted[1].replace(/\\(.)/g, "$1");
+    var found = matches(selector);
+    if (found === null) {
+      return fail("PAGE_MALFORMED", "evalInPage: the selector is not a valid selector");
+    }
+    var visible = found.filter(isVisible);
+    if (fn === "count") {
+      if (quoted[2] !== undefined) {
+        return fail("PAGE_MALFORMED", "evalInPage: count(selector) takes exactly one argument");
+      }
+      return { ok: true, result: visible.length };
+    }
+    if (fn === "rect") {
+      if (quoted[2] !== undefined) {
+        return fail("PAGE_MALFORMED", "evalInPage: rect(selector) takes exactly one argument");
+      }
+      if (visible.length === 0) {
+        return { ok: true, result: null };
+      }
+      var box = visible[0].getBoundingClientRect();
+      return { ok: true, result: { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) } };
+    }
+    if (fn === "attr") {
+      if (!quoted[2]) {
+        return fail("PAGE_MALFORMED", "evalInPage: attr(selector, name) requires the attribute name");
+      }
+      if (visible.length === 0) {
+        return { ok: true, result: null };
+      }
+      var v = visible[0].getAttribute(quoted[2]);
+      return { ok: true, result: v === null ? null : String(v) };
+    }
+    return fail("PAGE_MALFORMED", "evalInPage: unhandled query form");
+  }
+
   function handle(message) {
     if (typeof message !== "object" || message === null || message.zaiPage !== true) {
       return fail("PAGE_MALFORMED", "not a Z.ai page command");
@@ -304,7 +450,88 @@
     if (message.op === "pressEnter") {
       return pressEnter();
     }
-    return fail("PAGE_MALFORMED", "unknown op '" + String(message.op) + "' (closed vocabulary: probe, click, type, pressEnter)");
+
+    // ---- OPERATOR MANIPULATION VOCABULARY (the taught operator
+    // capability set: the controller operates the Z.ai surface with the
+    // same primitives the live operator uses — coordinate clicks,
+    // right-clicks, the full key set, page evaluation, navigation, and
+    // the one-shot state read) --------------------------------------
+
+    if (message.op === "clickAt") {
+      var pt = requireViewportPoint(message, "clickAt");
+      if (!pt.ok) {
+        return pt;
+      }
+      return clickPoint(pt.x, pt.y, 1);
+    }
+    if (message.op === "rclickAt") {
+      var rpt = requireViewportPoint(message, "rclickAt");
+      if (!rpt.ok) {
+        return rpt;
+      }
+      return clickPoint(rpt.x, rpt.y, 2);
+    }
+    if (message.op === "key") {
+      var keyName = typeof message.name === "string" ? message.name : "";
+      var keySpec = KEY_BY_NAME[keyName];
+      if (!keySpec) {
+        return fail("PAGE_MALFORMED", "key.name must be one of " + Object.keys(KEY_BY_NAME).join(", "));
+      }
+      return pressKey(keySpec);
+    }
+    if (message.op === "evalInPage") {
+      if (typeof message.expression !== "string" || message.expression.length === 0) {
+        return fail("PAGE_MALFORMED", "evalInPage.expression must be a non-empty string");
+      }
+      if (message.expression.length > MAX_EVAL) {
+        return fail("PAGE_MALFORMED", "evalInPage.expression exceeds " + MAX_EVAL + " characters");
+      }
+      // CSP-COMPLIANT STRUCTURED QUERY: the provider page's Content
+      // Security Policy forbids string evaluation (no unsafe-eval),
+      // so the operator's page-query surface is a closed expression
+      // vocabulary parsed here — never evaluated as code:
+      //   rect(<selector>)     -> {x,y,w,h} of the first visible match
+      //                            (the operator's click-targeting read)
+      //   textLength()         -> document.body.innerText.length
+      //                            (the operator's hang probe)
+      //   href()               -> location.href
+      //   attr(<selector>,<n>) -> the first visible match's attribute
+      //   count(<selector>)    -> the visible match count
+      return evalStructuredQuery(message.expression);
+    }
+    if (message.op === "navigateTo") {
+      if (typeof message.url !== "string" || message.url.length === 0) {
+        return fail("PAGE_MALFORMED", "navigateTo.url must be a non-empty string");
+      }
+      // The page script navigates itself; the adapter layer owns the
+      // origin restriction (only the provider's own origin is legal).
+      document.location.href = message.url;
+      return { ok: true, navigating: message.url };
+    }
+    if (message.op === "readState") {
+      var composer = document.querySelector("#chat-input");
+      var active = document.activeElement;
+      return {
+        ok: true,
+        state: {
+          url: String(document.location.href),
+          title: String(document.title || ""),
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          composer: composer
+            ? {
+                value: String(composer.value || ""),
+                focused: composer === active,
+                disabled: composer.disabled === true,
+              }
+            : null,
+          activeElement: active && active !== document.body
+            ? { tag: String(active.tagName || ""), id: String(active.id || "") }
+            : null,
+          readyState: String(document.readyState || ""),
+        },
+      };
+    }
+    return fail("PAGE_MALFORMED", "unknown op '" + String(message.op) + "' (closed vocabulary: probe, click, clickIndex, type, pressEnter, clickAt, rclickAt, key, evalInPage, navigateTo, readState)");
   }
 
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {

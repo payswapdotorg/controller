@@ -35,11 +35,12 @@ const GOVERNED_PROMPT = [
 // The frozen harness vocabulary.
 // --------------------------------------------------------------------
 
-test("the harness invokes exactly the three frozen CTRL-014 kinds", () => {
+test("the harness invokes exactly the CTRL-014 kinds (plus the operator action surface)", () => {
   assert.deepEqual(HARNESS_REQUEST_KINDS, [
     "ObserveZaiSession",
     "StartZaiWorkerSession",
     "RecoverZaiHungWorker",
+    "ZaiOperatorAction",
   ]);
 });
 

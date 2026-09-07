@@ -1001,6 +1001,99 @@ export function fakeZaiPage({
       }
       return { ok: true, pressed: "Enter", target: "TEXTAREA" };
     }
+    if (message.op === "key") {
+      // The operator key vocabulary (the taught key set): dispatch on
+      // the focused element. ShiftEnter inserts a newline into a
+      // composer holding text (the provider's keybinding); Escape
+      // closes an open dialog; every other key is a structural
+      // no-op reported honestly.
+      const KEYS = ["Enter", "ShiftEnter", "Tab", "Escape", "Backspace", "Delete",
+        "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"];
+      if (!KEYS.includes(message.name)) {
+        return { ok: false, error: { code: "PAGE_MALFORMED", message: "key.name must be one of " + KEYS.join(", ") } };
+      }
+      if (message.name === "ShiftEnter") {
+        state.composerValue += "\n";
+        return { ok: true, pressed: "Shift+Enter", target: "TEXTAREA" };
+      }
+      if (message.name === "Escape" && state.dialog) {
+        state.dialog = null;
+        return { ok: true, pressed: "Escape", target: "DIV" };
+      }
+      if (message.name === "Enter" && !state.dialog && state.composerValue.length > 0) {
+        submit();
+        return { ok: true, pressed: "Enter", target: "TEXTAREA" };
+      }
+      return { ok: true, pressed: message.name, target: state.composer ? "TEXTAREA" : "BODY" };
+    }
+    if (message.op === "clickAt") {
+      if (typeof message.x !== "number" || typeof message.y !== "number") {
+        return { ok: false, error: { code: "PAGE_MALFORMED", message: "clickAt.x and .y must be finite numbers (viewport coordinates)" } };
+      }
+      if (message.x < 0 || message.y < 0 || message.x >= 1440 || message.y >= 900) {
+        return { ok: false, error: { code: "PAGE_REFUSED", message: "clickAt coordinate is outside the viewport 1440x900" } };
+      }
+      return { ok: true, clicked: true, x: message.x, y: message.y, tag: "BUTTON" };
+    }
+    if (message.op === "rclickAt") {
+      if (typeof message.x !== "number" || typeof message.y !== "number") {
+        return { ok: false, error: { code: "PAGE_MALFORMED", message: "rclickAt.x and .y must be finite numbers (viewport coordinates)" } };
+      }
+      if (message.x < 0 || message.y < 0 || message.x >= 1440 || message.y >= 900) {
+        return { ok: false, error: { code: "PAGE_REFUSED", message: "rclickAt coordinate is outside the viewport 1440x900" } };
+      }
+      return { ok: true, rclicked: true, x: message.x, y: message.y, tag: "BUTTON" };
+    }
+    if (message.op === "evalInPage") {
+      if (typeof message.expression !== "string" || message.expression.length === 0) {
+        return { ok: false, error: { code: "PAGE_MALFORMED", message: "evalInPage.expression must be a non-empty string" } };
+      }
+      // The deterministic page simulator: the CSP-compliant closed
+      // query grammar (rect/textLength/href/attr/count over the
+      // simulated DOM).
+      const expr = message.expression.trim();
+      if (expr === "textLength()") {
+        return { ok: true, result: state.bodyText ? state.bodyText.length : 42 };
+      }
+      if (expr === "href()") {
+        return { ok: true, result: state.url || "https://chat.z.ai/" };
+      }
+      const rectMatch = expr.match(/^rect\("([^"]+)"\)$/);
+      if (rectMatch) {
+        const el = resolveList(rectMatch[1]).filter(isVisible)[0];
+        return { ok: true, result: el ? { x: 10, y: 20, w: 300, h: 40 } : null };
+      }
+      const attrMatch = expr.match(/^attr\("([^"]+)",\s*"([^"]+)"\)$/);
+      if (attrMatch) {
+        const el = resolveList(attrMatch[1]).filter(isVisible)[0];
+        return { ok: true, result: el ? String(el.getAttribute(attrMatch[2]) ?? "sim") : null };
+      }
+      const countMatch = expr.match(/^count\("([^"]+)"\)$/);
+      if (countMatch) {
+        return { ok: true, result: resolveList(countMatch[1]).filter(isVisible).length };
+      }
+      return { ok: false, error: { code: "PAGE_MALFORMED", message: "evalInPage: the expression must be one of the closed query forms rect(\"selector\") / textLength() / href() / attr(\"selector\", \"name\") / count(\"selector\") — arbitrary code evaluation is refused" } };
+    }
+    if (message.op === "navigateTo") {
+      if (typeof message.url !== "string" || message.url.length === 0) {
+        return { ok: false, error: { code: "PAGE_MALFORMED", message: "navigateTo.url must be a non-empty string" } };
+      }
+      state.url = message.url;
+      return { ok: true, navigating: message.url };
+    }
+    if (message.op === "readState") {
+      return {
+        ok: true,
+        state: {
+          url: state.url || "https://chat.z.ai/",
+          title: "Z.ai",
+          viewport: { width: 1440, height: 900 },
+          composer: { value: state.composerValue, focused: true, disabled: false },
+          activeElement: { tag: "TEXTAREA", id: "chat-input" },
+          readyState: "complete",
+        },
+      };
+    }
     return { ok: false, error: { code: "PAGE_MALFORMED", message: "unknown op" } };
   }
 

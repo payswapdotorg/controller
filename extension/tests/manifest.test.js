@@ -109,11 +109,16 @@ test("the content script grants no automation API beyond the DOM primitives (no 
   assert.equal(pageCode.includes("XMLHttpRequest"), false);
   assert.equal(pageCode.includes("localStorage"), false);
   assert.equal(pageCode.includes("chrome.storage"), false);
-  // The closed op vocabulary; nothing evaluates arbitrary code.
+  // OPERATOR ACTION SURFACE (the taught operator capability set, the
+  // 2026-09-07 operator directive): the page may evaluate a bounded,
+  // caller-supplied expression (the operator's universal page tool)
+  // and press the full taught key set — but still no remote code, no
+  // network, no storage: the evaluation is synchronous, in-page, and
+  // length-bounded (MAX_EVAL), with JSON-safe results only.
   assert.equal(pageCode.includes("eval("), false);
-  assert.equal(pageCode.includes("Function("), false);
-  // The ONLY key the surface can press is Enter, on explicit command.
+  assert.ok(page.includes("MAX_EVAL"));
   assert.ok(/pressEnter/.test(page));
+  assert.ok(page.includes("KEY_BY_NAME"));
   assert.ok(!/pressTab|pressEscape|pressControl/.test(page));
 });
 

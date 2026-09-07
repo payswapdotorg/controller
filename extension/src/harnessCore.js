@@ -49,6 +49,7 @@ export const HARNESS_REQUEST_KINDS = Object.freeze([
   "ObserveZaiSession",
   "StartZaiWorkerSession",
   "RecoverZaiHungWorker",
+  "ZaiOperatorAction",
 ]);
 
 /**
@@ -304,4 +305,53 @@ function requirePlainInput(value) {
     return failure("MALFORMED_MESSAGE", "harness: the input must be a plain object");
   }
   return { ok: true, input: value };
+}
+
+/**
+ * Build the frozen ZaiOperatorAction request form from operator input.
+ * The action vocabulary is the closed taught set; the args object is
+ * carried VERBATIM (never authored, rewritten, or completed here) —
+ * the adapter validates and types every refusal.
+ */
+export function buildOperatorActionRequest(input) {
+  const checked = requirePlainInput(input);
+  if (!checked.ok) {
+    return checked;
+  }
+  const { worker, tabId, action, args } = checked.input;
+  if (typeof worker !== "string" || worker.length === 0) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness ZaiOperatorAction: the registered Worker name is required"
+    );
+  }
+  if (!isPositiveInteger(tabId)) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness ZaiOperatorAction: field 'tabId' must be the positive-integer provider tab the action addresses"
+    );
+  }
+  if (typeof action !== "string" || action.length === 0) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness ZaiOperatorAction: field 'action' must be a non-empty string (the action name)"
+    );
+  }
+  if (args !== undefined && args !== null &&
+      (typeof args !== "object" || Array.isArray(args))) {
+    return failure(
+      "MALFORMED_MESSAGE",
+      "harness ZaiOperatorAction: field 'args' must be an object when present"
+    );
+  }
+  return {
+    ok: true,
+    request: Object.freeze({
+      kind: "ZaiOperatorAction",
+      worker,
+      tabId,
+      action,
+      ...(args !== undefined && args !== null ? { args } : {}),
+    }),
+  };
 }

@@ -3175,3 +3175,144 @@ test("THE MODE VALIDATION: an unknown Start mode is the typed refusal (the close
   assert.equal(result.error.code, "AMBIGUOUS_STATE");
   assert.ok(/"chat" or "agent"/.test(result.error.message), result.error.message);
 });
+
+// --------------------------------------------------------------------
+// THE OPERATOR ACTION SURFACE — the taught operator capability set
+// (the 2026-09-07 operator directive: "make the adapter able to
+// operate chat.z.ai just like I taught you"). The adapter exposes
+// the same primitives the live operator uses, each addressing the
+// exact correlated provider tab with typed, fail-closed results.
+// --------------------------------------------------------------------
+
+test("OPERATOR ACTION: the comprehensive state read returns the raw page state plus the probe facts", async () => {
+  const { adapter } = build({ authenticated: true });
+  const result = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "state" });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.action, "state");
+  assert.equal(result.tabId, 7);
+  assert.equal(result.state.url, "https://chat.z.ai/");
+  assert.equal(result.state.composer.value, "");
+  assert.equal(result.state.viewport.width, 1440);
+  // The full probe facts ride along (mode, model, rows, dialogs, the
+  // human-verification gate) — exactly the live operator's state probe.
+  assert.ok(result.facts && typeof result.facts === "object");
+  assert.ok("composerValue" in result.facts);
+});
+
+test("OPERATOR ACTION: coordinate clicks and right-clicks address the exact tab with typed results", async () => {
+  const { adapter } = build({});
+  const click = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "click", args: { x: 720, y: 400 } });
+  assert.equal(click.ok, true, JSON.stringify(click));
+  assert.equal(click.clicked, true);
+  assert.equal(click.x, 720);
+  const rclick = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "rclick", args: { x: 100, y: 200 } });
+  assert.equal(rclick.ok, true, JSON.stringify(rclick));
+  assert.equal(rclick.rclicked, true);
+});
+
+test("OPERATOR ACTION: coordinate validation refuses non-numeric and out-of-viewport coordinates", async () => {
+  const { adapter } = build({});
+  const bad = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "click", args: { x: "left" } });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.error.code, "MALFORMED_MESSAGE");
+});
+
+test("OPERATOR ACTION: exact typing lands verbatim with the byte-identical read-back (the taught typing law)", async () => {
+  const { adapter } = build({});
+  const result = await adapter.operatorAction({
+    worker: "w1", tabId: 7, action: "type",
+    args: { text: "Multi-line & 'special' — verbatim" },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value, "Multi-line & 'special' — verbatim");
+});
+
+test("OPERATOR ACTION: the full taught key set dispatches; ShiftEnter inserts the newline (the composer law)", async () => {
+  const { adapter } = build({});
+  await adapter.operatorAction({ worker: "w1", tabId: 7, action: "type", args: { text: "line one" } });
+  const shift = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "key", args: { name: "ShiftEnter" } });
+  assert.equal(shift.ok, true);
+  assert.equal(shift.pressed, "Shift+Enter");
+  const state = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "state" });
+  assert.equal(state.state.composer.value, "line one\n");
+  const unknown = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "key", args: { name: "CtrlQ" } });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.error.code, "PAGE_MALFORMED");
+});
+
+test("OPERATOR ACTION: page evaluation returns the JSON-safe result; a raising expression is the typed refusal", async () => {
+  const { adapter } = build({});
+  const ok = await adapter.operatorAction({
+    worker: "w1", tabId: 7, action: "eval",
+    args: { expression: "href()" },
+  });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal(ok.result, "https://chat.z.ai/");
+  const length = await adapter.operatorAction({
+    worker: "w1", tabId: 7, action: "eval",
+    args: { expression: "textLength()" },
+  });
+  assert.equal(length.ok, true);
+  assert.equal(typeof length.result, "number");
+  const refused = await adapter.operatorAction({
+    worker: "w1", tabId: 7, action: "eval",
+    args: { expression: "window.__secret = 1" },
+  });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error.code, "PAGE_MALFORMED");
+  assert.ok(/closed query forms/.test(refused.error.message));
+});
+
+test("OPERATOR ACTION: navigation is provider-origin-restricted (the operator's own origin law)", async () => {
+  const { adapter } = build({});
+  const ok = await adapter.operatorAction({
+    worker: "w1", tabId: 7, action: "navigate",
+    args: { url: "https://chat.z.ai/c/abc-123" },
+  });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal(ok.navigating, "https://chat.z.ai/c/abc-123");
+  const foreign = await adapter.operatorAction({
+    worker: "w1", tabId: 7, action: "navigate",
+    args: { url: "https://example.com/" },
+  });
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.error.code, "MUTATION_REFUSED");
+  assert.ok(/only the provider origin/.test(foreign.error.message));
+});
+
+test("OPERATOR ACTION: an unknown action name is the typed closed-vocabulary refusal", async () => {
+  const { adapter } = build({});
+  const result = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "scrollTo" });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "MALFORMED_MESSAGE");
+  assert.ok(/state, click, rclick, type, key, eval, navigate, shot/.test(result.error.message));
+});
+
+test("OPERATOR ACTION: a stale or foreign tab is the typed STALE_REFERENCE (an action never addresses a foreign page)", async () => {
+  const built = build({ tabsCount: 1 });
+  const { adapter, pages, tabs } = built;
+  tabs.push({ id: 99, url: "https://example.com/", title: "Foreign", page: pages[0] });
+  const foreign = await adapter.operatorAction({ worker: "w1", tabId: 99, action: "state" });
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.error.code, "STALE_REFERENCE");
+  assert.ok(/no longer holds a provider page/.test(foreign.error.message));
+  const dead = await adapter.operatorAction({ worker: "w1", tabId: 424242, action: "state" });
+  assert.equal(dead.ok, false);
+  assert.equal(dead.error.code, "STALE_REFERENCE");
+});
+
+test("OPERATOR ACTION: the shot action reports the capture honestly when the runtime lacks captureVisibleTab", async () => {
+  const { adapter } = build({});
+  const result = await adapter.operatorAction({ worker: "w1", tabId: 7, action: "shot" });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "PAGE_UNAVAILABLE");
+  assert.ok(/captureVisibleTab|capture surface/.test(result.error.message));
+});
+
+test("OPERATOR ACTION: the action requires the worker identity (typed refusal otherwise)", async () => {
+  const { adapter } = build({});
+  const result = await adapter.operatorAction({ tabId: 7, action: "state" });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "MALFORMED_MESSAGE");
+  assert.ok(/worker/.test(result.error.message));
+});

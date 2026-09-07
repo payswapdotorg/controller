@@ -544,7 +544,8 @@ export function createControllerService({
 
         case "ObserveZaiSession":
         case "StartZaiWorkerSession":
-        case "RecoverZaiHungWorker": {
+        case "RecoverZaiHungWorker":
+        case "ZaiOperatorAction": {
           const gated = _requireZaiWorker(configurationForRequest, validated.request.worker);
           if (!gated.ok) {
             return gated;
@@ -552,6 +553,17 @@ export function createControllerService({
           if (validated.request.kind === "ObserveZaiSession") {
             const observed = await zai.observeSession(validated.request.worker);
             return observed.ok ? { ok: true, observation: observed.observation } : observed;
+          }
+          if (validated.request.kind === "ZaiOperatorAction") {
+            // The operator action surface: the taught operator capability
+            // set routed through the adapter (typed, fail-closed, closed
+            // action vocabulary validated at the adapter boundary).
+            return await zai.operatorAction({
+              worker: validated.request.worker,
+              tabId: validated.request.tabId,
+              action: validated.request.action,
+              args: validated.request.args,
+            });
           }
           if (validated.request.kind === "StartZaiWorkerSession") {
             const started = await zai.startWorkerSession({

@@ -3220,10 +3220,176 @@ export function createZaiAdapter({
     return { ok: true, observation: { ...observation, tabId: target.tabId, worker: workerName } };
   }
 
+  // ------------------------------------------------------------------
+  // OPERATOR ACTION SURFACE — the taught operator capability set.
+  // The controller operates the Z.ai surface with the same primitives
+  // the live operator uses: the comprehensive state probe, coordinate
+  // clicks and right-clicks, exact typing with byte-identical
+  // read-back, the full key set, page evaluation, provider-origin
+  // navigation, and the visible-frame capture. Every action addresses
+  // the exact tab the caller correlates; every result is a typed
+  // fact. (The operator directive of 2026-09-07: "make the adapter
+  // able to operate chat.z.ai just like I taught you.")
+  // ------------------------------------------------------------------
+
+  const OPERATOR_ACTIONS = Object.freeze([
+    "state", "click", "rclick", "type", "key", "eval", "navigate", "shot",
+  ]);
+
+  /**
+   * Resolve and verify the target tab for an operator action: the tab
+   * must exist and currently hold a provider-origin page (fail closed
+   * otherwise — an operator action never addresses a foreign page).
+   */
+  async function requireProviderTab(tabId) {
+    if (!Number.isInteger(tabId) || tabId <= 0) {
+      return failure("MALFORMED_MESSAGE", "operator action: tabId must be a positive integer");
+    }
+    let tab;
+    try {
+      tab = await tabsApi.get(tabId);
+    } catch (err) {
+      return failure("STALE_REFERENCE", `operator action: tab ${tabId} does not exist (${err})`);
+    }
+    const url = typeof tab?.url === "string" ? tab.url : "";
+    if (!url.startsWith(`${origin}/`)) {
+      return failure(
+        "STALE_REFERENCE",
+        `operator action: tab ${tabId} no longer holds a provider page (currently ${url || "unknown"})`
+      );
+    }
+    return { ok: true, tab };
+  }
+
+  async function operatorAction({ worker, tabId, action, args }) {
+    if (typeof worker !== "string" || worker.length === 0) {
+      return failure("MALFORMED_MESSAGE", "operator action: worker must be a non-empty string");
+    }
+    if (!OPERATOR_ACTIONS.includes(action)) {
+      return failure(
+        "MALFORMED_MESSAGE",
+        `operator action: unknown action '${String(action)}' (closed vocabulary: ${OPERATOR_ACTIONS.join(", ")})`
+      );
+    }
+    const a = (args && typeof args === "object" && !Array.isArray(args)) ? args : {};
+    const target = await requireProviderTab(tabId);
+    if (!target.ok) {
+      return target;
+    }
+
+    switch (action) {
+      case "state": {
+        // The comprehensive one-shot state read: the raw page state
+        // plus the full probe facts (mode, model, rows, dialogs, the
+        // human-verification gate) — exactly the live operator's
+        // state probe.
+        const raw = await pageBridge.send(tabId, { zaiPage: true, op: "readState" });
+        if (!raw.ok) {
+          return raw;
+        }
+        const facts = await pageBridge.send(tabId, {
+          zaiPage: true,
+          op: "probe",
+          probes: BASE_PROBES,
+        });
+        if (!facts.ok) {
+          return facts;
+        }
+        return {
+          ok: true,
+          action: "state",
+          worker,
+          tabId,
+          state: raw.state,
+          facts: facts.facts,
+        };
+      }
+      case "click": {
+        if (typeof a.x !== "number" || typeof a.y !== "number") {
+          return failure("MALFORMED_MESSAGE", "operator action click: args.x and args.y must be numbers (viewport coordinates)");
+        }
+        const r = await pageBridge.send(tabId, { zaiPage: true, op: "clickAt", x: a.x, y: a.y });
+        return r.ok ? { ok: true, action: "click", worker, tabId, ...pick(r, ["clicked", "x", "y", "tag"]) } : r;
+      }
+      case "rclick": {
+        if (typeof a.x !== "number" || typeof a.y !== "number") {
+          return failure("MALFORMED_MESSAGE", "operator action rclick: args.x and args.y must be numbers (viewport coordinates)");
+        }
+        const r = await pageBridge.send(tabId, { zaiPage: true, op: "rclickAt", x: a.x, y: a.y });
+        return r.ok ? { ok: true, action: "rclick", worker, tabId, ...pick(r, ["rclicked", "x", "y", "tag"]) } : r;
+      }
+      case "type": {
+        // The exact-typing law: the text lands verbatim and the
+        // read-back must match byte-for-byte (the page op refuses
+        // otherwise). The default target is the composer; a caller
+        // may address any selector.
+        if (typeof a.text !== "string") {
+          return failure("MALFORMED_MESSAGE", "operator action type: args.text must be a string (carried verbatim)");
+        }
+        const selector = typeof a.selector === "string" && a.selector.length > 0
+          ? a.selector
+          : ZAI_LOCATORS.composer;
+        const r = await pageBridge.send(tabId, { zaiPage: true, op: "type", selector, text: a.text });
+        return r.ok ? { ok: true, action: "type", worker, tabId, value: r.value } : r;
+      }
+      case "key": {
+        if (typeof a.name !== "string" || a.name.length === 0) {
+          return failure("MALFORMED_MESSAGE", "operator action key: args.name must be a non-empty string");
+        }
+        const r = await pageBridge.send(tabId, { zaiPage: true, op: "key", name: a.name });
+        return r.ok ? { ok: true, action: "key", worker, tabId, pressed: r.pressed, target: r.target } : r;
+      }
+      case "eval": {
+        // The operator's universal page tool. The expression runs in
+        // the page context and returns a JSON-safe value.
+        if (typeof a.expression !== "string" || a.expression.length === 0) {
+          return failure("MALFORMED_MESSAGE", "operator action eval: args.expression must be a non-empty string");
+        }
+        const r = await pageBridge.send(tabId, { zaiPage: true, op: "evalInPage", expression: a.expression });
+        return r.ok ? { ok: true, action: "eval", worker, tabId, result: r.result } : r;
+      }
+      case "navigate": {
+        if (typeof a.url !== "string" || a.url.length === 0) {
+          return failure("MALFORMED_MESSAGE", "operator action navigate: args.url must be a non-empty string");
+        }
+        let target2;
+        try {
+          target2 = new URL(a.url);
+        } catch (err) {
+          return failure("MALFORMED_MESSAGE", `operator action navigate: args.url is not a valid URL (${err})`);
+        }
+        if (target2.origin !== origin) {
+          return failure(
+            "MUTATION_REFUSED",
+            `operator action navigate: only the provider origin is navigable (${origin}); refusing ${target2.origin}`
+          );
+        }
+        const r = await pageBridge.send(tabId, { zaiPage: true, op: "navigateTo", url: a.url });
+        return r.ok ? { ok: true, action: "navigate", worker, tabId, navigating: a.url } : r;
+      }
+      case "shot": {
+        // The visible-frame capture (the operator's screenshot). Uses
+        // the tabs API's captureVisibleTab against the provider window.
+        if (typeof tabsApi?.captureVisibleTab !== "function") {
+          return failure("PAGE_UNAVAILABLE", "operator action shot: the visible-frame capture surface is unavailable in this runtime (no captureVisibleTab)");
+        }
+        try {
+          const dataUrl = await tabsApi.captureVisibleTab(target.tab.windowId, { format: "jpeg", quality: 60 });
+          return { ok: true, action: "shot", worker, tabId, dataUrl: String(dataUrl) };
+        } catch (err) {
+          return failure("PAGE_UNAVAILABLE", `operator action shot failed: ${err}`);
+        }
+      }
+      default:
+        return failure("MALFORMED_MESSAGE", `operator action: unhandled action '${String(action)}'`);
+    }
+  }
+
   return Object.freeze({
     observeSession,
     startWorkerSession,
     recoverHungWorker,
+    operatorAction,
   });
 }
 
@@ -3235,4 +3401,15 @@ function leadingToken(text) {
   }
   const [token] = trimmed.split(/\s+/);
   return token;
+}
+
+/** @private — a shallow copy of the named fields that exist on the object. */
+function pick(object, names) {
+  const out = {};
+  for (const name of names) {
+    if (object && Object.prototype.hasOwnProperty.call(object, name)) {
+      out[name] = object[name];
+    }
+  }
+  return out;
 }

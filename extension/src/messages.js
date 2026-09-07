@@ -123,6 +123,7 @@ export const REQUEST_KINDS = Object.freeze([
   "ObserveZaiSession",
   "StartZaiWorkerSession",
   "RecoverZaiHungWorker",
+  "ZaiOperatorAction",
 ]);
 
 /** Field sets per kind (closed forms — exactly these fields). */
@@ -154,6 +155,7 @@ const KIND_FIELDS = Object.freeze({
   ObserveZaiSession: ["worker"],
   StartZaiWorkerSession: ["worker", "workItem", "prompt"],
   RecoverZaiHungWorker: ["worker", "workItem", "tabId"],
+  ZaiOperatorAction: ["worker", "tabId", "action", "args"],
 });
 
 /** The closed PR list state vocabulary (GitHub's three list states). */
@@ -286,7 +288,7 @@ export function validateRequest(value) {
     }
   }
   if (kind === "ObserveZaiSession" || kind === "StartZaiWorkerSession" ||
-      kind === "RecoverZaiHungWorker") {
+      kind === "RecoverZaiHungWorker" || kind === "ZaiOperatorAction") {
     // The Worker identity the Z.ai adapter session is bound to.
     if (typeof value.worker !== "string" || value.worker.length === 0) {
       return failure("MALFORMED_MESSAGE", `request ${kind}: field 'worker' must be a non-empty string`);
@@ -311,6 +313,21 @@ export function validateRequest(value) {
     // The exact browser-session correlation the start result reported.
     if (!isPositiveInteger(value.tabId)) {
       return failure("MALFORMED_MESSAGE", "request RecoverZaiHungWorker: field 'tabId' must be a positive integer (the session correlation from StartZaiWorkerSession)");
+    }
+  }
+  if (kind === "ZaiOperatorAction") {
+    // The operator action surface: the exact tab the action addresses,
+    // the action name, and its arguments object. The action vocabulary
+    // itself is validated at the adapter (closed set, typed refusals).
+    if (!isPositiveInteger(value.tabId)) {
+      return failure("MALFORMED_MESSAGE", "request ZaiOperatorAction: field 'tabId' must be a positive integer (the provider tab the action addresses)");
+    }
+    if (typeof value.action !== "string" || value.action.length === 0) {
+      return failure("MALFORMED_MESSAGE", "request ZaiOperatorAction: field 'action' must be a non-empty string");
+    }
+    if (value.args !== undefined && value.args !== null &&
+        (typeof value.args !== "object" || Array.isArray(value.args))) {
+      return failure("MALFORMED_MESSAGE", "request ZaiOperatorAction: field 'args' must be an object when present");
     }
   }
   return { ok: true, request: value };

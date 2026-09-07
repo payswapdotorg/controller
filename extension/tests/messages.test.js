@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 
 import { validateRequest, REQUEST_KINDS } from "../src/messages.js";
 
-test("the request vocabulary is the frozen CTRL-012 + CTRL-013 + CTRL-014 set", () => {
+test("the request vocabulary is the frozen CTRL-012 + CTRL-013 + CTRL-014 set (plus the operator action surface)", () => {
   assert.deepEqual([...REQUEST_KINDS], [
     "GetConfiguration",
     "RegisterWorker",
@@ -34,6 +34,7 @@ test("the request vocabulary is the frozen CTRL-012 + CTRL-013 + CTRL-014 set", 
     "ObserveZaiSession",
     "StartZaiWorkerSession",
     "RecoverZaiHungWorker",
+    "ZaiOperatorAction",
   ]);
   // The mutation vocabulary is exactly the three Controller-authorized
   // mutations — nothing else. No approval, completion, comment, or

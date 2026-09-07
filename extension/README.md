@@ -287,6 +287,36 @@ boundary (`ObserveZaiSession`, `StartZaiWorkerSession`,
 `RecoverZaiHungWorker`); no popup control drives it (runtime
 composition is CTRL-016 scope).
 
+
+### The operator action surface (`ZaiOperatorAction`) — the taught operator capability set
+
+The adapter exposes the same primitives the live operator uses, so the
+Controller can operate `chat.z.ai` exactly like a taught human operator
+(the 2026-09-07 operator directive). One message kind, a closed action
+vocabulary, every result typed and fail-closed:
+
+    { kind: "ZaiOperatorAction", worker, tabId, action, args }
+
+| action | args | result |
+|---|---|---|
+| `state` | `{}` | the comprehensive one-shot state read: raw page state (URL, title, viewport, composer value/focus, active element) plus the full probe facts (mode, model, rows, dialogs, the human-verification gate) |
+| `click` | `{x, y}` | a viewport-coordinate click (the full pointer event sequence on the resolved element) |
+| `rclick` | `{x, y}` | a viewport-coordinate right-click (contextmenu included) |
+| `type` | `{text, selector?}` | exact typing with the byte-identical read-back (the React native value setter; the default target is the composer) |
+| `key` | `{name}` | the taught key set: `Enter` `ShiftEnter` `Tab` `Escape` `Backspace` `Delete` arrows `Home` `End` (ShiftEnter inserts the composer newline — the provider's own keybinding) |
+| `eval` | `{expression}` | the operator's page query — a CSP-compliant closed grammar: `rect("selector")` / `textLength()` / `href()` / `attr("selector","name")` / `count("selector")`. The provider page forbids `unsafe-eval`, so arbitrary code evaluation is refused by design and the closed grammar is the honest surface |
+| `navigate` | `{url}` | navigation restricted to the provider origin (foreign origins are the typed refusal) |
+| `shot` | `{}` | the visible-frame capture (requires the provider tab to be the active tab of its window; unavailable runtimes fail closed with the typed refusal) |
+
+Laws carried over from the taught operator experience: the exact text
+is never rewritten (byte-identical read-back or refusal); every action
+addresses the exact correlated provider tab (a stale/foreign tab is
+`STALE_REFERENCE`, never a guess); the page query grammar never
+evaluates strings as code; navigation never leaves the provider
+origin. The full operator-action evidence (state/type/click/key/eval
+live against the real authenticated surface) is in the PR #6 operator
+run record.
+
 ### Prerequisites (human steps, out of band)
 
 1. Chromium with this extension loaded unpacked.

@@ -63,6 +63,28 @@
     <button type="button" id="invoke-recover" class="invoke" disabled>Invoke RecoverZaiHungWorker</button>
   </section>
 
+  <section id="operator-action-panel">
+    <h2>ZaiOperatorAction — the taught operator capability set</h2>
+    <p class="hint">The adapter's operator action surface: state / click / rclick / type / key / eval / navigate / shot — the same primitives the live operator uses, each addressing the exact provider tab below with typed, fail-closed results. The args object is carried verbatim to the adapter (JSON).</p>
+    <label for="action-tab-id">tabId (the exact provider tab)</label>
+    <input type="number" id="action-tab-id" min="1" step="1" placeholder="e.g. 221177405">
+    <label for="action-name">Action (the closed vocabulary)</label>
+    <select id="action-name" aria-label="operator action">
+      <option value="state">state — the comprehensive state read</option>
+      <option value="click">click — viewport-coordinate click {x, y}</option>
+      <option value="rclick">rclick — viewport-coordinate right-click {x, y}</option>
+      <option value="type">type — exact typing with read-back {text, selector?}</option>
+      <option value="key">key — the taught key set {name}</option>
+      <option value="eval">eval — page evaluation {expression}</option>
+      <option value="navigate">navigate — provider-origin navigation {url}</option>
+      <option value="shot">shot — the visible-frame capture</option>
+    </select>
+    <label for="action-args">Args (JSON object, verbatim)</label>
+    <textarea id="action-args" rows="3" spellcheck="false" placeholder='{"x": 720, "y": 400}'>{}</textarea>
+    <button type="button" id="invoke-action" class="invoke" disabled>Invoke ZaiOperatorAction</button>
+    <p id="action-error" class="error hidden"></p>
+  </section>
+
   <section id="evidence-panel">
     <h2>Evidence log</h2>
     <p class="hint">One deterministic JSON line per invocation: sequence, ISO-8601 timestamp, exact request kind, the request verbatim (including the exact governed prompt), the typed response verbatim, and the tab/session correlation. The log lives in this page's memory only (never persisted, never sent anywhere). No credential or provider token can appear on this surface by construction. Copy it for the Architect review.</p>

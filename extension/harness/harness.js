@@ -46,6 +46,7 @@ import {
   buildObserveRequest,
   buildStartRequest,
   buildRecoverRequest,
+  buildOperatorActionRequest,
   buildEvidenceRecord,
   formatEvidenceLog,
   startResultCorrelation,
@@ -160,7 +161,7 @@ function applyStartResult(response) {
 /** Enable/disable every invoke control per the operator acknowledgment. */
 function updateGate() {
   const armed = $("operator-ack").checked;
-  for (const id of ["invoke-observe", "invoke-start", "invoke-recover"]) {
+  for (const id of ["invoke-observe", "invoke-start", "invoke-recover", "invoke-action"]) {
     $(id).disabled = !armed;
   }
   $("gate-hint").textContent = armed
@@ -200,6 +201,30 @@ function wire() {
       worker: selectedWorker(),
       workItem: $("recover-work-item").value,
       tabId: tabText.length === 0 ? null : Number(tabText),
+    });
+  });
+
+  $("invoke-action").addEventListener("click", async () => {
+    const tabText = $("action-tab-id").value.trim();
+    const argsText = $("action-args").value.trim();
+    let args = null;
+    const errEl = $("action-error");
+    errEl.classList.add("hidden");
+    if (argsText.length > 0) {
+      try {
+        args = JSON.parse(argsText);
+      } catch (err) {
+        errEl.textContent = "args is not valid JSON: " + err;
+        errEl.classList.remove("hidden");
+        return;
+      }
+    }
+    await invoke(buildOperatorActionRequest, {
+      kind: "ZaiOperatorAction",
+      worker: selectedWorker(),
+      tabId: tabText.length === 0 ? null : Number(tabText),
+      action: $("action-name").value,
+      args,
     });
   });
 
