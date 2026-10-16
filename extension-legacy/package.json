@@ -1,0 +1,7 @@
+{
+  "name": "pectoraux-controller-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The Pectoraux Controller browser operator surface (CTRL-012). No build step: the manifest loads the unpacked sources directly; this file declares the ES-module type for the Node test runner."
+}

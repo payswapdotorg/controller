@@ -1,7 +1,17 @@
 {
-  "name": "pectoraux-controller-extension",
+  "name": "controller-extension",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
-  "description": "The Pectoraux Controller browser operator surface (CTRL-012). No build step: the manifest loads the unpacked sources directly; this file declares the ES-module type for the Node test runner."
+  "description": "Controller — the resident browser supervisor loop for governed GitHub work orders. Firefox (event page) + Chromium/Opera (service worker) dual target from one source. North star: connect a chat.z.ai session, point it at the repository of record (sole source of truth), and run monitor -> harvest -> review -> dispatch without supervision.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"tests/*.test.js\"",
+    "e2e": "node e2e/run.mjs",
+    "icon": "node scripts/generate-icon.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.7",
+    "playwright": "^1.64.0"
+  }
 }

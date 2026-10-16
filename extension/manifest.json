@@ -1,27 +1,36 @@
 {
   "manifest_version": 3,
-  "name": "Pectoraux Controller",
-  "version": "0.1.0",
-  "description": "Pectoraux Controller browser operator surface (non-authoritative): registers Workers/Architects, connects GitHub (OAuth device flow), selects the controlled repository, and presents repository-derived Controller authority state and evidence.",
+  "name": "Controller",
+  "version": "1.0.0",
+  "description": "The resident browser supervisor loop for governed GitHub work orders: monitor -> harvest -> review -> dispatch, with a chat.z.ai session or a local agent as the pluggable intelligence source. No continue button required.",
   "action": {
-    "default_title": "Pectoraux Controller",
+    "default_title": "Controller",
     "default_popup": "popup/popup.html"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": false
   },
   "background": {
     "service_worker": "src/service.js",
     "type": "module"
   },
-  "permissions": [
-    "storage",
-    "tabs"
-  ],
+  "permissions": ["storage", "tabs", "alarms", "scripting"],
   "host_permissions": [
     "https://api.github.com/*",
-    "https://raw.githubusercontent.com/*",
-    "https://github.com/*"
+    "https://github.com/*",
+    "https://chat.z.ai/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
   ],
-  "oauth2": {
-    "client_id": "PASTE-YOUR-GITHUB-OAUTH-CLIENT-ID-HERE",
-    "scopes": ["public_repo"]
+  "content_scripts": [
+    {
+      "matches": ["https://chat.z.ai/*"],
+      "js": ["src/content/chatzai-content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "128": "icons/icon-128.png"
   }
 }

@@ -20,3 +20,18 @@
 - This dashboard is non-authoritative observability only.
 - It records only actions that have actually occurred; it is not a prediction.
 - Repository authority remains the source of truth.
+
+---
+
+## 2026-10-16 — v1 Controller extension delivered (owner-directed)
+
+The owner directly instructed (2026-10-16, resident TL session) the delivery of
+the full browser-controller extension: Firefox + Opera dual-target, chat.z.ai
+session as a pluggable intelligence source, the repository as the sole source
+of truth, and an unsupervised resident loop (no continue button). Delivered as
+`extension/` (v1.0.0): supervisor FSM, GitHub source-of-truth client, chat
+driver with idle auto-continue + session resurrection, local-http driver,
+deterministic fallback, dual-target build, 43 unit tests + a full-loop
+Playwright E2E. The prior CTRL-012/013 surface is preserved at
+`extension-legacy/`. The CTRL-014 work order remains READY; the v1 extension
+subsumes its intent at the browser layer.

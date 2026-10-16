@@ -18,3 +18,5 @@ venv/
 .idea/
 .vscode/
 .DS_Store
+extension/node_modules/
+extension/dist/
