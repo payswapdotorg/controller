@@ -30,6 +30,17 @@ See:
 - `spec/work-items/CTRL-001.md`
 - `spec/state/controller-program-state.json`
 
+## v1 browser extension (2026-10-16, owner-directed)
+
+The full resident supervisor loop now ships as a dual-target browser extension
+(Firefox + Opera/Chromium) under [`extension/`](extension/README.md): connect a
+chat.z.ai session, point it at the repository of record (sole source of truth),
+and it runs `monitor -> harvest -> review -> dispatch` without supervision —
+no continue button (idle watchdog + session resurrection). Intelligence is
+pluggable: the chat.z.ai tab, a local HTTP agent endpoint, or deterministic-only
+mode. 43 unit tests + a full-loop Playwright E2E. The prior CTRL-012/013
+surface is preserved at `extension-legacy/`.
+
 ## Development
 
 The controller package is pure Python standard library (Python >= 3.10, no runtime dependencies, no network access, no credentials). All commands run from the repository root.
