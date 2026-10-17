@@ -12,7 +12,7 @@ test("absent config -> defaults", () => {
   const { config, issues } = normalizeConfig(undefined);
   assert.deepEqual(issues, []);
   assert.equal(config.github.mergeMethod, DEFAULT_CONFIG.github.mergeMethod);
-  assert.equal(config.intelligence.driver, "chatzai-web");
+  assert.equal(config.intelligence.driver, DEFAULT_CONFIG.intelligence.driver); // v1.1: rotating chain
   assert.equal(config.loop.intervalMinutes, 2);
 });
 
@@ -22,7 +22,7 @@ test("invalid merge method and driver are refused with recorded issues", () => {
     intelligence: { driver: "skynet" },
   });
   assert.equal(config.github.mergeMethod, "squash");
-  assert.equal(config.intelligence.driver, "chatzai-web");
+  assert.equal(config.intelligence.driver, DEFAULT_CONFIG.intelligence.driver);
   assert.equal(issues.length, 2);
 });
 

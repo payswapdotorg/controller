@@ -2,28 +2,40 @@
 /**
  * Controller extension E2E (Chromium-class target — Opera/Chrome/Edge engine).
  *
- * One REAL browser run of the full resident loop against fully mocked surfaces:
- *   - api.github.com  -> route-intercepted fixtures (a green in-fence PR that
- *     merges during the cycle, then an empty queue)
- *   - chat.z.ai       -> route-intercepted minimal chat page with the REAL
- *     packaged content script (the driver sends the dispatch brief, the page
- *     "thinks" 400ms and answers a scripted WAIT directive)
+ * REAL browser runs of the resident loop against mocked surfaces plus one
+ * REAL local intelligence agent (an HTTP server the test starts itself):
  *
- * Asserts the north-star mechanics end to end:
- *   1. the background service boots and accepts typed config;
- *   2. the attached chat tab answers the driver round-trip;
- *   3. one supervisor cycle MERGES the green PR through the mocked GitHub API;
- *   4. the empty queue sends the dispatch brief to the chat session (the page
- *      records every received message — no human continue button involved);
- *   5. the WAIT directive parks the loop honestly.
+ *   api.github.com -> route-intercepted fixtures (a green in-fence PR that
+ *                    merges during the cycle, then an empty queue)
+ *   chat.z.ai      -> route-intercepted minimal chat page running the REAL
+ *                    packaged content script
+ *   muse-spark     -> a REAL local HTTP agent on 127.0.0.1 answering the
+ *                    {kind, brief, context} contract
+ *
+ * Scenarios:
+ *   1. full loop (chatzai-web driver): monitor -> merge -> dispatch brief ->
+ *      chat intelligence verdict -> honest WAIT; then the no-continue-button
+ *      surface: the page surfaces a real Continue button and the watchdog
+ *      CLICKS it by itself.
+ *   2. chain fallback (the owner's recovery requirement): the chat session is
+ *      dead and cannot resurrect -> the chain rotates to the local muse spark
+ *      agent -> its DISPATCH directive creates the next work order issue.
+ *   3. all sources fail -> the loop parks in an honest WAIT naming every
+ *      source (fail-closed, never a guess).
+ *
+ * Headless: set CONTROLLER_E2E_HEADLESS=1 to run Chromium's new headless mode
+ * (extensions supported) — useful for CI; headed remains the default.
  */
 
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const MUSE_SPARK_PORT = Number(process.env.CONTROLLER_MUSE_SPARK_PORT ?? 18788);
+const HEADLESS = process.env.CONTROLLER_E2E_HEADLESS === "1";
 
 // ── the fake chat.z.ai page ────────────────────────────────────────────────
 
@@ -35,10 +47,22 @@ const CHAT_PAGE_HTML = `<!doctype html>
     <textarea id="composer" placeholder="Message…"></textarea>
     <button id="send" type="submit" aria-label="Send">Send</button>
   </form>
+  <button id="continue-btn" aria-label="Continue" style="display:none">Continue</button>
   <script>
     window.__received = [];
+    window.__continueClicks = 0;
     const messages = document.getElementById("messages");
     const composer = document.getElementById("composer");
+    const continueBtn = document.getElementById("continue-btn");
+    window.__showContinue = () => { continueBtn.style.display = "block"; };
+    continueBtn.addEventListener("click", () => {
+      window.__continueClicks += 1;
+      continueBtn.style.display = "none";
+      const reply = document.createElement("div");
+      reply.className = "assistant-message";
+      reply.textContent = "resumed after continue click";
+      messages.appendChild(reply);
+    });
     document.getElementById("composer-form").addEventListener("submit", (event) => {
       event.preventDefault();
       const text = composer.value.trim();
@@ -102,7 +126,7 @@ function createGithubMock() {
       if (method === "POST") {
         const body = route.request().postDataJSON();
         state.createdIssues.push(body);
-        return json({ number: 42, ...body });
+        return json({ number: 42 + state.createdIssues.length, ...body });
       }
       return json([]);
     }
@@ -121,15 +145,51 @@ function createGithubMock() {
   }
 }
 
+// ── the REAL local muse spark agent ───────────────────────────────────────
+
+function createMuseSparkAgent(replyText) {
+  const received = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      let payload = null;
+      try {
+        payload = JSON.parse(body);
+      } catch {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "bad json" }));
+        return;
+      }
+      received.push({ at: new Date().toISOString(), payload });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ reply: replyText }));
+    });
+  });
+  const listen = () =>
+    new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(MUSE_SPARK_PORT, "127.0.0.1", () => resolve());
+    });
+  const close = () => new Promise((resolve) => server.close(() => resolve()));
+  return { received, listen, close };
+}
+
 // ── the run ────────────────────────────────────────────────────────────────
 
 async function main() {
   const { chromium } = await import("playwright");
   const profileDir = await mkdtemp(join(tmpdir(), "controller-e2e-"));
   const github = createGithubMock();
+  const museSpark = createMuseSparkAgent(
+    "DISPATCH: WO-2 — muse spark recovery lane\n```\nRecovery dispatch issued by the local muse spark agent fixture.\n```",
+  );
+  await museSpark.listen();
+  console.log(`[e2e] local muse spark agent listening on 127.0.0.1:${MUSE_SPARK_PORT}`);
 
   const context = await chromium.launchPersistentContext(profileDir, {
-    headless: false,
+    headless: HEADLESS,
+    ...(HEADLESS ? { channel: "chromium" } : {}),
     args: [
       "--disable-extensions-except=" + join(root, "dist/chromium"),
       "--load-extension=" + join(root, "dist/chromium"),
@@ -149,7 +209,7 @@ async function main() {
     let serviceWorker = context.serviceWorkers().find((w) => w.url().startsWith("chrome-extension://"));
     if (!serviceWorker) serviceWorker = await context.waitForEvent("serviceworker", { timeout: 30_000 });
     const extensionId = new URL(serviceWorker.url()).host;
-    console.log(`[e2e] extension up: ${extensionId}`);
+    console.log(`[e2e] extension up: ${extensionId} (${HEADLESS ? "headless" : "headed"})`);
 
     // Drive the message boundary through a REAL extension page (the popup):
     // chrome.runtime.sendMessage from the service worker's own context does not
@@ -165,46 +225,57 @@ async function main() {
           });
         });
       }, message);
+    const waitForLog = async (pattern, timeoutMs = 60_000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const status = await sendToService({ type: "controller:status" });
+        const hit = (status?.log ?? []).find((l) => pattern.test(`${l.kind}: ${l.message ?? ""}`));
+        if (hit) return { hit, status };
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      return { hit: null, status: await sendToService({ type: "controller:status" }) };
+    };
 
-    // 1. Configure.
+    // ═══ Scenario 1 — the full loop over the chat.z.ai driver ═══════════
     const configured = await sendToService({
       type: "controller:config:set",
       config: {
         github: { token: "e2e-token", owner: "e2e-org", repo: "e2e-repo", autoMerge: true, mergeMethod: "squash" },
         intelligence: { driver: "chatzai-web", localEndpoint: "http://127.0.0.1:8765" },
-        chat: { resurrect: true, continuePrompt: "continue", directive: "You are the resident supervisor." },
+        chat: {
+          resurrect: true,
+          continuePrompt: "continue",
+          directive: "You are the resident supervisor.",
+          watchdogIntervalSeconds: 1,
+          idleContinueAfterSeconds: 3,
+        },
         loop: { intervalMinutes: 30 },
         safety: { requireGreenChecks: true, requireIntelligenceReview: false, onlyMergeBranchPrefixes: ["work/"] },
       },
     });
     if (!configured.ok) throw new Error(`config:set failed: ${configured.error}`);
-    console.log("[e2e] config accepted");
+    console.log("[e2e] scenario 1: config accepted (message boundary responsive after the v1.1 fix)");
 
-    // 2. Open + attach the (mocked) chat.z.ai session tab.
+    // Open + attach the (mocked) chat.z.ai session tab.
     const chatPage = await context.newPage();
     await chatPage.goto("https://chat.z.ai/", { waitUntil: "domcontentloaded" });
     await chatPage.waitForSelector("#composer", { timeout: 15_000 });
     const attached = await sendToService({ type: "controller:chat:attach" });
     if (!attached.ok) throw new Error(`chat attach failed: ${JSON.stringify(attached)}`);
-    console.log(`[e2e] chat tab attached (#${attached.tabId}, reused=${attached.reused})`);
+    console.log(`[e2e] scenario 1: chat tab attached (#${attached.tabId}, reused=${attached.reused})`);
 
-    // Diagnostics: one direct driver round-trip before the loop.
-    const probe = await sendToService({ type: "controller:chat:test" });
-    console.log(`[e2e] chat driver probe: ${JSON.stringify(probe).slice(0, 300)}`);
-
-    // 3. Run ONE full supervisor cycle.
+    // Run ONE full supervisor cycle.
     await sendToService({ type: "controller:start" });
-    const deadline = Date.now() + 60_000;
-    let status = null;
-    while (Date.now() < deadline) {
-      status = await sendToService({ type: "controller:status" });
-      const merged = github.state.merged.length;
-      const chatReceived = await chatPage.evaluate(() => window.__received.length);
-      if (merged === 1 && chatReceived >= 1) break;
-      await new Promise((r) => setTimeout(r, 1000));
+    {
+      const deadline = Date.now() + 60_000;
+      let chatReceived = 0;
+      while (Date.now() < deadline) {
+        chatReceived = await chatPage.evaluate(() => window.__received.length);
+        if (github.state.merged.length === 1 && chatReceived >= 1) break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
 
-    // 4. Assertions.
     if (github.state.merged.length !== 1) {
       throw new Error(`expected exactly 1 merge, got ${github.state.merged.length}`);
     }
@@ -215,33 +286,119 @@ async function main() {
       console.error("[e2e] supervisor log tail:\n" + (dump?.log ?? []).map((l) => `  ${l.kind}/${l.level}: ${l.message}`).join("\n"));
       throw new Error(`dispatch brief never reached the chat session; received=${JSON.stringify(received).slice(0, 300)}`);
     }
-    console.log(`[e2e] merge executed on the GitHub mock: ${JSON.stringify(github.state.merged[0])}`);
-    console.log(`[e2e] dispatch brief delivered to the chat session (${received.length} messages total)`);
+    console.log("[e2e] scenario 1: merge executed + dispatch brief delivered to the chat session");
 
-    // The chat reply settles ~4.5s after delivery (stability window) — await the
-    // honest WAIT log entry with its own bounded poll.
-    const logDeadline = Date.now() + 45_000;
-    let waitLog = null;
-    let finalStatus = status;
-    while (Date.now() < logDeadline) {
-      finalStatus = await sendToService({ type: "controller:status" });
-      waitLog = (finalStatus?.log ?? []).find((l) => l.kind === "dispatch" && /WAIT/.test(l.message ?? ""));
-      if (waitLog) break;
-      await new Promise((r) => setTimeout(r, 1000));
+    const { hit: waitLog } = await waitForLog(/dispatch: WAIT/);
+    if (!waitLog) throw new Error("honest WAIT log entry missing");
+    console.log("[e2e] scenario 1: honest WAIT recorded");
+
+    // The no-continue-button surface: the page surfaces a REAL Continue button.
+    await chatPage.evaluate(() => window.__showContinue());
+    {
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        const clicks = await chatPage.evaluate(() => window.__continueClicks);
+        if (clicks >= 1) break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
     }
-    console.log(`[e2e] last action: ${finalStatus?.status?.lastAction ?? "?"} | cycles: ${finalStatus?.status?.cycles ?? "?"}`);
-
-    const logs = finalStatus?.log ?? [];
-    const harvestLog = logs.find((l) => l.kind === "harvest" && /#10 merged/.test(l.message ?? ""));
-    if (!harvestLog) throw new Error("harvest log entry missing");
-    if (!waitLog) {
-      console.error("[e2e] supervisor log tail:\n" + logs.map((l) => `  ${l.kind}/${l.level}: ${l.message}`).join("\n"));
-      throw new Error("honest WAIT log entry missing");
+    const continueClicks = await chatPage.evaluate(() => window.__continueClicks);
+    if (continueClicks < 1) {
+      throw new Error("the watchdog never clicked the surfaced Continue button");
     }
+    const continueReplies = await chatPage.evaluate(() =>
+      [...document.querySelectorAll(".assistant-message")].filter((n) => /resumed after continue click/.test(n.textContent ?? "")).length,
+    );
+    if (continueReplies < 1) throw new Error("the continue click did not resume the session on the page");
+    console.log("[e2e] scenario 1: watchdog clicked the real Continue button by itself (no human)");
 
-    console.log("[e2e] PASS — full loop verified: monitor -> harvest (merge) -> dispatch brief -> chat intelligence -> honest WAIT");
+    await sendToService({ type: "controller:stop" });
+
+    // ═══ Scenario 2 — chain fallback to the local muse spark agent ══════
+    await chatPage.close();
+    const chained = await sendToService({
+      type: "controller:config:set",
+      config: {
+        github: { token: "e2e-token", owner: "e2e-org", repo: "e2e-repo", autoMerge: true, mergeMethod: "squash" },
+        intelligence: {
+          driver: "chain",
+          timeoutSeconds: 8,
+          failureThreshold: 2,
+          cooldownMinutes: 1,
+          chain: [
+            { id: "chatzai-web", kind: "chatzai-web", url: "", enabled: true },
+            { id: "muse-spark", kind: "local-http", url: `http://127.0.0.1:${MUSE_SPARK_PORT}/ask`, enabled: true },
+          ],
+        },
+        chat: { resurrect: false, continuePrompt: "continue", directive: "You are the resident supervisor." },
+        loop: { intervalMinutes: 30 },
+        safety: { requireGreenChecks: true, requireIntelligenceReview: false, onlyMergeBranchPrefixes: ["work/"] },
+      },
+    });
+    if (!chained.ok) throw new Error(`chain config failed: ${JSON.stringify(chained)}`);
+
+    await sendToService({ type: "controller:start" });
+    const { hit: museSparkHit } = await waitForLog(/chain: source "muse-spark" answered/, 60_000);
+    if (!museSparkHit) {
+      const dump = await sendToService({ type: "controller:status" });
+      console.error("[e2e] log tail:\n" + (dump?.log ?? []).map((l) => `  ${l.kind}/${l.level}: ${l.message}`).join("\n"));
+      throw new Error("the chain never rotated to the muse spark agent");
+    }
+    const { hit: rotationHit } = await waitForLog(/chain: source "chatzai-web" failed/);
+    if (!rotationHit) throw new Error("the chatzai-web failure was not logged before rotation");
+    if (museSpark.received.length < 1) throw new Error("the muse spark agent never received the brief");
+    const briefPayload = museSpark.received[0].payload;
+    if (!/CONTROLLER STATUS BRIEF/i.test(String(briefPayload?.brief ?? ""))) {
+      throw new Error(`muse spark received an unexpected payload: ${JSON.stringify(briefPayload).slice(0, 200)}`);
+    }
+    {
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        if (github.state.createdIssues.length >= 1) break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    if (github.state.createdIssues.length < 1) {
+      throw new Error("the muse-spark DISPATCH directive never created the next work order issue");
+    }
+    console.log(`[e2e] scenario 2: chain rotated chatzai-web -> muse spark; directive created issue "${github.state.createdIssues[0].title}"`);
+    await sendToService({ type: "controller:stop" });
+
+    // ═══ Scenario 3 — every source fails: honest, typed WAIT ════════════
+    const doomed = await sendToService({
+      type: "controller:config:set",
+      config: {
+        github: { token: "e2e-token", owner: "e2e-org", repo: "e2e-repo", autoMerge: true, mergeMethod: "squash" },
+        intelligence: {
+          driver: "chain",
+          timeoutSeconds: 5,
+          failureThreshold: 2,
+          cooldownMinutes: 1,
+          chain: [
+            { id: "chatzai-web", kind: "chatzai-web", url: "", enabled: true },
+            { id: "dead-agent", kind: "local-http", url: "http://127.0.0.1:1/ask", enabled: true },
+          ],
+        },
+        chat: { resurrect: false, continuePrompt: "continue", directive: "You are the resident supervisor." },
+        loop: { intervalMinutes: 30 },
+        safety: { requireGreenChecks: true, requireIntelligenceReview: false, onlyMergeBranchPrefixes: ["work/"] },
+      },
+    });
+    if (!doomed.ok) throw new Error(`doomed config failed: ${JSON.stringify(doomed)}`);
+    await sendToService({ type: "controller:start" });
+    const { hit: allFailedHit } = await waitForLog(/WAIT \(intelligence unavailable\): all intelligence sources failed/, 60_000);
+    if (!allFailedHit) {
+      const dump = await sendToService({ type: "controller:status" });
+      console.error("[e2e] log tail:\n" + (dump?.log ?? []).map((l) => `  ${l.kind}/${l.level}: ${l.message}`).join("\n"));
+      throw new Error("the all-sources-failed WAIT was never recorded");
+    }
+    console.log("[e2e] scenario 3: every source failed -> honest fail-closed WAIT naming both sources");
+    await sendToService({ type: "controller:stop" });
+
+    console.log("[e2e] PASS — full loop + continue-button watchdog + chain recovery + fail-closed posture verified");
   } finally {
     await context.close().catch(() => {});
+    await museSpark.close().catch(() => {});
     await rm(profileDir, { recursive: true, force: true });
   }
 }

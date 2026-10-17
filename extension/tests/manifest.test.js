@@ -47,7 +47,7 @@ test("the firefox dist manifest is an event page with a gecko id", () => {
   assert.equal(manifest.background.scripts[0], "background.js");
   assert.equal(manifest.background.service_worker, undefined);
   assert.equal(manifest.browser_specific_settings.gecko.id, "controller@payswapdotorg.github");
-  assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "115.0");
+  assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
   assert.ok(existsSync(join(root, "dist/firefox/background.js")));
 });
 

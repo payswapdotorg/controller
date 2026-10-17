@@ -2,8 +2,9 @@
  * The background service — wires the whole resident loop.
  *
  *   alarm (intervalMinutes) -> supervisor.tick() -> github (source of truth)
- *                                        └─> intelligence driver (chat tab |
- *                                            local endpoint | none)
+ *                                        └─> intelligence chain (chat tab |
+ *                                            muse spark | copilot bridge |
+ *                                            any local endpoint | none)
  *
  * Message boundary (popup/options -> here):
  *   { type: "controller:status" }                    -> live status + log tail
@@ -12,15 +13,23 @@
  *   { type: "controller:config:get" }                 -> the normalized config
  *   { type: "controller:config:set", config }         -> validate + persist
  *   { type: "controller:chat:attach" }                -> attach/resurrect the chat tab
- *   { type: "controller:chat:test" }                  -> ping + one driver round-trip
+ *   { type: "controller:chat:test" }                  -> ping + one chat driver round-trip
+ *   { type: "controller:intelligence:test" }          -> probe every enabled chain source
  *
  * Everything is fail-closed and typed; the log ring (last 200 records) is the
  * operator's observability surface in the popup.
+ *
+ * The onMessage listener ALWAYS returns true and lets the async handler call
+ * sendResponse when it is ready: an async listener that returns a Promise
+ * (instead of literal true) has its response channel closed by current
+ * Chromium builds before the first await settles — the v1 defect the E2E
+ * caught at config:set ("no response"). Returning true keeps the channel
+ * open in Chromium/Opera AND Firefox alike.
  */
 
 import { loadConfig, saveConfig, CONFIG_KEY } from "./config.js";
 import { createSupervisor } from "./supervisor.js";
-import { createDriverFromConfig } from "./intelligence.js";
+import { createDriverFromConfig, createChainDriver } from "./intelligence.js";
 import { createChatzaiWebDriver } from "./chatzai.js";
 import * as githubApi from "./github.js";
 
@@ -37,6 +46,7 @@ const state = {
   log: [],
   supervisor: null,
   chatDriver: null,
+  intelligenceDriver: null,
   github: null,
   alarmName: "controller-cycle",
 };
@@ -101,10 +111,10 @@ function rebuildRuntime() {
     config: () => state.config,
     log,
   });
-  const driver = createDriverFromConfig(state.config, state.chatDriver);
+  state.intelligenceDriver = createDriverFromConfig(state.config, state.chatDriver, fetch, log);
   state.supervisor = createSupervisor({
     github: state.github,
-    intelligence: driver,
+    intelligence: state.intelligenceDriver,
     config: state.config,
     log,
   });
@@ -127,6 +137,48 @@ async function handleTick() {
   }
 }
 
+/**
+ * Probe every usable intelligence source with a harmless directive probe.
+ * Returns per-source results so the popup can show which source would carry
+ * the loop right now (the chain itself rotates at ask time; this is a
+ * read-only health surface).
+ */
+async function probeIntelligenceSources() {
+  const driver = state.intelligenceDriver;
+  const results = [];
+  if (typeof driver?.health !== "function") {
+    // Legacy single-driver mode: one probe.
+    const reply = await driver.ask({
+      kind: "directive",
+      brief: "Controller connectivity probe. Reply with exactly: WAIT: probe acknowledged",
+    });
+    return { mode: state.config.intelligence.driver, results: [{ source: reply.driver ?? "driver", ok: reply.ok, error: reply.error ?? null, text: reply.ok ? reply.text.slice(0, 200) : null }] };
+  }
+  for (const source of driver.health()) {
+    if (!source.usable) {
+      results.push({ source: source.id, ok: false, skipped: true, error: source.enabled ? "not usable (no url?)" : "disabled" });
+      continue;
+    }
+    const single = await (() => {
+      // Build a one-off chain of exactly this source so benching state of the
+      // live chain is untouched by probes.
+      const probe = createChainDriver(
+        [{ id: source.id, kind: source.kind, url: source.url, enabled: true }],
+        {
+          chatDriverFactory: () => state.chatDriver,
+          timeoutMs: Math.min((state.config.intelligence.timeoutSeconds ?? 120) * 1000, 30_000),
+          failureThreshold: 1,
+          cooldownMs: 60_000,
+          log: () => {},
+        },
+      );
+      return probe.ask({ kind: "directive", brief: "Controller connectivity probe. Reply with exactly: WAIT: probe acknowledged" });
+    })();
+    results.push({ source: source.id, ok: single.ok, error: single.error ?? null, text: single.ok ? single.text.slice(0, 200) : null });
+  }
+  return { mode: state.config.intelligence.driver, results };
+}
+
 async function handleMessage(message, _sender, sendResponse) {
   try {
     switch (message?.type) {
@@ -135,6 +187,7 @@ async function handleMessage(message, _sender, sendResponse) {
           ok: true,
           status: state.supervisor?.status() ?? null,
           config: state.config,
+          sources: typeof state.intelligenceDriver?.health === "function" ? state.intelligenceDriver.health() : null,
           log: state.log.slice(-50),
         });
         return false;
@@ -198,6 +251,16 @@ async function handleMessage(message, _sender, sendResponse) {
         sendResponse(reply);
         return false;
       }
+      case "controller:intelligence:test": {
+        const probe = await probeIntelligenceSources();
+        log({
+          kind: "chain",
+          level: "info",
+          message: `intelligence probe (${probe.mode}): ${probe.results.map((r) => `${r.source}=${r.ok ? "ok" : r.skipped ? "skipped" : "fail"}`).join(", ")}`,
+        });
+        sendResponse({ ok: probe.results.some((r) => r.ok), ...probe });
+        return false;
+      }
       default:
         sendResponse({ ok: false, error: `unknown message type: ${message?.type ?? "(none)"}` });
         return false;
@@ -214,7 +277,10 @@ async function boot() {
   rebuildRuntime();
   await scheduleAlarm();
   log({ kind: "boot", level: "info", message: `controller background up (driver=${state.config.intelligence.driver}, loop=${state.config.loop.enabled ? "on" : "off"})` });
-  runtimeApi.onMessage.addListener(handleMessage);
+  runtimeApi.onMessage.addListener((message, sender, sendResponse) => {
+    void handleMessage(message, sender, sendResponse);
+    return true; // keep the response channel open across the handler's awaits
+  });
   alarmsApi.onAlarm.addListener((alarm) => {
     if (alarm?.name === state.alarmName) void handleTick();
   });

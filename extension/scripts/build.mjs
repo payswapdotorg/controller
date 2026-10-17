@@ -82,7 +82,15 @@ async function buildTarget(target) {
     manifest.background = { scripts: ["background.js"] };
     manifest.content_scripts = [{ ...SOURCE_MANIFEST.content_scripts[0], js: ["content/chatzai-content.js"] }];
     manifest.browser_specific_settings = {
-      gecko: { id: "controller@payswapdotorg.github", strict_min_version: "115.0" },
+      gecko: {
+        id: "controller@payswapdotorg.github",
+        // 142 = the first release supporting data_collection_permissions;
+        // current Firefox stable + ESR are well past it.
+        strict_min_version: "142.0",
+        // Firefox data-collection consent declaration (AMO requirement):
+        // the Controller collects NOTHING — storage stays on the machine.
+        data_collection_permissions: { required: ["none"] },
+      },
     };
     // Firefox MV3 does not use scripting for our declared content script; keep
     // the permission anyway (harmless) so future programmatic injection works.

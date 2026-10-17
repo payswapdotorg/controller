@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Controller",
-  "version": "1.0.0",
-  "description": "The resident browser supervisor loop for governed GitHub work orders: monitor -> harvest -> review -> dispatch, with a chat.z.ai session or a local agent as the pluggable intelligence source. No continue button required.",
+  "version": "1.1.0",
+  "description": "Resident browser supervisor loop for governed GitHub work orders: monitor -> harvest -> review -> dispatch with a rotating intelligence chain (chat.z.ai, muse spark, Copilot bridge, any agent). No continue button.",
   "action": {
     "default_title": "Controller",
     "default_popup": "popup/popup.html"
@@ -15,7 +15,12 @@
     "service_worker": "src/service.js",
     "type": "module"
   },
-  "permissions": ["storage", "tabs", "alarms", "scripting"],
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms",
+    "scripting"
+  ],
   "host_permissions": [
     "https://api.github.com/*",
     "https://github.com/*",
@@ -25,8 +30,12 @@
   ],
   "content_scripts": [
     {
-      "matches": ["https://chat.z.ai/*"],
-      "js": ["src/content/chatzai-content.js"],
+      "matches": [
+        "https://chat.z.ai/*"
+      ],
+      "js": [
+        "src/content/chatzai-content.js"
+      ],
       "run_at": "document_idle"
     }
   ],

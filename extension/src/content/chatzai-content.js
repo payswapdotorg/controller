@@ -9,23 +9,60 @@
  *      (multi-strategy completion detection — never a guess: on ambiguous
  *      DOM it times out honestly and reports the failure kind);
  *   3. returns the last assistant message text;
- *   4. runs a local auto-continue watchdog: when the session sits idle with
- *      an enabled composer (the classic "awaiting continue" posture), it
- *      sends the configured continue prompt by itself.
+ *   4. runs a local auto-continue watchdog that, when the session sits idle:
+ *      FIRST clicks the real continue affordance when the page surfaces one
+ *      (the exact button the owner never wants to press), and only otherwise
+ *      types the configured continue prompt into the composer.
+ *
+ * Watchdog timings and the continue prompt come from the live config
+ * (chrome.storage.local "controller.config") and refresh on config changes.
  *
  * Selector strategies are intentionally layered (generic ARIA/textbox/submit
  * semantics first, product-specific attributes second) so the driver degrades
  * honestly rather than silently misfiring when the host app changes.
  */
 
+import { isContinueControl } from "./continue-match.js";
+
 (() => {
   if (window.__CONTROLLER_CHAT_DRIVER__) return;
   window.__CONTROLLER_CHAT_DRIVER__ = true;
 
-  const CONTINUE_PROMPT = "continue";
   const SEND_TIMEOUT_MS = 10 * 60 * 1000;
-  const IDLE_CONTINUE_AFTER_MS = 45 * 1000;
-  const WATCHDOG_INTERVAL_MS = 30 * 1000;
+  const CONFIG_KEY = "controller.config";
+
+  // Watchdog tuning — replaced by the live config as soon as it loads.
+  let watchdog = {
+    continuePrompt: "continue",
+    idleContinueAfterMs: 45 * 1000,
+    watchdogIntervalMs: 30 * 1000,
+    configured: false,
+  };
+  let watchdogTimer = null;
+
+  async function loadWatchdogConfig() {
+    try {
+      const stored = await chrome.storage.local.get(CONFIG_KEY);
+      const chat = stored?.[CONFIG_KEY]?.chat;
+      if (!chat) return;
+      watchdog = {
+        continuePrompt: typeof chat.continuePrompt === "string" && chat.continuePrompt.trim() !== "" ? chat.continuePrompt : "continue",
+        idleContinueAfterMs: Math.max(2, Number(chat.idleContinueAfterSeconds) || 45) * 1000,
+        watchdogIntervalMs: Math.max(1, Number(chat.watchdogIntervalSeconds) || 30) * 1000,
+        configured: true,
+      };
+      scheduleWatchdog();
+    } catch {
+      // No config yet — the defaults above keep the watchdog honest.
+    }
+  }
+
+  if (chrome?.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes[CONFIG_KEY]) void loadWatchdogConfig();
+    });
+  }
+  void loadWatchdogConfig();
 
   // ── element discovery (layered strategies) ───────────────────────────────
 
@@ -47,6 +84,14 @@
     const visibleOnes = candidates.filter(visible);
     // Prefer the last (bottom-most) visible composer — chat UIs put it last.
     return visibleOnes.length > 0 ? visibleOnes[visibleOnes.length - 1] : null;
+  }
+
+  function findContinueControl() {
+    const controls = [...document.querySelectorAll('button, [role="button"], a[role="button"]')];
+    const candidates = controls.filter((el) => visible(el) && isContinueControl(el));
+    // Prefer the last visible one (bottom of the transcript is where chat UIs
+    // anchor the continue affordance).
+    return candidates.length > 0 ? candidates[candidates.length - 1] : null;
   }
 
   function findSendButton(composer) {
@@ -114,6 +159,7 @@
       composer.dispatchEvent(new Event("input", { bubbles: true }));
     } else {
       // contenteditable: insertText keeps the host editor's own state consistent.
+      composer.focus();
       document.execCommand("selectAll", false, null);
       document.execCommand("insertText", false, text);
       composer.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
@@ -166,18 +212,28 @@
   }
 
   async function sendBrief(text) {
-    const composer = findComposer();
-    if (!composer) return { ok: false, error: "composer not found on the page" };
-    const typed = await typeIntoComposer(composer, text);
-    if (!typed.ok) return typed;
-    const before = messageNodes().length;
-    const sent = pressSend(composer);
-    if (!sent.ok) return sent;
-    const completion = await waitForCompletion(before, SEND_TIMEOUT_MS);
-    if (!completion.ok) return completion;
-    const reply = lastAssistantText();
-    if (reply === null) return { ok: false, error: "assistant turn completed but no text extracted" };
-    return { ok: true, text: reply };
+    // One exchange at a time: the driver's ask() and the watchdog share this
+    // entry point. While a send + completion-wait is in flight the watchdog
+    // must stay quiet — otherwise its auto-continue keeps the transcript
+    // moving and the driver's completion detector never settles.
+    if (sendBrief.inFlight) return { ok: false, error: "another send is already in flight" };
+    sendBrief.inFlight = true;
+    try {
+      const composer = findComposer();
+      if (!composer) return { ok: false, error: "composer not found on the page" };
+      const typed = await typeIntoComposer(composer, text);
+      if (!typed.ok) return typed;
+      const before = messageNodes().length;
+      const sent = pressSend(composer);
+      if (!sent.ok) return sent;
+      const completion = await waitForCompletion(before, SEND_TIMEOUT_MS);
+      if (!completion.ok) return completion;
+      const reply = lastAssistantText();
+      if (reply === null) return { ok: false, error: "assistant turn completed but no text extracted" };
+      return { ok: true, text: reply };
+    } finally {
+      sendBrief.inFlight = false;
+    }
   }
 
   // ── message boundary with the background service ────────────────────────
@@ -207,21 +263,38 @@
   if (document.body) startObserving();
   else document.addEventListener("DOMContentLoaded", startObserving);
 
-  setInterval(async () => {
+  async function watchdogTick() {
     try {
+      if (sendBrief.inFlight) return; // never fight an in-flight driver exchange
       if (generationInFlight()) return;
+      const idleFor = Date.now() - lastActivityAt;
+      if (idleFor < watchdog.idleContinueAfterMs) return;
+
+      // 1. The REAL continue affordance: the page surfaces a continue button —
+      //    click it ourselves (the exact thing the owner refuses to do by hand).
+      const continueControl = findContinueControl();
+      if (continueControl) {
+        lastActivityAt = Date.now();
+        continueControl.click();
+        window.__controllerContinueClicks = (window.__controllerContinueClicks ?? 0) + 1;
+        return;
+      }
+
+      // 2. Fallback: idle composer — type the configured continue prompt.
       const composer = findComposer();
       if (!composer) return;
-      const idleFor = Date.now() - lastActivityAt;
-      if (idleFor >= IDLE_CONTINUE_AFTER_MS) {
-        // The session is stalled awaiting input — press continue ourselves.
-        const empty = ((composer.value ?? composer.textContent ?? "")).trim() === "";
-        if (!empty) return;
-        lastActivityAt = Date.now();
-        await sendBrief(CONTINUE_PROMPT);
-      }
+      const empty = ((composer.value ?? composer.textContent ?? "")).trim() === "";
+      if (!empty) return;
+      lastActivityAt = Date.now();
+      await sendBrief(watchdog.continuePrompt);
     } catch {
       // The watchdog never throws upward; failures surface via sendBrief logs.
     }
-  }, WATCHDOG_INTERVAL_MS);
+  }
+
+  function scheduleWatchdog() {
+    if (watchdogTimer) clearInterval(watchdogTimer);
+    watchdogTimer = setInterval(() => void watchdogTick(), watchdog.watchdogIntervalMs);
+  }
+  scheduleWatchdog();
 })();

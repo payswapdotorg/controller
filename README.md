@@ -30,16 +30,23 @@ See:
 - `spec/work-items/CTRL-001.md`
 - `spec/state/controller-program-state.json`
 
-## v1 browser extension (2026-10-16, owner-directed)
+## v1.1 browser extension (2026-10-16/17, owner-directed)
 
-The full resident supervisor loop now ships as a dual-target browser extension
+The full resident supervisor loop ships as a dual-target browser extension
 (Firefox + Opera/Chromium) under [`extension/`](extension/README.md): connect a
 chat.z.ai session, point it at the repository of record (sole source of truth),
 and it runs `monitor -> harvest -> review -> dispatch` without supervision —
-no continue button (idle watchdog + session resurrection). Intelligence is
-pluggable: the chat.z.ai tab, a local HTTP agent endpoint, or deterministic-only
-mode. 43 unit tests + a full-loop Playwright E2E. The prior CTRL-012/013
-surface is preserved at `extension-legacy/`.
+no continue button (the watchdog clicks the page's real Continue affordance,
+falls back to a typed prompt, and resurrects dead sessions). Recovery
+intelligence is a rotating chain, per the owner's requirement: another
+chat.z.ai session -> local muse spark agent -> local GitHub Copilot bridge ->
+any other HTTP agent -> honest WAIT. A source that fails is benched and cooled
+back in; every rotation is logged and attributed. 69 unit tests, a Playwright
+E2E covering the full loop + continue-button click + chain recovery +
+fail-closed posture (headed and new-headless modes), and a clean web-ext lint
+(0 errors / 0 warnings) for the Firefox target. The v1.1 follow-up also fixed
+a Chromium message-boundary defect the E2E caught at `config:set`. The prior
+CTRL-012/013 surface is preserved at `extension-legacy/`.
 
 ## Development
 
